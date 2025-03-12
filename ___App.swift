@@ -5,12 +5,22 @@ import SwiftUI
 
 @main
 struct FloatingPetApp: App {
+    @State private var showingPreferences = false
     var body: some Scene {
         WindowGroup {
             PetView() // 宠物视图
+                .sheet(isPresented: $showingPreferences){
+                    PreferencesView()
+                }
         }
         .windowStyle(HiddenTitleBarWindowStyle()) // 隐藏标题栏
         .commands {
+            CommandGroup(replacing: .appSettings){
+                Button("偏好设置...") {
+                    showingPreferences.toggle()
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
             CommandGroup(replacing: .appInfo) {} // 隐藏菜单栏的多余选项
         }
     }
