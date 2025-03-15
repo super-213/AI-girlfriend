@@ -5,8 +5,8 @@ struct PetView: View {
     @State private var currentGif = puppet_beat // 默认播放普通动画
     @State private var isReacting = false       // 标记是否处于点击状态
     @State private var userInput = ""          // 用户输入的文本
-    @State private var aiResponse = ""         // AI 的回复
     @State private var isThinking = false      // 思考状态变量
+    @State private var streamedResponse = ""   //流式回复
 
     let normalGif = puppet_beat                // 普通动画
     let clickGifs = loop_puppet_bear             // 点击时的多个反应动画
@@ -55,19 +55,17 @@ struct PetView: View {
         }
     }
 
-    @State private var streamedResponse = ""
-
     private func sendRequest(userInput: String) {
         isThinking = true
-        streamedResponse = ""
+        streamedResponse = "" // 清空之前的回复
 
-        apiManager.sendStreamRequest(userInput: userInput) { [self] newContent in
+        apiManager.sendStreamRequest(userInput: userInput) { newContent in
             DispatchQueue.main.async {
-                self.streamedResponse += newContent
+                self.streamedResponse += newContent // 追加新内容
             }
         } onComplete: {
             DispatchQueue.main.async {
-                self.isThinking = false
+                self.isThinking = false // 流结束，停止思考
             }
         }
     }
