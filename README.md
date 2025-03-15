@@ -7,3 +7,5 @@ AI提示词可调
 重构代码 易于维护
 
 接入web-search功能 glm-4v应该是支持这个功能的 我一直用的是glm-4v-flash 没这个功能
+
+#2025.03.15更新<br>更新了流式输出 使用URLSessionDataDelegate代替了之前的dataTask
