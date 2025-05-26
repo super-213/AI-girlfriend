@@ -6,6 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		6231AD972D3A4352009BE5ED /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6231AD902D3A3C2A009BE5ED /* AVFoundation.framework */; };
+		6231AD982D3A4352009BE5ED /* AVKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6231AD8E2D3A3BCA009BE5ED /* AVKit.framework */; };
+		629E1FF52D7861E300AEC753 /* SDWebImageSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 629E1FF42D7861E300AEC753 /* SDWebImageSwiftUI */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		62A3BF132D1989A0003DB0DF /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -24,6 +30,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		6231AD8E2D3A3BCA009BE5ED /* AVKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVKit.framework; path = System/Library/Frameworks/AVKit.framework; sourceTree = SDKROOT; };
+		6231AD902D3A3C2A009BE5ED /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
+		6248B38D2D3A2CCE00446FCE /* SDWebImageSwiftUI-master */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = "SDWebImageSwiftUI-master"; path = "../库/SDWebImageSwiftUI-master"; sourceTree = "<group>"; };
 		62A3BF012D19899F003DB0DF /* 看板娘.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "看板娘.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		62A3BF122D1989A0003DB0DF /* 看板娘Tests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "看板娘Tests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		62A3BF1C2D1989A0003DB0DF /* 看板娘UITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "看板娘UITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -52,6 +61,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				629E1FF52D7861E300AEC753 /* SDWebImageSwiftUI in Frameworks */,
+				6231AD982D3A4352009BE5ED /* AVKit.framework in Frameworks */,
+				6231AD972D3A4352009BE5ED /* AVFoundation.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -78,6 +90,7 @@
 				62A3BF032D19899F003DB0DF /* 看板娘 */,
 				62A3BF152D1989A0003DB0DF /* 看板娘Tests */,
 				62A3BF1F2D1989A1003DB0DF /* 看板娘UITests */,
+				62A3BF302D198BB8003DB0DF /* Frameworks */,
 				62A3BF022D19899F003DB0DF /* Products */,
 			);
 			sourceTree = "<group>";
@@ -90,6 +103,16 @@
 				62A3BF1C2D1989A0003DB0DF /* 看板娘UITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		62A3BF302D198BB8003DB0DF /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				6231AD902D3A3C2A009BE5ED /* AVFoundation.framework */,
+				6231AD8E2D3A3BCA009BE5ED /* AVKit.framework */,
+				6248B38D2D3A2CCE00446FCE /* SDWebImageSwiftUI-master */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -112,6 +135,7 @@
 			);
 			name = "看板娘";
 			packageProductDependencies = (
+				629E1FF42D7861E300AEC753 /* SDWebImageSwiftUI */,
 			);
 			productName = "看板娘";
 			productReference = 62A3BF012D19899F003DB0DF /* 看板娘.app */;
@@ -195,6 +219,9 @@
 			);
 			mainGroup = 62A3BEF82D19899F003DB0DF;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				6231AD922D3A3F53009BE5ED /* XCLocalSwiftPackageReference "../库/SDWebImageSwiftUI-master" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 62A3BF022D19899F003DB0DF /* Products */;
 			projectDirPath = "";
@@ -393,10 +420,11 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "看板娘/___.entitlements";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_ASSET_PATHS = "\"看板娘/Preview Content\"";
+				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = 656G5NMSYR;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -406,6 +434,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zhihaojiang.MD-editer.---";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -420,10 +449,11 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "看板娘/___.entitlements";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_ASSET_PATHS = "\"看板娘/Preview Content\"";
+				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = 656G5NMSYR;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -433,6 +463,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zhihaojiang.MD-editer.---";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -549,6 +580,20 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		6231AD922D3A3F53009BE5ED /* XCLocalSwiftPackageReference "../库/SDWebImageSwiftUI-master" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../库/SDWebImageSwiftUI-master";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		629E1FF42D7861E300AEC753 /* SDWebImageSwiftUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SDWebImageSwiftUI;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 62A3BEF92D19899F003DB0DF /* Project object */;
 }
