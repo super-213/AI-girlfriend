@@ -1,0 +1,28 @@
+# macOS 系统文件
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# macOS资源派生文件（你那种"._xxx"文件）
+._*
+
+# Xcode 项目缓存
+build/
+DerivedData/
+
+# Xcode 用户数据
+*.xcworkspace
+xcuserdata/
+*.xcuserstate
+*.xcodeproj/project.xcworkspace/
+
+# SwiftPM
+/.build
+/Packages
+
+# Logs
+*.log
+
+# Playground
+timeline.xctimeline
+playground.xcworkspace
