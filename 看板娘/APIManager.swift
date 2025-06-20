@@ -107,6 +107,5 @@ class APIManager: NSObject, URLSessionDataDelegate {
             }
             self?.onComplete?()
         }
-        session.invalidateAndCancel()
     }
 }
