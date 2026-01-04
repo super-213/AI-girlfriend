@@ -1,7 +1,10 @@
 import Foundation
 import Combine
 import AppKit
+<<<<<<< HEAD
 import Cocoa
+=======
+>>>>>>> 4fa7d00ee41c189ad6e6da7dc4b0a4715a74e682
 
 class PetViewBackend: ObservableObject {
     // MARK: - 可绑定的属性
@@ -15,6 +18,7 @@ class PetViewBackend: ObservableObject {
     @Published var userInput = ""
     @Published var isThinking = false
     @Published var streamedResponse = ""
+<<<<<<< HEAD
     
     // MARK: - 资源常量
     private let apiManager = APIManager()
@@ -35,20 +39,51 @@ class PetViewBackend: ObservableObject {
                                                object: nil)
     }
     
+=======
+
+    // MARK: - 资源常量
+    private let apiManager = APIManager()
+
+    // MARK: - 自动交互定时器
+    private var periodicAutoActionTimer: AnyCancellable?
+    private let clickAnimationDuration: TimeInterval = 20.0
+
+    init() {
+        NotificationCenter.default.addObserver(self,
+            selector: #selector(onAppDidBecomeActive),
+            name: NSApplication.didBecomeActiveNotification,
+            object: nil)
+
+        NotificationCenter.default.addObserver(self,
+            selector: #selector(onAppDidResignActive),
+            name: NSApplication.didResignActiveNotification,
+            object: nil)
+    }
+
+>>>>>>> 4fa7d00ee41c189ad6e6da7dc4b0a4715a74e682
     deinit {
         NotificationCenter.default.removeObserver(self)
         cancelAutoActionLoop()
     }
+<<<<<<< HEAD
     
+=======
+
+>>>>>>> 4fa7d00ee41c189ad6e6da7dc4b0a4715a74e682
     // MARK: - 生命周期
     func onAppear() {
         startAutoActionLoop()
     }
+<<<<<<< HEAD
     
+=======
+
+>>>>>>> 4fa7d00ee41c189ad6e6da7dc4b0a4715a74e682
     func onDisappear() {
         cancelAutoActionLoop()
         streamedResponse = ""
     }
+<<<<<<< HEAD
     
     @objc private func onAppDidBecomeActive() {
         startAutoActionLoop()
@@ -78,11 +113,33 @@ class PetViewBackend: ObservableObject {
         userInput = ""
     }
     
+=======
+
+    @objc private func onAppDidBecomeActive() {
+        startAutoActionLoop()
+    }
+
+    @objc private func onAppDidResignActive() {
+        // 不取消定时器，保持后台也能持续运行自动互动
+    }
+
+    // MARK: - 用户交互
+    func submitInput() {
+        guard !userInput.isEmpty else { return }
+        sendRequest(userInput: userInput)
+        userInput = ""
+    }
+
+>>>>>>> 4fa7d00ee41c189ad6e6da7dc4b0a4715a74e682
     func handleTap() {
         guard !isReacting else { return }
         playNextGif()
     }
+<<<<<<< HEAD
     
+=======
+
+>>>>>>> 4fa7d00ee41c189ad6e6da7dc4b0a4715a74e682
     // MARK: - 切换角色
     func switchToCharacter(_ character: PetCharacter) {
         print("切换角色为：\(character.name)")
@@ -90,15 +147,26 @@ class PetViewBackend: ObservableObject {
         currentCharacter = character
         currentGif = character.normalGif
     }
+<<<<<<< HEAD
     
+=======
+
+>>>>>>> 4fa7d00ee41c189ad6e6da7dc4b0a4715a74e682
     // MARK: - 播放动画
     private func playNextGif() {
         print("开始播放动画: \(currentCharacter.clickGif)")
         print("当前 isReacting: \(isReacting)")
+<<<<<<< HEAD
         
         currentGif = currentCharacter.clickGif
         isReacting = true
         
+=======
+
+        currentGif = currentCharacter.clickGif
+        isReacting = true
+
+>>>>>>> 4fa7d00ee41c189ad6e6da7dc4b0a4715a74e682
         DispatchQueue.main.asyncAfter(deadline: .now() + clickAnimationDuration) { [weak self] in
             print("动画定时器触发")
             guard let self = self else {
@@ -109,15 +177,26 @@ class PetViewBackend: ObservableObject {
             self.isReacting = false
             print("动画已重置，currentGif: \(self.currentGif), isReacting: \(self.isReacting)")
         }
+<<<<<<< HEAD
         
         print("设置了 \(clickAnimationDuration) 秒后恢复")
     }
     
+=======
+
+        print("设置了 \(clickAnimationDuration) 秒后恢复")
+    }
+
+>>>>>>> 4fa7d00ee41c189ad6e6da7dc4b0a4715a74e682
     // MARK: - 模型响应
     private func sendRequest(userInput: String) {
         isThinking = true
         streamedResponse = ""
+<<<<<<< HEAD
         
+=======
+
+>>>>>>> 4fa7d00ee41c189ad6e6da7dc4b0a4715a74e682
         apiManager.sendStreamRequest(userInput: userInput) { newContent in
             DispatchQueue.main.async {
                 self.streamedResponse += newContent
@@ -128,16 +207,28 @@ class PetViewBackend: ObservableObject {
             }
         }
     }
+<<<<<<< HEAD
     
+=======
+
+>>>>>>> 4fa7d00ee41c189ad6e6da7dc4b0a4715a74e682
     // MARK: - 自动定时交互
     private func startAutoActionLoop() {
         scheduleNextAutoAction()
     }
+<<<<<<< HEAD
     
     private func scheduleNextAutoAction() {
         let delay = Double.random(in: 270...330)
         print("安排下一次自动互动将在 \(Int(delay)) 秒后执行")
         
+=======
+
+    private func scheduleNextAutoAction() {
+        let delay = Double.random(in: 270...330)
+        print("安排下一次自动互动将在 \(Int(delay)) 秒后执行")
+
+>>>>>>> 4fa7d00ee41c189ad6e6da7dc4b0a4715a74e682
         periodicAutoActionTimer = Just(())
             .delay(for: .seconds(delay), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -145,12 +236,17 @@ class PetViewBackend: ObservableObject {
                 self?.scheduleNextAutoAction() // 继续下一轮
             }
     }
+<<<<<<< HEAD
     
+=======
+
+>>>>>>> 4fa7d00ee41c189ad6e6da7dc4b0a4715a74e682
     private func performAutoAction() {
         guard !isReacting else {
             print("当前正在播放动画，跳过自动互动")
             return
         }
+<<<<<<< HEAD
         
         print("执行自动互动")
         playNextGif()
@@ -159,11 +255,22 @@ class PetViewBackend: ObservableObject {
         streamedResponse = autoMessage
     }
     
+=======
+
+        print("执行自动互动")
+        playNextGif()
+
+        let autoMessage = currentCharacter.autoMessages.randomElement() ?? ""
+        streamedResponse += (streamedResponse.isEmpty ? "" : "\n") + autoMessage
+    }
+
+>>>>>>> 4fa7d00ee41c189ad6e6da7dc4b0a4715a74e682
     private func cancelAutoActionLoop() {
         print("停止自动互动定时器")
         periodicAutoActionTimer?.cancel()
         periodicAutoActionTimer = nil
     }
+<<<<<<< HEAD
     // MARK: - 音乐播放控制
     private func extractSongName(from input: String) -> String {
         // 简单去除常见开头关键词
@@ -192,4 +299,6 @@ class PetViewBackend: ObservableObject {
         NSWorkspace.shared.open(url)
         sendRequest(userInput: "请以“布偶熊·觅语”的口吻，用80%可爱+20%傲娇的语气回复，说明已经为指挥官打开了 Apple Music 的搜索结果，但因为权限不够无法自动播放，拜托指挥官自己点击第一首播放。语气要甜美俏皮，带一点点撒娇，用颜文字增加表现力，回复结尾加上“布偶熊·觅语随时陪伴指挥官哦～(๑ᴖ◡ᴖ๑)♪”。")
     }
+=======
+>>>>>>> 4fa7d00ee41c189ad6e6da7dc4b0a4715a74e682
 }
