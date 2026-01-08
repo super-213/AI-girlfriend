@@ -1,12 +1,26 @@
+//
+//  gif_library.swift
+//  桌面宠物应用
+//
+//  角色数据模型和角色库管理
+//
+
 import Foundation
 
-struct PetCharacter {
+// MARK: - 角色数据模型
+
+/// 宠物角色数据模型
+/// 包含角色名称、GIF动画路径和自动消息
+struct PetCharacter: Codable {
     let name: String
     let normalGif: String
     let clickGif: String
     let autoMessages: [String]
 }
 
+// MARK: - 内置角色
+
+/// 内置角色：布偶熊·觅语
 let puppetBear = PetCharacter(
     name: "布偶熊·觅语",
     normalGif: "布偶熊站立透明.gif",
@@ -22,6 +36,7 @@ let puppetBear = PetCharacter(
     ] //布偶熊的自动回复
 )
 
+/// 内置角色：夏提雅
 let puppetCat = PetCharacter(
     name: "夏提雅",
     normalGif: "夏提雅.gif",
@@ -31,4 +46,19 @@ let puppetCat = PetCharacter(
         "不可以冷落猫猫哟~"
     ]
 )
+
+/// 所有可用的内置角色列表
 let availableCharacters: [PetCharacter] = [puppetBear, puppetCat]
+
+// MARK: - 角色管理函数
+
+/// 获取所有角色（包括内置角色和自定义角色）
+/// - Returns: 包含所有角色的数组
+func getAllCharacters() -> [PetCharacter] {
+    var characters = availableCharacters
+    if let data = UserDefaults.standard.data(forKey: "customCharacters"),
+       let customChars = try? JSONDecoder().decode([PetCharacter].self, from: data) {
+        characters.append(contentsOf: customChars)
+    }
+    return characters
+}

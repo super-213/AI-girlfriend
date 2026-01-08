@@ -1,3 +1,10 @@
+//
+//  PreferencesModels.swift
+//  桌面宠物应用
+//
+//  偏好设置相关的数据模型、验证逻辑和UI组件
+//
+
 import Foundation
 import SwiftUI
 import AppKit
@@ -156,17 +163,27 @@ struct FontStyles {
 
 // MARK: - 系统提示词编辑器组件
 
-/// 系统提示词编辑器组件，支持多行编辑、字符计数和重置功能
+/// 系统提示词编辑器组件
+/// 支持多行编辑、字符计数和重置功能
 struct SystemPromptEditor: View {
+    /// 绑定的文本内容
     @Binding var text: String
+    
+    /// 字符数限制
     let characterLimit: Int = 500
+    
+    /// 默认提示词
     let defaultPrompt: String
+    
+    /// 聚焦字段绑定
     var focusedField: FocusState<PreferencesView.FocusableField?>.Binding
     
+    /// 当前字符数
     var characterCount: Int {
         text.count
     }
     
+    /// 是否超过字符限制
     var isOverLimit: Bool {
         characterCount > characterLimit
     }
@@ -237,9 +254,12 @@ struct Provider: Identifiable {
 // MARK: - 提供商选择器组件
 
 /// 提供商选择器组件
+/// 用于选择AI服务提供商（智谱清言或通义千问）
 struct ProviderPicker: View {
+    /// 选中的提供商ID
     @Binding var selectedProvider: String
     
+    /// 可用的提供商列表
     let providers: [Provider] = [
         Provider(id: "zhipu", name: "智谱清言"),
         Provider(id: "qwen", name: "通义千问")
@@ -266,15 +286,30 @@ struct ProviderPicker: View {
 
 // MARK: - 增强表单组件
 
-/// 增强的表单字段组件，支持标签、内容、错误消息和成功消息
-/// 提供丰富的视觉反馈，包括错误和成功状态的边框、图标和动画
+/// 增强的表单字段组件
+/// 支持标签、内容、错误消息和成功消息，提供丰富的视觉反馈
 struct EnhancedFormField<Content: View>: View {
+    /// 字段标签
     let label: String
+    
+    /// 错误消息（可选）
     let errorMessage: String?
+    
+    /// 成功消息（可选）
     let successMessage: String?
+    
+    /// 字段内容
     let content: Content
+    
+    /// 是否显示成功状态
     @State private var showSuccess: Bool = false
     
+    /// 初始化增强表单字段
+    /// - Parameters:
+    ///   - label: 字段标签
+    ///   - errorMessage: 错误消息
+    ///   - successMessage: 成功消息
+    ///   - content: 字段内容视图构建器
     init(
         label: String,
         errorMessage: String? = nil,
@@ -354,13 +389,22 @@ struct EnhancedFormField<Content: View>: View {
 }
 
 
-/// 增强的操作按钮组组件，提供保存和取消按钮
-/// 包含未保存更改的脉动指示器和增强的按钮样式
+/// 增强的操作按钮组组件
+/// 提供保存和取消按钮，包含未保存更改的脉动指示器
 struct EnhancedActionButtons: View {
+    /// 保存按钮回调
     let onSave: () -> Void
+    
+    /// 取消按钮回调
     let onCancel: () -> Void
+    
+    /// 保存按钮是否禁用
     let isSaveDisabled: Bool
+    
+    /// 是否有未保存的更改
     let hasUnsavedChanges: Bool
+    
+    /// 脉动动画状态
     @State private var pulseAnimation: CGFloat = 1.0
     
     var body: some View {
@@ -408,11 +452,16 @@ struct EnhancedActionButtons: View {
 }
 
 
-/// 增强的成功横幅组件，显示操作成功的反馈
-/// 包含从顶部滑入的动画、阴影和圆角样式
+/// 增强的成功横幅组件
+/// 显示操作成功的反馈，包含从顶部滑入的动画
 struct EnhancedSuccessBanner: View {
+    /// 成功消息文本
     let message: String
+    
+    /// 垂直偏移量
     @State private var offset: CGFloat = -100
+    
+    /// 透明度
     @State private var opacity: Double = 0
     
     var body: some View {
@@ -443,15 +492,17 @@ struct EnhancedSuccessBanner: View {
 }
 
 
-// MARK: - 键盘快捷键处理器
+// MARK: - 预览组件
 
-/// 重叠预览组件，显示 chatOutput 和 petImage 的重叠效果
+/// 重叠预览组件
+/// 显示chatOutput和petImage的重叠效果预览
 struct OverlapPreview: View {
+    /// 重叠比例（0.0-1.0）
     let overlapRatio: Double
     
     var body: some View {
         GeometryReader { geometry in
-            let totalHeight = geometry.size.height
+            let _ = geometry.size.height // 目前没用到
             let inputHeight: CGFloat = 24
             let chatHeight: CGFloat = 60
             let petHeight: CGFloat = 80

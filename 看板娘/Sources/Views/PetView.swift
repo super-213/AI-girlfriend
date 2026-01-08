@@ -1,11 +1,25 @@
+//
+//  PetView.swift
+//  桌面宠物应用
+//
+//  宠物主视图，显示输入框、对话输出和宠物动画
+//
+
 import SwiftUI
 import SDWebImageSwiftUI
 
+// MARK: - 宠物视图
+
+/// 宠物主视图
+/// 包含用户输入、对话输出和宠物动画显示
 struct PetView: View {
     
     // MARK: - 属性
     
+    /// 宠物视图后端
     @ObservedObject var petViewBackend: PetViewBackend
+    
+    /// 界面重叠比例
     @AppStorage("overlapRatio") private var overlapRatio: Double = 0.3
     
     // MARK: - 主体
@@ -46,6 +60,8 @@ struct PetView: View {
     }
     
     // MARK: - 子视图
+    
+    /// 用户输入框
     private var inputField: some View {
         TextField("我会帮助指挥官解决问题...", text: $petViewBackend.userInput)
             .textFieldStyle(PlainTextFieldStyle())
@@ -57,6 +73,8 @@ struct PetView: View {
                 }
             }
     }
+    
+    /// 对话输出区域
     private var chatOutput: some View {
         ScrollView {
             Text(petViewBackend.streamedResponse)
@@ -74,14 +92,31 @@ struct PetView: View {
         .modifier(SmoothScrollStyle())
         .padding([.leading, .trailing])
     }
+    
+    /// 宠物图像显示
     private var petImage: some View {
-        AnimatedImage(name: petViewBackend.currentGif)
-            .resizable()
-            .id(petViewBackend.currentGif)
-            .scaledToFit()
-            .frame(width: 300, height: 300)
-            .onTapGesture {
-                petViewBackend.handleTap()
+        Group {
+            if petViewBackend.currentGif.hasPrefix("/") {
+                // 自定义角色：从文件系统加载
+                AnimatedImage(url: URL(fileURLWithPath: petViewBackend.currentGif))
+                    .resizable()
+                    .id(petViewBackend.currentGif)
+                    .scaledToFit()
+                    .frame(width: 300, height: 300)
+                    .onTapGesture {
+                        petViewBackend.handleTap()
+                    }
+            } else {
+                // 内置角色：从Bundle加载
+                AnimatedImage(name: petViewBackend.currentGif)
+                    .resizable()
+                    .id(petViewBackend.currentGif)
+                    .scaledToFit()
+                    .frame(width: 300, height: 300)
+                    .onTapGesture {
+                        petViewBackend.handleTap()
+                    }
             }
+        }
     }
 }

@@ -36,6 +36,19 @@
 		62A3BF012D19899F003DB0DF /* 看板娘.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "看板娘.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		62A3BF122D1989A0003DB0DF /* 看板娘Tests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "看板娘Tests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		62A3BF1C2D1989A0003DB0DF /* 看板娘UITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "看板娘UITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		62C27E362F0FE00B006D6809 /* Indicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Indicator.swift; sourceTree = "<group>"; };
+		62C27E382F0FE00B006D6809 /* Transition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transition.swift; sourceTree = "<group>"; };
+		62C27E3A2F0FE00B006D6809 /* .gitkeep */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitkeep; sourceTree = "<group>"; };
+		62C27E3B2F0FE00B006D6809 /* AnimatedImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnimatedImage.swift; sourceTree = "<group>"; };
+		62C27E3C2F0FE00B006D6809 /* Image.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Image.swift; sourceTree = "<group>"; };
+		62C27E3D2F0FE00B006D6809 /* ImageManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageManager.swift; sourceTree = "<group>"; };
+		62C27E3E2F0FE00B006D6809 /* ImagePlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePlayer.swift; sourceTree = "<group>"; };
+		62C27E3F2F0FE00B006D6809 /* ImageViewWrapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageViewWrapper.swift; sourceTree = "<group>"; };
+		62C27E402F0FE00B006D6809 /* SDWebImageSwiftUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SDWebImageSwiftUI.swift; sourceTree = "<group>"; };
+		62C27E412F0FE00B006D6809 /* WebImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebImage.swift; sourceTree = "<group>"; };
+		62C27E432F0FE00B006D6809 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		62C27E442F0FE00B006D6809 /* SDWebImageSwiftUI.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SDWebImageSwiftUI.h; sourceTree = "<group>"; };
+		62C27E462F0FE00B006D6809 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -108,11 +121,73 @@
 		62A3BF302D198BB8003DB0DF /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				62C27E482F0FE00B006D6809 /* SDWebImageSwiftUI */,
 				6231AD902D3A3C2A009BE5ED /* AVFoundation.framework */,
 				6231AD8E2D3A3BCA009BE5ED /* AVKit.framework */,
 				6248B38D2D3A2CCE00446FCE /* SDWebImageSwiftUI-master */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		62C27E372F0FE00B006D6809 /* Indicator */ = {
+			isa = PBXGroup;
+			children = (
+				62C27E362F0FE00B006D6809 /* Indicator.swift */,
+			);
+			path = Indicator;
+			sourceTree = "<group>";
+		};
+		62C27E392F0FE00B006D6809 /* Transition */ = {
+			isa = PBXGroup;
+			children = (
+				62C27E382F0FE00B006D6809 /* Transition.swift */,
+			);
+			path = Transition;
+			sourceTree = "<group>";
+		};
+		62C27E422F0FE00B006D6809 /* Classes */ = {
+			isa = PBXGroup;
+			children = (
+				62C27E372F0FE00B006D6809 /* Indicator */,
+				62C27E392F0FE00B006D6809 /* Transition */,
+				62C27E3A2F0FE00B006D6809 /* .gitkeep */,
+				62C27E3B2F0FE00B006D6809 /* AnimatedImage.swift */,
+				62C27E3C2F0FE00B006D6809 /* Image.swift */,
+				62C27E3D2F0FE00B006D6809 /* ImageManager.swift */,
+				62C27E3E2F0FE00B006D6809 /* ImagePlayer.swift */,
+				62C27E3F2F0FE00B006D6809 /* ImageViewWrapper.swift */,
+				62C27E402F0FE00B006D6809 /* SDWebImageSwiftUI.swift */,
+				62C27E412F0FE00B006D6809 /* WebImage.swift */,
+			);
+			path = Classes;
+			sourceTree = "<group>";
+		};
+		62C27E452F0FE00B006D6809 /* Module */ = {
+			isa = PBXGroup;
+			children = (
+				62C27E432F0FE00B006D6809 /* Info.plist */,
+				62C27E442F0FE00B006D6809 /* SDWebImageSwiftUI.h */,
+			);
+			path = Module;
+			sourceTree = "<group>";
+		};
+		62C27E472F0FE00B006D6809 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				62C27E462F0FE00B006D6809 /* PrivacyInfo.xcprivacy */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		62C27E482F0FE00B006D6809 /* SDWebImageSwiftUI */ = {
+			isa = PBXGroup;
+			children = (
+				62C27E422F0FE00B006D6809 /* Classes */,
+				62C27E452F0FE00B006D6809 /* Module */,
+				62C27E472F0FE00B006D6809 /* Resources */,
+			);
+			name = SDWebImageSwiftUI;
+			path = "../库/SDWebImageSwiftUI-master/SDWebImageSwiftUI";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -220,7 +295,7 @@
 			mainGroup = 62A3BEF82D19899F003DB0DF;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				6231AD922D3A3F53009BE5ED /* XCLocalSwiftPackageReference "../库/SDWebImageSwiftUI-master" */,
+				62C27E492F0FE081006D6809 /* XCLocalSwiftPackageReference "../库/SDWebImageSwiftUI-master" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 62A3BF022D19899F003DB0DF /* Products */;
@@ -582,7 +657,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		6231AD922D3A3F53009BE5ED /* XCLocalSwiftPackageReference "../库/SDWebImageSwiftUI-master" */ = {
+		62C27E492F0FE081006D6809 /* XCLocalSwiftPackageReference "../库/SDWebImageSwiftUI-master" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "../库/SDWebImageSwiftUI-master";
 		};

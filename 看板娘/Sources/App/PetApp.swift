@@ -1,7 +1,11 @@
-//___FILEHEADER___
+//
+//  PetApp.swift
+//  桌面宠物应用
+//
+//  应用程序主入口和窗口配置
+//
 
 import SwiftUI
-
 
 @main
 struct PetApp: App {
@@ -61,6 +65,8 @@ struct PetApp: App {
 }
 
 // MARK: - 应用委托
+
+/// 应用程序委托，负责窗口配置和生命周期管理
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 配置主窗口

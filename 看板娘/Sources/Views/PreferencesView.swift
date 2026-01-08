@@ -1,5 +1,17 @@
-import SwiftUI
+//
+//  PreferencesView.swift
+//  桌面宠物应用
+//
+//  偏好设置视图，提供风格、模型、布局和角色绑定设置
+//
 
+import SwiftUI
+import UniformTypeIdentifiers
+
+// MARK: - 偏好设置视图
+
+/// 偏好设置主视图
+/// 使用NavigationSplitView提供侧边栏导航和详情视图
 struct PreferencesView: View {
     // MARK: - 属性
 
@@ -21,10 +33,20 @@ struct PreferencesView: View {
 
     // MARK: - 状态
 
+    /// 当前选中的角色索引
     @State private var selectedIndex: Int = 0
+    
+    /// 当前聚焦的输入字段
     @FocusState private var focusedField: FocusableField?
     
-    // 可聚焦字段枚举
+    /// 计算属性：获取所有角色（包括自定义角色）
+    private var allCharacters: [PetCharacter] {
+        var characters = availableCharacters
+        characters.append(contentsOf: backend.customCharacters)
+        return characters
+    }
+    
+    /// 可聚焦字段枚举
     enum FocusableField: Hashable {
         case systemPrompt
         case provider
@@ -36,6 +58,8 @@ struct PreferencesView: View {
 
     // MARK: - 初始化
 
+    /// 初始化偏好设置视图
+    /// - Parameter petViewBackend: 宠物视图后端实例
     init(petViewBackend: PetViewBackend) {
         self.petViewBackend = petViewBackend
         _backend = StateObject(wrappedValue: PreferencesViewBackend(petViewBackend: petViewBackend))
@@ -134,6 +158,8 @@ struct PreferencesView: View {
             modelSettingsTab
         case .layout:
             layoutSettingsTab
+        case .characterBinding:
+            characterBindingTab
         case .about:
             aboutTab
         }
@@ -141,10 +167,12 @@ struct PreferencesView: View {
     
     // MARK: - 辅助方法
     
+    /// 切换侧边栏显示/隐藏
     private func toggleSidebar() {
         NSApp.keyWindow?.firstResponder?.tryToPerform(#selector(NSSplitViewController.toggleSidebar(_:)), with: nil)
     }
     
+    /// 保存设置
     private func saveSettings() {
         _ = backend.saveSettings(
             apiKey: apiKey,
@@ -166,6 +194,7 @@ struct PreferencesView: View {
         )
     }
     
+    /// 取消更改，恢复到之前的值
     private func cancelChanges() {
         apiKey = backend.tempApiKey
         aiModel = backend.tempAiModel
@@ -178,6 +207,7 @@ struct PreferencesView: View {
 
     // MARK: - 标签页
 
+    /// 风格设置标签页
     private var styleSettingsTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: LayoutConstants.sectionSpacing) {
@@ -204,6 +234,7 @@ struct PreferencesView: View {
         .accessibilityLabel("风格设置标签")
     }
 
+    /// 模型设置标签页
     private var modelSettingsTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: LayoutConstants.sectionSpacing) {
@@ -337,6 +368,7 @@ struct PreferencesView: View {
         .accessibilityLabel("模型设置标签")
     }
 
+    /// 布局设置标签页
     private var layoutSettingsTab: some View {
         ScrollView {
             VStack(spacing: DesignSpacing.lg) {
@@ -393,6 +425,120 @@ struct PreferencesView: View {
         .accessibilityLabel("布局设置标签")
     }
 
+    /// 角色绑定标签页
+    private var characterBindingTab: some View {
+        ScrollView {
+            VStack(spacing: DesignSpacing.lg) {
+                Text("角色绑定管理")
+                    .font(DesignFonts.title)
+                    .padding(.top, DesignSpacing.md)
+                
+                // 角色选择器部分
+                VStack(alignment: .leading, spacing: DesignSpacing.md) {
+                    Text("当前角色：")
+                        .font(DesignFonts.headline)
+                        .foregroundColor(DesignColors.textPrimary)
+                    
+                    Picker("选择角色", selection: $selectedIndex) {
+                        ForEach(0..<allCharacters.count, id: \.self) { index in
+                            Text(allCharacters[index].name)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(width: 200)
+                    .focused($focusedField, equals: .characterPicker)
+                    .accessibilityLabel("角色选择器")
+                    .accessibilityHint("选择不同的桌面宠物角色")
+                    .onChange(of: selectedIndex) { _, newValue in
+                        if newValue < availableCharacters.count {
+                            backend.switchCharacter(to: newValue)
+                        } else {
+                            // 切换到自定义角色
+                            let customIndex = newValue - availableCharacters.count
+                            if customIndex < backend.customCharacters.count {
+                                petViewBackend.switchToCharacter(backend.customCharacters[customIndex])
+                            }
+                        }
+                    }
+                    
+                    // 角色数量显示
+                    HStack(spacing: DesignSpacing.xs) {
+                        Image(systemName: "person.2.fill")
+                            .font(DesignFonts.caption)
+                        Text("可用角色: \(allCharacters.count) 个 (内置: \(availableCharacters.count), 自定义: \(backend.customCharacters.count))")
+                            .font(DesignFonts.caption)
+                    }
+                    .foregroundColor(DesignColors.textSecondary)
+                }
+                .padding(.horizontal, DesignSpacing.xl)
+                
+                Divider()
+                    .padding(.vertical, DesignSpacing.md)
+                
+                // 自定义角色管理
+                VStack(alignment: .leading, spacing: DesignSpacing.md) {
+                    HStack {
+                        Text("自定义角色 (\(backend.customCharacters.count)/3)")
+                            .font(DesignFonts.headline)
+                        Spacer()
+                        Button(action: {
+                            // 导入新角色
+                            showImportDialog()
+                        }) {
+                            Label("导入", systemImage: "plus.circle.fill")
+                        }
+                        .disabled(backend.customCharacters.count >= 3)
+                    }
+                    
+                    if backend.customCharacters.isEmpty {
+                        Text("暂无自定义角色，点击导入按钮添加")
+                            .font(DesignFonts.caption)
+                            .foregroundColor(DesignColors.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, DesignSpacing.lg)
+                    } else {
+                        ForEach(Array(backend.customCharacters.enumerated()), id: \.offset) { index, character in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(character.name)
+                                        .font(DesignFonts.body)
+                                    Text("站立: \(URL(fileURLWithPath: character.normalGif).lastPathComponent)")
+                                        .font(DesignFonts.caption)
+                                        .foregroundColor(DesignColors.textSecondary)
+                                    Text("动作: \(URL(fileURLWithPath: character.clickGif).lastPathComponent)")
+                                        .font(DesignFonts.caption)
+                                        .foregroundColor(DesignColors.textSecondary)
+                                }
+                                Spacer()
+                                Button(action: {
+                                    backend.deleteCustomCharacter(at: index)
+                                }) {
+                                    Image(systemName: "trash")
+                                        .foregroundColor(.red)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                            .padding()
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(8)
+                        }
+                    }
+                }
+                .padding(.horizontal, DesignSpacing.xl)
+                
+                Spacer()
+            }
+        }
+        .alert("导入失败", isPresented: $backend.showImportError) {
+            Button("确定", role: .cancel) { }
+        } message: {
+            Text(backend.importErrorMessage)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("角色绑定标签")
+    }
+    
+    /// 关于标签页
     private var aboutTab: some View {
         ScrollView {
             VStack(spacing: DesignSpacing.lg) {
@@ -421,41 +567,6 @@ struct PreferencesView: View {
                     .foregroundColor(DesignColors.textPrimary)
                     .padding(.top, DesignSpacing.xs)
 
-                Divider()
-                    .padding(.vertical, DesignSpacing.md)
-
-                // 角色选择器部分
-                VStack(alignment: .leading, spacing: DesignSpacing.md) {
-                    Text("选择角色：")
-                        .font(DesignFonts.headline)
-                        .foregroundColor(DesignColors.textPrimary)
-                    
-                    Picker("选择角色", selection: $selectedIndex) {
-                        ForEach(0..<availableCharacters.count, id: \.self) { index in
-                            Text(availableCharacters[index].name)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .frame(width: 200)
-                    .focused($focusedField, equals: .characterPicker)
-                    .accessibilityLabel("角色选择器")
-                    .accessibilityHint("选择不同的桌面宠物角色")
-                    .onChange(of: selectedIndex) { _, newValue in
-                        backend.switchCharacter(to: newValue)
-                    }
-                    
-                    // 角色数量显示
-                    HStack(spacing: DesignSpacing.xs) {
-                        Image(systemName: "person.2.fill")
-                            .font(DesignFonts.caption)
-                        Text("可用角色: \(availableCharacters.count) 个")
-                            .font(DesignFonts.caption)
-                    }
-                    .foregroundColor(DesignColors.textSecondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, DesignSpacing.xl)
-
                 Spacer()
 
                 // 关闭按钮
@@ -475,5 +586,71 @@ struct PreferencesView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("关于标签")
+    }
+    
+    // MARK: - 辅助方法
+    
+    /// 显示导入GIF对话框
+    private func showImportDialog() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.gif]
+        panel.message = "选择站立GIF文件"
+        
+        panel.begin { response in
+            guard response == .OK, let normalUrl = panel.url else { return }
+            
+            // 询问角色名称
+            let alert = NSAlert()
+            alert.messageText = "输入角色名称"
+            alert.informativeText = "请为新角色输入一个名称"
+            alert.addButton(withTitle: "继续")
+            alert.addButton(withTitle: "取消")
+            
+            let inputField = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+            inputField.placeholderString = "角色名称"
+            alert.accessoryView = inputField
+            
+            let response = alert.runModal()
+            guard response == .alertFirstButtonReturn else { return }
+            
+            let characterName = inputField.stringValue
+            
+            // 询问是否选择动作GIF
+            let clickAlert = NSAlert()
+            clickAlert.messageText = "选择动作GIF（可选）"
+            clickAlert.informativeText = "是否为角色添加点击动作GIF？"
+            clickAlert.addButton(withTitle: "选择")
+            clickAlert.addButton(withTitle: "跳过")
+            
+            let clickResponse = clickAlert.runModal()
+            
+            if clickResponse == .alertFirstButtonReturn {
+                let clickPanel = NSOpenPanel()
+                clickPanel.allowsMultipleSelection = false
+                clickPanel.canChooseDirectories = false
+                clickPanel.canChooseFiles = true
+                clickPanel.allowedContentTypes = [.gif]
+                clickPanel.message = "选择动作GIF文件"
+                
+                clickPanel.begin { clickPanelResponse in
+                    let clickUrl = clickPanelResponse == .OK ? clickPanel.url : nil
+                    _ = backend.importGIF(normalGif: normalUrl, clickGif: clickUrl, name: characterName)
+                }
+            } else {
+                _ = backend.importGIF(normalGif: normalUrl, clickGif: nil, name: characterName)
+            }
+        }
+    }
+}
+
+
+// MARK: - UTType Extension for GIF
+
+extension UTType {
+    static var gif: UTType {
+        UTType(filenameExtension: "gif") ?? .data
     }
 }
