@@ -50,15 +50,4 @@ let puppetCat = PetCharacter(
 /// 所有可用的内置角色列表
 let availableCharacters: [PetCharacter] = [puppetBear, puppetCat]
 
-// MARK: - 角色管理函数
 
-/// 获取所有角色（包括内置角色和自定义角色）
-/// - Returns: 包含所有角色的数组
-func getAllCharacters() -> [PetCharacter] {
-    var characters = availableCharacters
-    if let data = UserDefaults.standard.data(forKey: "customCharacters"),
-       let customChars = try? JSONDecoder().decode([PetCharacter].self, from: data) {
-        characters.append(contentsOf: customChars)
-    }
-    return characters
-}

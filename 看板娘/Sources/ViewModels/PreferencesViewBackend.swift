@@ -37,6 +37,9 @@ class PreferencesViewBackend: ObservableObject {
     /// 是否有未保存的更改
     @Published var hasUnsavedChanges: Bool = false
     
+    /// 静态提示词列表
+    @Published var staticMessages: [String] = []
+    
     // 角色绑定相关
     
     /// 自定义角色列表
@@ -50,23 +53,8 @@ class PreferencesViewBackend: ObservableObject {
     
     // MARK: - 取消操作的临时存储
     
-    /// 临时存储的API Key（用于取消操作）
-    var tempApiKey: String = ""
-    
-    /// 临时存储的AI模型（用于取消操作）
-    var tempAiModel: String = ""
-    
-    /// 临时存储的系统提示词（用于取消操作）
-    var tempSystemPrompt: String = ""
-    
-    /// 临时存储的API地址（用于取消操作）
-    var tempApiUrl: String = ""
-    
-    /// 临时存储的提供商（用于取消操作）
-    var tempProvider: String = ""
-    
-    /// 临时存储的重叠比例（用于取消操作）
-    var tempOverlapRatio: Double = 0.3
+    /// 临时存储的设置数据（用于取消操作）
+    private var tempData: PreferencesData = .default
     
     // MARK: - 依赖项
     
@@ -80,6 +68,24 @@ class PreferencesViewBackend: ObservableObject {
     init(petViewBackend: PetViewBackend) {
         self.petViewBackend = petViewBackend
         loadCustomCharacters()
+        loadStaticMessages()
+    }
+    
+    // MARK: - 静态提示词管理
+    
+    /// 加载静态提示词
+    private func loadStaticMessages() {
+        if let data = UserDefaults.standard.data(forKey: "staticMessages"),
+           let messages = try? JSONDecoder().decode([String].self, from: data) {
+            staticMessages = messages
+        }
+    }
+    
+    /// 保存静态提示词
+    func saveStaticMessages() {
+        if let data = try? JSONEncoder().encode(staticMessages) {
+            UserDefaults.standard.set(data, forKey: "staticMessages")
+        }
     }
     
     // MARK: - 角色绑定方法
@@ -239,13 +245,6 @@ extension PreferencesViewBackend {
 /// 临时值管理扩展
 extension PreferencesViewBackend {
     /// 加载当前值到临时存储
-    /// - Parameters:
-    ///   - apiKey: API密钥
-    ///   - aiModel: AI模型名称
-    ///   - systemPrompt: 系统提示词
-    ///   - apiUrl: API地址
-    ///   - provider: 服务提供商
-    ///   - overlapRatio: 重叠比例
     func loadTemporaryValues(
         apiKey: String,
         aiModel: String,
@@ -254,22 +253,18 @@ extension PreferencesViewBackend {
         provider: String,
         overlapRatio: Double
     ) {
-        tempApiKey = apiKey
-        tempAiModel = aiModel
-        tempSystemPrompt = systemPrompt
-        tempApiUrl = apiUrl
-        tempProvider = provider
-        tempOverlapRatio = overlapRatio
+        tempData = PreferencesData(
+            apiKey: apiKey,
+            aiModel: aiModel,
+            systemPrompt: systemPrompt,
+            apiUrl: apiUrl,
+            provider: provider,
+            overlapRatio: overlapRatio,
+            staticMessages: staticMessages
+        )
     }
     
     /// 检查是否有未保存的更改
-    /// - Parameters:
-    ///   - apiKey: 当前API密钥
-    ///   - aiModel: 当前AI模型
-    ///   - systemPrompt: 当前系统提示词
-    ///   - apiUrl: 当前API地址
-    ///   - provider: 当前服务提供商
-    ///   - overlapRatio: 当前重叠比例
     func checkUnsavedChanges(
         apiKey: String,
         aiModel: String,
@@ -278,12 +273,16 @@ extension PreferencesViewBackend {
         provider: String,
         overlapRatio: Double
     ) {
-        hasUnsavedChanges = apiKey != tempApiKey ||
-                           aiModel != tempAiModel ||
-                           systemPrompt != tempSystemPrompt ||
-                           apiUrl != tempApiUrl ||
-                           provider != tempProvider ||
-                           overlapRatio != tempOverlapRatio
+        let currentData = PreferencesData(
+            apiKey: apiKey,
+            aiModel: aiModel,
+            systemPrompt: systemPrompt,
+            apiUrl: apiUrl,
+            provider: provider,
+            overlapRatio: overlapRatio,
+            staticMessages: staticMessages
+        )
+        hasUnsavedChanges = currentData != tempData
     }
 }
 
@@ -421,6 +420,9 @@ extension PreferencesViewBackend {
             return false
         }
         
+        // 保存静态提示词
+        saveStaticMessages()
+        
         // 更新临时值
         onSuccess()
         
@@ -454,6 +456,7 @@ extension PreferencesViewBackend {
         validationErrors.removeAll()
         validationState.clearErrors()
         hasUnsavedChanges = false
+        staticMessages = tempData.staticMessages
     }
 }
 

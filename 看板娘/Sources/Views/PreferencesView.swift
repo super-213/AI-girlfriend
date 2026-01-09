@@ -196,13 +196,9 @@ struct PreferencesView: View {
     
     /// 取消更改，恢复到之前的值
     private func cancelChanges() {
-        apiKey = backend.tempApiKey
-        aiModel = backend.tempAiModel
-        systemPrompt = backend.tempSystemPrompt
-        apiUrl = backend.tempApiUrl
-        provider = backend.tempProvider
-        overlapRatio = backend.tempOverlapRatio
         backend.cancelChanges()
+        // 触发视图刷新
+        presentationMode.wrappedValue.dismiss()
     }
 
     // MARK: - 标签页
@@ -218,6 +214,23 @@ struct PreferencesView: View {
                 )
                 .accessibilityLabel("系统提示词编辑器")
                 .accessibilityHint("编辑 AI 角色的个性和行为设置")
+                
+                Divider()
+                    .padding(.vertical, LayoutConstants.fieldSpacing)
+                
+                StaticMessagesEditor(messages: $backend.staticMessages)
+                    .accessibilityLabel("静态提示词编辑器")
+                    .accessibilityHint("管理自动回复的静态提示词列表")
+                    .onChange(of: backend.staticMessages) { _, _ in
+                        backend.checkUnsavedChanges(
+                            apiKey: apiKey,
+                            aiModel: aiModel,
+                            systemPrompt: systemPrompt,
+                            apiUrl: apiUrl,
+                            provider: provider,
+                            overlapRatio: overlapRatio
+                        )
+                    }
 
                 Spacer()
 
@@ -332,10 +345,10 @@ struct PreferencesView: View {
                     TextEditor(text: $apiKey)
                         .frame(height: LayoutConstants.textEditorMinHeight)
                         .border(
-                            backend.validationErrors["apiKey"] != nil ? Color.errorRed : Color.borderGray,
+                            backend.validationErrors["apiKey"] != nil ? DesignColors.error : DesignColors.border,
                             width: LayoutConstants.borderWidth
                         )
-                        .font(FontStyles.fieldInput)
+                        .font(DesignFonts.input)
                         .focused($focusedField, equals: .apiKey)
                         .accessibilityLabel("API 密钥")
                         .accessibilityHint("输入您的 API 密钥以访问 AI 服务")

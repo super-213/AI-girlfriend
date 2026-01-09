@@ -68,7 +68,9 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         cancelPreviousTask()
 
         guard let request = buildRequest(with: userInput) else {
+            #if DEBUG
             print(" 请求构建失败")
+            #endif
             onComplete()
             return
         }
@@ -135,7 +137,9 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             ]
             
         default:
+            #if DEBUG
             print("不支持的 provider: \(provider)")
+            #endif
             return nil
         }
         
@@ -172,7 +176,9 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         guard let rawText = String(data: data, encoding: .utf8) else { return }
 
+        #if DEBUG
         print("接收到原始数据：\n\(rawText)")
+        #endif
 
         let lines = rawText
             .components(separatedBy: "\n")
@@ -183,7 +189,9 @@ final class APIManager: NSObject, URLSessionDataDelegate {
 
             guard trimmed != "[DONE]" else { continue }
 
+            #if DEBUG
             print("解码前：\(trimmed)")
+            #endif
 
             if let jsonData = trimmed.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
@@ -210,11 +218,15 @@ final class APIManager: NSObject, URLSessionDataDelegate {
                     }
 
                 default:
+                    #if DEBUG
                     print("未知 provider: \(provider)")
+                    #endif
                 }
 
             } else {
+                #if DEBUG
                 print("JSON解析失败: \(trimmed)")
+                #endif
             }
         }
     }
@@ -227,7 +239,9 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         DispatchQueue.main.async { [weak self] in
             if let error = error {
+                #if DEBUG
                 print("任务出错：\(error.localizedDescription)")
+                #endif
             }
             self?.onComplete?()
         }

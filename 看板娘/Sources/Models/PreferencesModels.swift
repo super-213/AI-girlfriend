@@ -46,6 +46,7 @@ struct PreferencesData: Equatable {
     var apiUrl: String
     var provider: String
     var overlapRatio: Double
+    var staticMessages: [String]
     
     static let `default` = PreferencesData(
         apiKey: "",
@@ -53,7 +54,8 @@ struct PreferencesData: Equatable {
         systemPrompt: "你的名字叫布偶熊·觅语，用80%可爱和20%傲娇的风格回答问题，在回答问题前都要说：指挥官，你好。",
         apiUrl: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
         provider: "zhipu",
-        overlapRatio: 0.3
+        overlapRatio: 0.3,
+        staticMessages: []
     )
 }
 
@@ -122,42 +124,11 @@ struct LayoutConstants {
     static let sectionSpacing: CGFloat = 20
     static let fieldSpacing: CGFloat = 12
     static let horizontalPadding: CGFloat = 20
-    static let verticalPadding: CGFloat = 16
-    
     static let textFieldWidth: CGFloat = 360
     static let textEditorMinHeight: CGFloat = 100
     static let systemPromptHeight: CGFloat = 180
-    
-    static let windowMinWidth: CGFloat = 500
-    static let windowMinHeight: CGFloat = 400
-    
     static let cornerRadius: CGFloat = 8
     static let borderWidth: CGFloat = 1
-}
-
-
-// MARK: - 颜色扩展
-
-/// 颜色扩展，定义统一的颜色方案
-extension Color {
-    static let formBackground = Color(NSColor.controlBackgroundColor)
-    static let errorRed = Color.red.opacity(0.8)
-    static let successGreen = Color.green.opacity(0.8)
-    static let warningYellow = Color.yellow.opacity(0.8)
-    static let borderGray = Color.gray.opacity(0.3)
-    static let focusBorderBlue = Color.blue.opacity(0.5)
-}
-
-
-// MARK: - 字体样式
-
-/// 字体样式，定义统一的字体
-struct FontStyles {
-    static let sectionTitle = Font.headline
-    static let fieldLabel = Font.body
-    static let fieldInput = Font.system(size: 14)
-    static let errorMessage = Font.caption
-    static let characterCount = Font.caption.monospacedDigit()
 }
 
 
@@ -193,21 +164,21 @@ struct SystemPromptEditor: View {
             // 标签和字符计数
             HStack {
                 Text("系统提示词:")
-                    .font(FontStyles.fieldLabel)
+                    .font(DesignFonts.body)
                 
                 Spacer()
                 
                 Text("[\(characterCount)/\(characterLimit)]")
-                    .font(FontStyles.characterCount)
-                    .foregroundColor(isOverLimit ? .warningYellow : .secondary)
+                    .font(DesignFonts.caption.monospacedDigit())
+                    .foregroundColor(isOverLimit ? DesignColors.warning : .secondary)
                     .accessibilityLabel("字符计数：\(characterCount) 个，限制 \(characterLimit) 个")
             }
             
             // 文本编辑器
             TextEditor(text: $text)
                 .frame(height: LayoutConstants.systemPromptHeight)
-                .border(Color.borderGray, width: LayoutConstants.borderWidth)
-                .font(FontStyles.fieldInput)
+                .border(DesignColors.border, width: LayoutConstants.borderWidth)
+                .font(DesignFonts.input)
                 .focused(focusedField, equals: .systemPrompt)
                 .accessibilityLabel("系统提示词文本编辑器")
                 .accessibilityValue(text)
@@ -218,9 +189,9 @@ struct SystemPromptEditor: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.caption)
                     Text("提示词较长，建议精简以获得更好的响应")
-                        .font(FontStyles.errorMessage)
+                        .font(DesignFonts.caption)
                 }
-                .foregroundColor(.warningYellow)
+                .foregroundColor(DesignColors.warning)
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("警告：提示词较长，建议精简")
             }
@@ -268,7 +239,7 @@ struct ProviderPicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: LayoutConstants.fieldSpacing / 2) {
             Text("选择平台：")
-                .font(FontStyles.fieldLabel)
+                .font(DesignFonts.body)
             
             Picker("选择平台", selection: $selectedProvider) {
                 ForEach(providers) { provider in
@@ -488,6 +459,154 @@ struct EnhancedSuccessBanner: View {
                 opacity = 1
             }
         }
+    }
+}
+
+
+// MARK: - 静态提示词编辑器组件
+
+/// 静态提示词列表编辑器组件
+/// 支持添加、编辑和删除静态提示词
+struct StaticMessagesEditor: View {
+    /// 绑定的静态提示词列表
+    @Binding var messages: [String]
+    
+    /// 新消息输入文本
+    @State private var newMessage: String = ""
+    
+    /// 当前编辑的消息索引
+    @State private var editingIndex: Int? = nil
+    
+    /// 编辑中的消息文本
+    @State private var editingText: String = ""
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: LayoutConstants.fieldSpacing) {
+            // 标签和计数
+            HStack {
+                Text("静态提示词:")
+                    .font(DesignFonts.body)
+                
+                Spacer()
+                
+                Text("[\(messages.count) 条]")
+                    .font(DesignFonts.caption.monospacedDigit())
+                    .foregroundColor(.secondary)
+            }
+            
+            // 消息列表
+            if !messages.isEmpty {
+                ScrollView {
+                    VStack(spacing: 8) {
+                        ForEach(Array(messages.enumerated()), id: \.offset) { index, message in
+                            HStack(alignment: .top, spacing: 8) {
+                                // 序号
+                                Text("\(index + 1).")
+                                    .font(DesignFonts.input)
+                                    .foregroundColor(.secondary)
+                                    .frame(width: 20, alignment: .trailing)
+                                
+                                // 消息内容或编辑框
+                                if editingIndex == index {
+                                    TextField("编辑消息", text: $editingText)
+                                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                                        .font(DesignFonts.input)
+                                } else {
+                                    Text(message)
+                                        .font(DesignFonts.input)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(6)
+                                        .background(Color.gray.opacity(0.1))
+                                        .cornerRadius(4)
+                                }
+                                
+                                // 操作按钮
+                                HStack(spacing: 4) {
+                                    if editingIndex == index {
+                                        // 保存按钮
+                                        Button(action: {
+                                            messages[index] = editingText
+                                            editingIndex = nil
+                                            editingText = ""
+                                        }) {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundColor(.green)
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                        
+                                        // 取消按钮
+                                        Button(action: {
+                                            editingIndex = nil
+                                            editingText = ""
+                                        }) {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .foregroundColor(.gray)
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                    } else {
+                                        // 编辑按钮
+                                        Button(action: {
+                                            editingIndex = index
+                                            editingText = message
+                                        }) {
+                                            Image(systemName: "pencil.circle")
+                                                .foregroundColor(.blue)
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                        
+                                        // 删除按钮
+                                        Button(action: {
+                                            messages.remove(at: index)
+                                        }) {
+                                            Image(systemName: "trash.circle")
+                                                .foregroundColor(.red)
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+                .frame(height: 150)
+                .border(DesignColors.border, width: LayoutConstants.borderWidth)
+            } else {
+                Text("暂无静态提示词，请添加")
+                    .font(DesignFonts.caption)
+                    .foregroundColor(.secondary)
+                    .frame(height: 60)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.gray.opacity(0.05))
+                    .border(DesignColors.border, width: LayoutConstants.borderWidth)
+            }
+            
+            // 添加新消息
+            HStack(spacing: 8) {
+                TextField("输入新的静态提示词", text: $newMessage)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .font(DesignFonts.input)
+                
+                Button(action: addMessage) {
+                    Image(systemName: "plus.circle.fill")
+                        .foregroundColor(.blue)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(newMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            
+            Text("静态提示词将替代角色的默认自动消息")
+                .font(DesignFonts.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+    
+    /// 添加新消息
+    private func addMessage() {
+        let trimmed = newMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        messages.append(trimmed)
+        newMessage = ""
     }
 }
 

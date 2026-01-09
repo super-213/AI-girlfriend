@@ -132,13 +132,17 @@ class PetViewBackend: ObservableObject {
         
         // 获取GIF实际时长
         let duration = getGifDuration(gifName: currentCharacter.clickGif)
+        #if DEBUG
         print("GIF: \(currentCharacter.clickGif), 计算时长: \(duration)秒")
+        #endif
         
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
             guard let self = self else { return }
             self.currentGif = self.currentCharacter.normalGif
             self.isReacting = false
+            #if DEBUG
             print("切换回静止状态")
+            #endif
         }
     }
     
@@ -149,26 +153,36 @@ class PetViewBackend: ObservableObject {
     /// - Returns: GIF的总播放时长（秒）
     private func getGifDuration(gifName: String) -> TimeInterval {
         guard let gifUrl = getGifUrl(gifName: gifName) else {
+            #if DEBUG
             print("无法获取GIF URL: \(gifName)")
+            #endif
             return 2.0
         }
         
+        #if DEBUG
         print("GIF路径: \(gifUrl.path)")
+        #endif
         
         guard let imageSource = CGImageSourceCreateWithURL(gifUrl as CFURL, nil) else {
+            #if DEBUG
             print("无法创建ImageSource")
+            #endif
             return 2.0
         }
         
         let frameCount = CGImageSourceGetCount(imageSource)
+        #if DEBUG
         print("总帧数: \(frameCount)")
+        #endif
         
         var totalDuration: TimeInterval = 0
         
         for i in 0..<frameCount {
             guard let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, i, nil) as? [String: Any],
                   let gifInfo = properties[kCGImagePropertyGIFDictionary as String] as? [String: Any] else {
+                #if DEBUG
                 print("第\(i)帧无法读取属性")
+                #endif
                 continue
             }
             
@@ -185,7 +199,9 @@ class PetViewBackend: ObservableObject {
             totalDuration += frameDuration
         }
         
+        #if DEBUG
         print("总时长: \(totalDuration)秒")
+        #endif
         
         // 如果计算出的时长太短，返回默认值
         return totalDuration > 0.1 ? totalDuration : 2.0
@@ -220,7 +236,9 @@ class PetViewBackend: ObservableObject {
                 return url
             }
             
+            #if DEBUG
             print("尝试了所有路径都找不到: \(gifName)")
+            #endif
             return nil
         }
     }
@@ -266,7 +284,15 @@ class PetViewBackend: ObservableObject {
     private func performAutoAction() {
         guard !isReacting else { return }
         playNextGif()
-        streamedResponse = currentCharacter.autoMessages.randomElement() ?? ""
+        
+        // 优先使用静态提示词，如果没有则使用角色的 autoMessages
+        if let data = UserDefaults.standard.data(forKey: "staticMessages"),
+           let staticMessages = try? JSONDecoder().decode([String].self, from: data),
+           !staticMessages.isEmpty {
+            streamedResponse = staticMessages.randomElement() ?? ""
+        } else {
+            streamedResponse = currentCharacter.autoMessages.randomElement() ?? ""
+        }
     }
     
     /// 取消自动行为循环

@@ -30,22 +30,7 @@ struct PetApp: App {
         }
     }
 
-    init() {
-        configureTransparentWindow()
-    }
 
-    private func configureTransparentWindow() {
-        DispatchQueue.main.async {
-            if let window = NSApplication.shared.windows.first {
-                window.titleVisibility = .hidden
-                window.titlebarAppearsTransparent = true
-                window.isOpaque = false
-                window.backgroundColor = .clear
-                window.hasShadow = false
-                window.level = .floating
-            }
-        }
-    }
 
     private func showPreferencesWindow() {
         let window = NSWindow(
@@ -77,18 +62,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationDidBecomeActive(_ notification: Notification) {
-        // 每次激活时确保窗口配置正确
         configureMainWindow()
     }
     
     private func configureMainWindow() {
-        // 找到主窗口（第一个非偏好设置窗口）
-        guard let window = NSApplication.shared.windows.first(where: { $0.title == "Pet" || $0.identifier?.rawValue == "main-pet-window" }) else {
-            // 如果找不到特定窗口，使用第一个窗口
-            guard let window = NSApplication.shared.windows.first else { return }
-            applyTransparentStyle(to: window)
-            return
-        }
+        guard let window = NSApplication.shared.windows.first(where: { 
+            $0.title == "Pet" || $0.identifier?.rawValue == "main-pet-window" 
+        }) ?? NSApplication.shared.windows.first else { return }
         
         applyTransparentStyle(to: window)
     }
