@@ -50,6 +50,9 @@ class PetViewBackend: ObservableObject {
     /// 定期自动行为的定时器
     private var periodicAutoActionTimer: AnyCancellable?
     
+    /// 定期内存清理定时器
+    private var memoryCleanupTimer: AnyCancellable?
+    
     // MARK: - 初始化
     
     /// 初始化后端并注册通知观察者
@@ -63,12 +66,16 @@ class PetViewBackend: ObservableObject {
                                                selector: #selector(onAppDidResignActive),
                                                name: NSApplication.didResignActiveNotification,
                                                object: nil)
+        
+        // 启动定期内存清理（每5分钟）
+        startPeriodicMemoryCleanup()
     }
     
     /// 清理资源和观察者
     deinit {
         NotificationCenter.default.removeObserver(self)
         cancelAutoActionLoop()
+        memoryCleanupTimer?.cancel()
     }
     
     // MARK: - 生命周期
@@ -254,6 +261,11 @@ class PetViewBackend: ObservableObject {
         apiManager.sendStreamRequest(userInput: userInput) { newContent in
             DispatchQueue.main.async {
                 self.streamedResponse += newContent
+                
+                // 限制响应文本长度，避免内存无限增长
+                if self.streamedResponse.count > 5000 {
+                    self.streamedResponse = String(self.streamedResponse.suffix(5000))
+                }
             }
         } onComplete: {
             DispatchQueue.main.async {
@@ -285,6 +297,9 @@ class PetViewBackend: ObservableObject {
         guard !isReacting else { return }
         playNextGif()
         
+        // 清理旧的响应文本，避免内存累积
+        streamedResponse = ""
+        
         // 优先使用静态提示词，如果没有则使用角色的 autoMessages
         if let data = UserDefaults.standard.data(forKey: "staticMessages"),
            let staticMessages = try? JSONDecoder().decode([String].self, from: data),
@@ -302,6 +317,18 @@ class PetViewBackend: ObservableObject {
     }
     
     // MARK: - 音乐播放控制
+    
+    /// 启动定期内存清理（每5分钟）
+    private func startPeriodicMemoryCleanup() {
+        memoryCleanupTimer = Timer.publish(every: 300, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                MemoryOptimizer.shared.periodicCleanup()
+                #if DEBUG
+                print("执行定期内存清理")
+                #endif
+            }
+    }
     
     /// 从用户输入中提取歌曲名称
     /// - Parameter input: 用户输入的文本

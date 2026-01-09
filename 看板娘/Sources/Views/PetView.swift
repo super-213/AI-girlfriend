@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SDWebImageSwiftUI
+import SDWebImage
 
 // MARK: - 宠物视图
 
@@ -106,6 +107,10 @@ struct PetView: View {
                     .onTapGesture {
                         petViewBackend.handleTap()
                     }
+                    .onDisappear {
+                        // 清理GIF缓存
+                        SDImageCache.shared.clearMemory()
+                    }
             } else {
                 // 内置角色：从Bundle加载
                 AnimatedImage(name: petViewBackend.currentGif)
@@ -115,6 +120,10 @@ struct PetView: View {
                     .frame(width: 300, height: 300)
                     .onTapGesture {
                         petViewBackend.handleTap()
+                    }
+                    .onDisappear {
+                        // 清理GIF缓存
+                        SDImageCache.shared.clearMemory()
                     }
             }
         }

@@ -12,6 +12,11 @@ struct PetApp: App {
     @StateObject private var backend = PetViewBackend()
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
+    init() {
+        // 初始化内存优化器
+        _ = MemoryOptimizer.shared
+    }
+
     var body: some Scene {
         Window("Pet", id: "main-pet-window") {
             PetView(petViewBackend: backend)
