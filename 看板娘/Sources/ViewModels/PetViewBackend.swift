@@ -138,9 +138,13 @@ class PetViewBackend: ObservableObject {
         isReacting = true
         
         // 获取GIF实际时长
-        let duration = getGifDuration(gifName: currentCharacter.clickGif)
+        let calculatedDuration = getGifDuration(gifName: currentCharacter.clickGif)
+        
+        // 减少10%的时长，让切换更及时（避免GIF已播完但还在等待的情况）
+        let duration = calculatedDuration * 0.9
+        
         #if DEBUG
-        print("GIF: \(currentCharacter.clickGif), 计算时长: \(duration)秒")
+        print("GIF: \(currentCharacter.clickGif), 计算时长: \(calculatedDuration)秒, 实际使用: \(duration)秒")
         #endif
         
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
@@ -190,28 +194,42 @@ class PetViewBackend: ObservableObject {
                 #if DEBUG
                 print("第\(i)帧无法读取属性")
                 #endif
+                // 如果无法读取属性，使用默认帧延迟
+                totalDuration += 0.1
                 continue
             }
             
             // 获取每帧的延迟时间
             var frameDuration: TimeInterval = 0.1 // 默认0.1秒
             
+            // 优先使用 UnclampedDelayTime
             if let unclampedDelay = gifInfo[kCGImagePropertyGIFUnclampedDelayTime as String] as? TimeInterval,
                unclampedDelay > 0 {
                 frameDuration = unclampedDelay
-            } else if let delay = gifInfo[kCGImagePropertyGIFDelayTime as String] as? TimeInterval {
+            } else if let delay = gifInfo[kCGImagePropertyGIFDelayTime as String] as? TimeInterval,
+                      delay > 0 {
                 frameDuration = delay
             }
             
+            // 某些GIF编码器会设置非常小的延迟（如0.02秒），这会导致播放过快
+            // 将最小延迟限制为0.02秒
+            if frameDuration < 0.02 {
+                frameDuration = 0.1
+            }
+            
             totalDuration += frameDuration
+            
+            #if DEBUG
+            print("第\(i)帧延迟: \(frameDuration)秒")
+            #endif
         }
         
         #if DEBUG
         print("总时长: \(totalDuration)秒")
         #endif
         
-        // 如果计算出的时长太短，返回默认值
-        return totalDuration > 0.1 ? totalDuration : 2.0
+        // 如果计算出的时长太短（小于0.5秒），返回默认值
+        return totalDuration >= 0.5 ? totalDuration : 2.0
     }
     
     /// 获取GIF文件的URL

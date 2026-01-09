@@ -57,6 +57,17 @@ struct PreferencesData: Equatable {
         overlapRatio: 0.3,
         staticMessages: []
     )
+    
+    /// Ollama 默认配置
+    static let ollamaDefault = PreferencesData(
+        apiKey: "ollama",
+        aiModel: "qwen2.5",
+        systemPrompt: "你的名字叫布偶熊·觅语，用80%可爱和20%傲娇的风格回答问题，在回答问题前都要说：指挥官，你好。",
+        apiUrl: "http://localhost:11434/api/chat",
+        provider: "ollama",
+        overlapRatio: 0.3,
+        staticMessages: []
+    )
 }
 
 
@@ -99,9 +110,10 @@ struct ValidationState {
             modelError = ValidationError.emptyModel.errorDescription
             return false
         }
-        let validPattern = "^[a-zA-Z0-9_-]+$"
+        // 允许字母、数字、下划线、连字符、点号和冒号（支持 Ollama 的 model:tag 格式）
+        let validPattern = "^[a-zA-Z0-9_.-]+(:[a-zA-Z0-9_.-]+)?$"
         guard model.range(of: validPattern, options: .regularExpression) != nil else {
-            modelError = ValidationError.emptyModel.errorDescription
+            modelError = "模型名称格式无效，仅支持字母、数字、下划线、连字符、点号和冒号"
             return false
         }
         modelError = nil
@@ -233,7 +245,8 @@ struct ProviderPicker: View {
     /// 可用的提供商列表
     let providers: [Provider] = [
         Provider(id: "zhipu", name: "智谱清言"),
-        Provider(id: "qwen", name: "通义千问")
+        Provider(id: "qwen", name: "通义千问"),
+        Provider(id: "ollama", name: "Ollama 本地")
     ]
     
     var body: some View {

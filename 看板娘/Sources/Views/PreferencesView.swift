@@ -178,6 +178,7 @@ struct PreferencesView: View {
             apiKey: apiKey,
             apiUrl: apiUrl,
             aiModel: aiModel,
+            provider: provider,
             onSuccess: {
                 backend.loadTemporaryValues(
                     apiKey: apiKey,
@@ -254,7 +255,7 @@ struct PreferencesView: View {
                 // 提供商选择器
                 ProviderPicker(selectedProvider: $provider)
                     .accessibilityLabel("AI 服务提供商选择器")
-                    .accessibilityHint("选择智谱清言或通义千问作为 AI 服务提供商")
+                    .accessibilityHint("选择智谱清言、通义千问或 Ollama 本地模型作为 AI 服务提供商")
                     .focused($focusedField, equals: .provider)
                     .onChange(of: provider) { _, newValue in
                         let result = backend.handleProviderChange(
@@ -274,6 +275,51 @@ struct PreferencesView: View {
                         )
                     }
                 
+                // Ollama 使用说明
+                if provider == "ollama" {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "info.circle.fill")
+                                .foregroundColor(.blue)
+                            Text("Ollama 本地模型使用说明")
+                                .font(DesignFonts.body)
+                                .fontWeight(.medium)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("1. 确保已安装 Ollama：")
+                                .font(DesignFonts.caption)
+                            Text("   访问 https://ollama.com 下载安装")
+                                .font(DesignFonts.caption)
+                                .foregroundColor(.secondary)
+                            
+                            Text("2. 下载模型（终端执行）：")
+                                .font(DesignFonts.caption)
+                                .padding(.top, 4)
+                            Text("   ollama pull qwen2.5")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .padding(6)
+                                .background(Color.gray.opacity(0.1))
+                                .cornerRadius(4)
+                            
+                            Text("3. 常用模型：qwen2.5, llama3, gemma2")
+                                .font(DesignFonts.caption)
+                                .padding(.top, 4)
+                            
+                            Text("4. API Key 字段可留空或填任意值")
+                                .font(DesignFonts.caption)
+                                .foregroundColor(.orange)
+                                .padding(.top, 4)
+                        }
+                        .padding(.leading, 20)
+                    }
+                    .padding()
+                    .background(Color.blue.opacity(0.05))
+                    .cornerRadius(8)
+                    .frame(width: LayoutConstants.textFieldWidth)
+                }
+                
                 // 模型字段
                 EnhancedFormField(
                     label: "模型：",
@@ -281,7 +327,9 @@ struct PreferencesView: View {
                     successMessage: backend.validationErrors["model"] == nil && !aiModel.isEmpty ? "模型名称有效" : nil
                 ) {
                     TextField(
-                        provider == "zhipu" ? "例如: glm-4v-flash" : "例如: qwen-turbo",
+                        provider == "zhipu" ? "例如: glm-4v-flash" : 
+                        provider == "qwen" ? "例如: qwen-turbo" : 
+                        "例如: qwen2.5, llama3",
                         text: $aiModel
                     )
                     .textFieldStyle(RoundedBorderTextFieldStyle())
@@ -291,7 +339,9 @@ struct PreferencesView: View {
                     .accessibilityHint(
                         provider == "zhipu" 
                             ? "输入智谱清言的模型名称，例如 glm-4v-flash"
-                            : "输入通义千问的模型名称，例如 qwen-turbo"
+                            : provider == "qwen"
+                            ? "输入通义千问的模型名称，例如 qwen-turbo"
+                            : "输入 Ollama 模型名称，例如 qwen2.5 或 llama3"
                     )
                     .onChange(of: aiModel) { _, _ in
                         backend.checkUnsavedChanges(
@@ -315,14 +365,20 @@ struct PreferencesView: View {
                     TextField(
                         provider == "zhipu" 
                             ? "例如: https://open.bigmodel.cn/api/paas/v4/..." 
-                            : "例如: https://dashscope.aliyuncs.com/api/v1/...",
+                            : provider == "qwen"
+                            ? "例如: https://dashscope.aliyuncs.com/api/v1/..."
+                            : "例如: http://localhost:11434/api/chat",
                         text: $apiUrl
                     )
                     .textFieldStyle(RoundedBorderTextFieldStyle())
                     .frame(width: LayoutConstants.textFieldWidth)
                     .focused($focusedField, equals: .apiUrl)
                     .accessibilityLabel("API 服务地址")
-                    .accessibilityHint("输入 AI 服务的 API 地址，必须是 HTTPS 协议")
+                    .accessibilityHint(
+                        provider == "ollama" 
+                            ? "输入 Ollama 服务地址，默认为 http://localhost:11434/api/chat"
+                            : "输入 AI 服务的 API 地址，必须是 HTTPS 协议"
+                    )
                     .onChange(of: apiUrl) { _, _ in
                         backend.checkUnsavedChanges(
                             apiKey: apiKey,
@@ -336,33 +392,47 @@ struct PreferencesView: View {
                     }
                 }
 
-                // API Key 字段
-                EnhancedFormField(
-                    label: "API Key:",
-                    errorMessage: backend.validationErrors["apiKey"],
-                    successMessage: backend.validationErrors["apiKey"] == nil && !apiKey.isEmpty && !apiKey.contains("<默认API Key>") ? "API Key 有效" : nil
-                ) {
-                    TextEditor(text: $apiKey)
-                        .frame(height: LayoutConstants.textEditorMinHeight)
-                        .border(
-                            backend.validationErrors["apiKey"] != nil ? DesignColors.error : DesignColors.border,
-                            width: LayoutConstants.borderWidth
-                        )
-                        .font(DesignFonts.input)
-                        .focused($focusedField, equals: .apiKey)
-                        .accessibilityLabel("API 密钥")
-                        .accessibilityHint("输入您的 API 密钥以访问 AI 服务")
-                        .onChange(of: apiKey) { _, _ in
-                            backend.checkUnsavedChanges(
-                                apiKey: apiKey,
-                                aiModel: aiModel,
-                                systemPrompt: systemPrompt,
-                                apiUrl: apiUrl,
-                                provider: provider,
-                                overlapRatio: overlapRatio
+                // API Key 字段（Ollama 不需要）
+                if provider != "ollama" {
+                    EnhancedFormField(
+                        label: "API Key:",
+                        errorMessage: backend.validationErrors["apiKey"],
+                        successMessage: backend.validationErrors["apiKey"] == nil && !apiKey.isEmpty && !apiKey.contains("<默认API Key>") ? "API Key 有效" : nil
+                    ) {
+                        TextEditor(text: $apiKey)
+                            .frame(height: LayoutConstants.textEditorMinHeight)
+                            .border(
+                                backend.validationErrors["apiKey"] != nil ? DesignColors.error : DesignColors.border,
+                                width: LayoutConstants.borderWidth
                             )
-                            backend.validateAPIKeyRealtime(apiKey)
-                        }
+                            .font(DesignFonts.input)
+                            .focused($focusedField, equals: .apiKey)
+                            .accessibilityLabel("API 密钥")
+                            .accessibilityHint("输入您的 API 密钥以访问 AI 服务")
+                            .onChange(of: apiKey) { _, _ in
+                                backend.checkUnsavedChanges(
+                                    apiKey: apiKey,
+                                    aiModel: aiModel,
+                                    systemPrompt: systemPrompt,
+                                    apiUrl: apiUrl,
+                                    provider: provider,
+                                    overlapRatio: overlapRatio
+                                )
+                                backend.validateAPIKeyRealtime(apiKey)
+                            }
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("API Key:")
+                            .font(DesignFonts.headline)
+                        Text("Ollama 本地模型无需 API Key")
+                            .font(DesignFonts.caption)
+                            .foregroundColor(.secondary)
+                            .padding(8)
+                            .frame(width: LayoutConstants.textFieldWidth, alignment: .leading)
+                            .background(Color.gray.opacity(0.05))
+                            .cornerRadius(6)
+                    }
                 }
 
                 Spacer()

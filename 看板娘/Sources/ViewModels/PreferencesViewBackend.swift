@@ -296,17 +296,19 @@ extension PreferencesViewBackend {
     ///   - apiKey: API密钥
     ///   - apiUrl: API地址
     ///   - aiModel: AI模型名称
+    ///   - provider: 服务提供商
     /// - Returns: 是否所有字段都有效
-    func validateAllFields(apiKey: String, apiUrl: String, aiModel: String) -> Bool {
+    func validateAllFields(apiKey: String, apiUrl: String, aiModel: String, provider: String = "zhipu") -> Bool {
         validationState.clearErrors()
         
-        let apiKeyValid = validationState.validateAPIKey(apiKey)
+        // Ollama 不需要验证 API Key
+        let apiKeyValid = provider == "ollama" ? true : validationState.validateAPIKey(apiKey)
         let apiUrlValid = validationState.validateAPIURL(apiUrl)
         let modelValid = validationState.validateModel(aiModel)
         
         // 更新验证错误字典
         validationErrors.removeAll()
-        if let error = validationState.apiKeyError {
+        if provider != "ollama", let error = validationState.apiKeyError {
             validationErrors["apiKey"] = error
         }
         if let error = validationState.apiUrlError {
@@ -373,18 +375,25 @@ extension PreferencesViewBackend {
         var updatedModel = currentModel
         
         if newProvider == "zhipu" {
-            if currentApiUrl.contains("dashscope") || currentApiUrl.contains("aliyuncs") || currentApiUrl.isEmpty {
+            if currentApiUrl.contains("dashscope") || currentApiUrl.contains("aliyuncs") || currentApiUrl.contains("localhost") || currentApiUrl.isEmpty {
                 updatedApiUrl = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
             }
-            if currentModel.isEmpty || currentModel.contains("qwen") {
+            if currentModel.isEmpty || currentModel.contains("qwen") || currentModel.contains("llama") || currentModel.contains("gemma") {
                 updatedModel = "glm-4v-flash"
             }
         } else if newProvider == "qwen" {
-            if currentApiUrl.contains("bigmodel") || currentApiUrl.isEmpty {
+            if currentApiUrl.contains("bigmodel") || currentApiUrl.contains("localhost") || currentApiUrl.isEmpty {
                 updatedApiUrl = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
             }
-            if currentModel.isEmpty || currentModel.contains("glm") {
+            if currentModel.isEmpty || currentModel.contains("glm") || currentModel.contains("llama") || currentModel.contains("gemma") {
                 updatedModel = "qwen-turbo"
+            }
+        } else if newProvider == "ollama" {
+            if currentApiUrl.contains("bigmodel") || currentApiUrl.contains("dashscope") || currentApiUrl.contains("aliyuncs") || currentApiUrl.isEmpty {
+                updatedApiUrl = "http://localhost:11434/api/chat"
+            }
+            if currentModel.isEmpty || currentModel.contains("glm") || currentModel.contains("qwen-turbo") {
+                updatedModel = "qwen2.5"
             }
         }
         
@@ -402,6 +411,7 @@ extension PreferencesViewBackend {
     ///   - apiKey: API密钥
     ///   - apiUrl: API地址
     ///   - aiModel: AI模型名称
+    ///   - provider: 服务提供商
     ///   - onSuccess: 保存成功回调
     ///   - onDismiss: 关闭窗口回调
     /// - Returns: 是否保存成功
@@ -409,11 +419,12 @@ extension PreferencesViewBackend {
         apiKey: String,
         apiUrl: String,
         aiModel: String,
+        provider: String = "zhipu",
         onSuccess: @escaping () -> Void,
         onDismiss: @escaping () -> Void
     ) -> Bool {
         // 验证所有字段
-        guard validateAllFields(apiKey: apiKey, apiUrl: apiUrl, aiModel: aiModel) else {
+        guard validateAllFields(apiKey: apiKey, apiUrl: apiUrl, aiModel: aiModel, provider: provider) else {
             let errors = validationErrors.values.joined(separator: "\n")
             errorAlertMessage = "请修正以下错误：\n\n\(errors)"
             showErrorAlert = true

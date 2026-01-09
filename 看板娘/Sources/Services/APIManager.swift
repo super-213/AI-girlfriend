@@ -17,7 +17,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     // MARK: - 配置存储
     
     /// AI模型名称
-    @AppStorage("ai_model") private var aiModel = "glm-4v-flash"
+    @AppStorage("aiModel") private var aiModel = "glm-4v-flash"
     
     /// API密钥
     @AppStorage("apiKey") private var apiKey = "<默认API Key>"
@@ -136,6 +136,17 @@ final class APIManager: NSObject, URLSessionDataDelegate {
                 ]
             ]
             
+        case "ollama":
+            payload = [
+                "model": aiModel,
+                "messages": messages,
+                "stream": true,
+                "options": [
+                    "temperature": 0.9,
+                    "top_p": 0.7
+                ]
+            ]
+            
         default:
             #if DEBUG
             print("不支持的 provider: \(provider)")
@@ -153,7 +164,11 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         request.httpMethod = "POST"
         request.httpBody = data
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        
+        // Ollama 不需要 Authorization header
+        if provider.lowercased() != "ollama" {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
         
         return request
     }
@@ -180,6 +195,13 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         print("接收到原始数据：\n\(rawText)")
         #endif
 
+        // Ollama 直接返回 JSON，不使用 SSE 格式
+        if provider.lowercased() == "ollama" {
+            parseOllamaResponse(rawText)
+            return
+        }
+        
+        // 智谱清言和通义千问使用 SSE 格式（data: 前缀）
         let lines = rawText
             .components(separatedBy: "\n")
             .filter { $0.starts(with: "data:") }
@@ -227,6 +249,40 @@ final class APIManager: NSObject, URLSessionDataDelegate {
                 #if DEBUG
                 print("JSON解析失败: \(trimmed)")
                 #endif
+            }
+        }
+    }
+    
+    /// 解析 Ollama 响应
+    /// - Parameter rawText: 原始响应文本
+    private func parseOllamaResponse(_ rawText: String) {
+        // Ollama 可能在一次回调中返回多个 JSON 对象，用换行符分隔
+        let lines = rawText.components(separatedBy: "\n").filter { !$0.isEmpty }
+        
+        for line in lines {
+            guard let jsonData = line.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else {
+                #if DEBUG
+                print("Ollama JSON解析失败: \(line)")
+                #endif
+                continue
+            }
+            
+            // 检查是否有错误
+            if let error = json["error"] as? String {
+                #if DEBUG
+                print("Ollama 错误: \(error)")
+                #endif
+                continue
+            }
+            
+            // 提取消息内容
+            if let message = json["message"] as? [String: Any],
+               let content = message["content"] as? String,
+               !content.isEmpty {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onReceive?(content)
+                }
             }
         }
     }
