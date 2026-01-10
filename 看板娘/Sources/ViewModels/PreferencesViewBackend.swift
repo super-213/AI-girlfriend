@@ -19,12 +19,6 @@ class PreferencesViewBackend: ObservableObject {
     /// 当前选中的设置分区
     @Published var selectedSection: PreferenceSection? = .style
     
-    /// 验证错误字典，键为字段名，值为错误消息
-    @Published var validationErrors: [String: String] = [:]
-    
-    /// 验证状态对象
-    @Published var validationState = ValidationState()
-    
     /// 是否显示成功消息
     @Published var showSuccessMessage: Bool = false
     
@@ -287,73 +281,7 @@ extension PreferencesViewBackend {
 }
 
 
-// MARK: - 验证
 
-/// 验证逻辑扩展
-extension PreferencesViewBackend {
-    /// 验证所有输入字段
-    /// - Parameters:
-    ///   - apiKey: API密钥
-    ///   - apiUrl: API地址
-    ///   - aiModel: AI模型名称
-    ///   - provider: 服务提供商
-    /// - Returns: 是否所有字段都有效
-    func validateAllFields(apiKey: String, apiUrl: String, aiModel: String, provider: String = "zhipu") -> Bool {
-        validationState.clearErrors()
-        
-        // Ollama 不需要验证 API Key
-        let apiKeyValid = provider == "ollama" ? true : validationState.validateAPIKey(apiKey)
-        let apiUrlValid = validationState.validateAPIURL(apiUrl)
-        let modelValid = validationState.validateModel(aiModel)
-        
-        // 更新验证错误字典
-        validationErrors.removeAll()
-        if provider != "ollama", let error = validationState.apiKeyError {
-            validationErrors["apiKey"] = error
-        }
-        if let error = validationState.apiUrlError {
-            validationErrors["apiUrl"] = error
-        }
-        if let error = validationState.modelError {
-            validationErrors["model"] = error
-        }
-        
-        return apiKeyValid && apiUrlValid && modelValid
-    }
-    
-    /// 实时验证API Key
-    /// - Parameter apiKey: 要验证的API Key
-    func validateAPIKeyRealtime(_ apiKey: String) {
-        validationState.validateAPIKey(apiKey)
-        if let error = validationState.apiKeyError {
-            validationErrors["apiKey"] = error
-        } else {
-            validationErrors.removeValue(forKey: "apiKey")
-        }
-    }
-    
-    /// 实时验证API URL
-    /// - Parameter apiUrl: 要验证的API URL
-    func validateAPIURLRealtime(_ apiUrl: String) {
-        validationState.validateAPIURL(apiUrl)
-        if let error = validationState.apiUrlError {
-            validationErrors["apiUrl"] = error
-        } else {
-            validationErrors.removeValue(forKey: "apiUrl")
-        }
-    }
-    
-    /// 实时验证模型名称
-    /// - Parameter aiModel: 要验证的模型名称
-    func validateModelRealtime(_ aiModel: String) {
-        validationState.validateModel(aiModel)
-        if let error = validationState.modelError {
-            validationErrors["model"] = error
-        } else {
-            validationErrors.removeValue(forKey: "model")
-        }
-    }
-}
 
 
 // MARK: - 提供商管理
@@ -423,14 +351,6 @@ extension PreferencesViewBackend {
         onSuccess: @escaping () -> Void,
         onDismiss: @escaping () -> Void
     ) -> Bool {
-        // 验证所有字段
-        guard validateAllFields(apiKey: apiKey, apiUrl: apiUrl, aiModel: aiModel, provider: provider) else {
-            let errors = validationErrors.values.joined(separator: "\n")
-            errorAlertMessage = "请修正以下错误：\n\n\(errors)"
-            showErrorAlert = true
-            return false
-        }
-        
         // 保存静态提示词
         saveStaticMessages()
         
@@ -464,8 +384,6 @@ extension PreferencesViewBackend {
     
     /// 取消更改，恢复到之前的值
     func cancelChanges() {
-        validationErrors.removeAll()
-        validationState.clearErrors()
         hasUnsavedChanges = false
         staticMessages = tempData.staticMessages
     }

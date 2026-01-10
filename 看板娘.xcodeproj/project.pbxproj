@@ -9,7 +9,8 @@
 /* Begin PBXBuildFile section */
 		6231AD972D3A4352009BE5ED /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6231AD902D3A3C2A009BE5ED /* AVFoundation.framework */; };
 		6231AD982D3A4352009BE5ED /* AVKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6231AD8E2D3A3BCA009BE5ED /* AVKit.framework */; };
-		629E1FF52D7861E300AEC753 /* SDWebImageSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 629E1FF42D7861E300AEC753 /* SDWebImageSwiftUI */; };
+		6239CB8D2F12438C00BCB222 /* SDWebImageSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 6239CB8C2F12438C00BCB222 /* SDWebImageSwiftUI */; };
+		6239CB8F2F1243AB00BCB222 /* SDWebImageSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 6239CB8E2F1243AB00BCB222 /* SDWebImageSwiftUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -32,6 +33,19 @@
 /* Begin PBXFileReference section */
 		6231AD8E2D3A3BCA009BE5ED /* AVKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVKit.framework; path = System/Library/Frameworks/AVKit.framework; sourceTree = SDKROOT; };
 		6231AD902D3A3C2A009BE5ED /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
+		6239CB792F12430E00BCB222 /* Indicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Indicator.swift; sourceTree = "<group>"; };
+		6239CB7B2F12430E00BCB222 /* Transition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transition.swift; sourceTree = "<group>"; };
+		6239CB7D2F12430E00BCB222 /* .gitkeep */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitkeep; sourceTree = "<group>"; };
+		6239CB7E2F12430E00BCB222 /* AnimatedImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnimatedImage.swift; sourceTree = "<group>"; };
+		6239CB7F2F12430E00BCB222 /* Image.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Image.swift; sourceTree = "<group>"; };
+		6239CB802F12430E00BCB222 /* ImageManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageManager.swift; sourceTree = "<group>"; };
+		6239CB812F12430E00BCB222 /* ImagePlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePlayer.swift; sourceTree = "<group>"; };
+		6239CB822F12430E00BCB222 /* ImageViewWrapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageViewWrapper.swift; sourceTree = "<group>"; };
+		6239CB832F12430E00BCB222 /* SDWebImageSwiftUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SDWebImageSwiftUI.swift; sourceTree = "<group>"; };
+		6239CB842F12430E00BCB222 /* WebImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebImage.swift; sourceTree = "<group>"; };
+		6239CB862F12430E00BCB222 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		6239CB872F12430E00BCB222 /* SDWebImageSwiftUI.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SDWebImageSwiftUI.h; sourceTree = "<group>"; };
+		6239CB892F12430E00BCB222 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		6248B38D2D3A2CCE00446FCE /* SDWebImageSwiftUI-master */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = "SDWebImageSwiftUI-master"; path = "../库/SDWebImageSwiftUI-master"; sourceTree = "<group>"; };
 		62A3BF012D19899F003DB0DF /* 看板娘.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "看板娘.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		62A3BF122D1989A0003DB0DF /* 看板娘Tests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "看板娘Tests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -74,7 +88,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				629E1FF52D7861E300AEC753 /* SDWebImageSwiftUI in Frameworks */,
+				6239CB8F2F1243AB00BCB222 /* SDWebImageSwiftUI in Frameworks */,
+				6239CB8D2F12438C00BCB222 /* SDWebImageSwiftUI in Frameworks */,
 				6231AD982D3A4352009BE5ED /* AVKit.framework in Frameworks */,
 				6231AD972D3A4352009BE5ED /* AVFoundation.framework in Frameworks */,
 			);
@@ -97,6 +112,67 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		6239CB7A2F12430E00BCB222 /* Indicator */ = {
+			isa = PBXGroup;
+			children = (
+				6239CB792F12430E00BCB222 /* Indicator.swift */,
+			);
+			path = Indicator;
+			sourceTree = "<group>";
+		};
+		6239CB7C2F12430E00BCB222 /* Transition */ = {
+			isa = PBXGroup;
+			children = (
+				6239CB7B2F12430E00BCB222 /* Transition.swift */,
+			);
+			path = Transition;
+			sourceTree = "<group>";
+		};
+		6239CB852F12430E00BCB222 /* Classes */ = {
+			isa = PBXGroup;
+			children = (
+				6239CB7A2F12430E00BCB222 /* Indicator */,
+				6239CB7C2F12430E00BCB222 /* Transition */,
+				6239CB7D2F12430E00BCB222 /* .gitkeep */,
+				6239CB7E2F12430E00BCB222 /* AnimatedImage.swift */,
+				6239CB7F2F12430E00BCB222 /* Image.swift */,
+				6239CB802F12430E00BCB222 /* ImageManager.swift */,
+				6239CB812F12430E00BCB222 /* ImagePlayer.swift */,
+				6239CB822F12430E00BCB222 /* ImageViewWrapper.swift */,
+				6239CB832F12430E00BCB222 /* SDWebImageSwiftUI.swift */,
+				6239CB842F12430E00BCB222 /* WebImage.swift */,
+			);
+			path = Classes;
+			sourceTree = "<group>";
+		};
+		6239CB882F12430E00BCB222 /* Module */ = {
+			isa = PBXGroup;
+			children = (
+				6239CB862F12430E00BCB222 /* Info.plist */,
+				6239CB872F12430E00BCB222 /* SDWebImageSwiftUI.h */,
+			);
+			path = Module;
+			sourceTree = "<group>";
+		};
+		6239CB8A2F12430E00BCB222 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				6239CB892F12430E00BCB222 /* PrivacyInfo.xcprivacy */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		6239CB8B2F12430E00BCB222 /* SDWebImageSwiftUI */ = {
+			isa = PBXGroup;
+			children = (
+				6239CB852F12430E00BCB222 /* Classes */,
+				6239CB882F12430E00BCB222 /* Module */,
+				6239CB8A2F12430E00BCB222 /* Resources */,
+			);
+			name = SDWebImageSwiftUI;
+			path = "../库/SDWebImageSwiftUI-master/SDWebImageSwiftUI";
+			sourceTree = "<group>";
+		};
 		62A3BEF82D19899F003DB0DF = {
 			isa = PBXGroup;
 			children = (
@@ -122,6 +198,7 @@
 			isa = PBXGroup;
 			children = (
 				62C27E482F0FE00B006D6809 /* SDWebImageSwiftUI */,
+				6239CB8B2F12430E00BCB222 /* SDWebImageSwiftUI */,
 				6231AD902D3A3C2A009BE5ED /* AVFoundation.framework */,
 				6231AD8E2D3A3BCA009BE5ED /* AVKit.framework */,
 				6248B38D2D3A2CCE00446FCE /* SDWebImageSwiftUI-master */,
@@ -210,7 +287,8 @@
 			);
 			name = "看板娘";
 			packageProductDependencies = (
-				629E1FF42D7861E300AEC753 /* SDWebImageSwiftUI */,
+				6239CB8C2F12438C00BCB222 /* SDWebImageSwiftUI */,
+				6239CB8E2F1243AB00BCB222 /* SDWebImageSwiftUI */,
 			);
 			productName = "看板娘";
 			productReference = 62A3BF012D19899F003DB0DF /* 看板娘.app */;
@@ -664,7 +742,11 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		629E1FF42D7861E300AEC753 /* SDWebImageSwiftUI */ = {
+		6239CB8C2F12438C00BCB222 /* SDWebImageSwiftUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SDWebImageSwiftUI;
+		};
+		6239CB8E2F1243AB00BCB222 /* SDWebImageSwiftUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SDWebImageSwiftUI;
 		};

@@ -109,7 +109,8 @@ class PetViewBackend: ObservableObject {
         guard !userInput.isEmpty else { return }
         
         if userInput.contains("我想听") || userInput.contains("播放") || userInput.contains("来一首") {
-            playSongInAppleMusic(songName: extractSongName(from: userInput))
+            let songName = MusicPlayerService.extractSongName(from: userInput)
+            streamedResponse = MusicPlayerService.playSong(named: songName)
             userInput = ""
             return
         }
@@ -137,8 +138,8 @@ class PetViewBackend: ObservableObject {
         currentGif = currentCharacter.clickGif
         isReacting = true
         
-        // 获取GIF实际时长
-        let calculatedDuration = getGifDuration(gifName: currentCharacter.clickGif)
+        // 使用GIF时长计算服务
+        let calculatedDuration = GIFDurationCalculator.getDuration(for: currentCharacter.clickGif)
         
         // 减少10%的时长，让切换更及时（避免GIF已播完但还在等待的情况）
         let duration = calculatedDuration * 0.9
@@ -154,117 +155,6 @@ class PetViewBackend: ObservableObject {
             #if DEBUG
             print("切换回静止状态")
             #endif
-        }
-    }
-    
-    // MARK: - GIF时长计算
-    
-    /// 计算GIF动画的实际播放时长
-    /// - Parameter gifName: GIF文件名
-    /// - Returns: GIF的总播放时长（秒）
-    private func getGifDuration(gifName: String) -> TimeInterval {
-        guard let gifUrl = getGifUrl(gifName: gifName) else {
-            #if DEBUG
-            print("无法获取GIF URL: \(gifName)")
-            #endif
-            return 2.0
-        }
-        
-        #if DEBUG
-        print("GIF路径: \(gifUrl.path)")
-        #endif
-        
-        guard let imageSource = CGImageSourceCreateWithURL(gifUrl as CFURL, nil) else {
-            #if DEBUG
-            print("无法创建ImageSource")
-            #endif
-            return 2.0
-        }
-        
-        let frameCount = CGImageSourceGetCount(imageSource)
-        #if DEBUG
-        print("总帧数: \(frameCount)")
-        #endif
-        
-        var totalDuration: TimeInterval = 0
-        
-        for i in 0..<frameCount {
-            guard let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, i, nil) as? [String: Any],
-                  let gifInfo = properties[kCGImagePropertyGIFDictionary as String] as? [String: Any] else {
-                #if DEBUG
-                print("第\(i)帧无法读取属性")
-                #endif
-                // 如果无法读取属性，使用默认帧延迟
-                totalDuration += 0.1
-                continue
-            }
-            
-            // 获取每帧的延迟时间
-            var frameDuration: TimeInterval = 0.1 // 默认0.1秒
-            
-            // 优先使用 UnclampedDelayTime
-            if let unclampedDelay = gifInfo[kCGImagePropertyGIFUnclampedDelayTime as String] as? TimeInterval,
-               unclampedDelay > 0 {
-                frameDuration = unclampedDelay
-            } else if let delay = gifInfo[kCGImagePropertyGIFDelayTime as String] as? TimeInterval,
-                      delay > 0 {
-                frameDuration = delay
-            }
-            
-            // 某些GIF编码器会设置非常小的延迟（如0.02秒），这会导致播放过快
-            // 将最小延迟限制为0.02秒
-            if frameDuration < 0.02 {
-                frameDuration = 0.1
-            }
-            
-            totalDuration += frameDuration
-            
-            #if DEBUG
-            print("第\(i)帧延迟: \(frameDuration)秒")
-            #endif
-        }
-        
-        #if DEBUG
-        print("总时长: \(totalDuration)秒")
-        #endif
-        
-        // 如果计算出的时长太短（小于0.5秒），返回默认值
-        return totalDuration >= 0.5 ? totalDuration : 2.0
-    }
-    
-    /// 获取GIF文件的URL
-    /// - Parameter gifName: GIF文件名或完整路径
-    /// - Returns: GIF文件的URL，如果找不到则返回nil
-    private func getGifUrl(gifName: String) -> URL? {
-        if gifName.hasPrefix("/") {
-            // 自定义角色：从文件系统加载
-            return URL(fileURLWithPath: gifName)
-        } else {
-            // 内置角色：从Bundle加载
-            // 先在Bundle中查找
-            if let url = Bundle.main.url(forResource: gifName, withExtension: nil) {
-                return url
-            }
-            
-            // 去掉.gif后缀再查找
-            let nameWithoutExtension = gifName.replacingOccurrences(of: ".gif", with: "")
-            if let url = Bundle.main.url(forResource: nameWithoutExtension, withExtension: "gif") {
-                return url
-            }
-            
-            // 在Resources/Animations子目录中查找
-            if let url = Bundle.main.url(forResource: gifName, withExtension: nil, subdirectory: "Resources/Animations") {
-                return url
-            }
-            
-            if let url = Bundle.main.url(forResource: nameWithoutExtension, withExtension: "gif", subdirectory: "Resources/Animations") {
-                return url
-            }
-            
-            #if DEBUG
-            print("尝试了所有路径都找不到: \(gifName)")
-            #endif
-            return nil
         }
     }
     
@@ -334,7 +224,7 @@ class PetViewBackend: ObservableObject {
         periodicAutoActionTimer = nil
     }
     
-    // MARK: - 音乐播放控制
+    // MARK: - 内存管理
     
     /// 启动定期内存清理（每5分钟）
     private func startPeriodicMemoryCleanup() {
@@ -346,44 +236,5 @@ class PetViewBackend: ObservableObject {
                 print("执行定期内存清理")
                 #endif
             }
-    }
-    
-    /// 从用户输入中提取歌曲名称
-    /// - Parameter input: 用户输入的文本
-    /// - Returns: 提取出的歌曲名称
-    private func extractSongName(from input: String) -> String {
-        let keywords = ["我想听", "播放", "来一首", "来点", "帮我放"]
-        var result = input
-        
-        for keyword in keywords {
-            result = result.replacingOccurrences(of: keyword, with: "")
-        }
-
-        // 去除“的歌”等尾巴
-        result = result.replacingOccurrences(of: "的歌", with: "")
-        
-        // 去除前后空格
-        return result.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-    
-    /// 在Apple Music中播放指定歌曲
-    /// - Parameter songName: 歌曲名称
-    private func playSongInAppleMusic(songName: String) {
-        guard let encoded = songName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
-            streamedResponse = "歌名好像有点奇怪呢～(｡•́︿•̀｡)"
-            return
-        }
-        
-        // 尝试打开 Apple Music 应用
-        if let appUrl = URL(string: "music://music.apple.com/search?term=\(encoded)"),
-           NSWorkspace.shared.urlForApplication(toOpen: appUrl) != nil {
-            NSWorkspace.shared.open(appUrl)
-            streamedResponse = "已经帮指挥官打开《\(songName)》的搜索啦～记得点击播放哦 (๑ᴖ◡ᴖ๑)♪\n布偶熊·觅语随时陪伴指挥官哦～"
-        } else if let webUrl = URL(string: "https://music.apple.com/search?term=\(encoded)") {
-            NSWorkspace.shared.open(webUrl)
-            streamedResponse = "已经帮指挥官打开《\(songName)》的搜索啦～记得点击播放哦 (๑ᴖ◡ᴖ๑)♪\n布偶熊·觅语随时陪伴指挥官哦～"
-        } else {
-            streamedResponse = "呜～好像打不开音乐应用呢 (｡•́︿•̀｡)"
-        }
     }
 }
