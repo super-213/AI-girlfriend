@@ -231,6 +231,7 @@ class PetViewBackend: ObservableObject {
         memoryCleanupTimer = Timer.publish(every: 300, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
+                _ = self // 知道 self 被捕获了
                 MemoryOptimizer.shared.periodicCleanup()
                 #if DEBUG
                 print("执行定期内存清理")

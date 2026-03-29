@@ -48,6 +48,8 @@ struct PreferencesView: View {
             } detail: {
                 detailContent
             }
+            .tint(DesignColors.primary)
+            .accentColor(DesignColors.primary)
             .navigationSplitViewStyle(.balanced)
             .frame(minWidth: 600, idealWidth: 650, maxWidth: 800, minHeight: 400, idealHeight: 450, maxHeight: 600)
             .onAppear(perform: handleAppear)

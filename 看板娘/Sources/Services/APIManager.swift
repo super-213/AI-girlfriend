@@ -125,15 +125,8 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         case "qwen":
             payload = [
                 "model": aiModel,
-                "input": [
-                    "messages": messages
-                ],
-                "parameters": [
-                    "top_p": 0.7,
-                    "temperature": 0.9,
-                    "stream": true,
-                    "type": "json_object"
-                ]
+                "messages": messages,
+                "stream": true
             ]
             
         case "ollama":
@@ -155,8 +148,18 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         }
         
         // 构造请求
+        var finalApiUrl = apiUrl
+        if provider.lowercased() == "qwen",
+           finalApiUrl.contains("dashscope.aliyuncs.com/compatible-mode/v1"),
+           !finalApiUrl.contains("/chat/completions") {
+            if finalApiUrl.hasSuffix("/") {
+                finalApiUrl.removeLast()
+            }
+            finalApiUrl += "/chat/completions"
+        }
+        
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let url = URL(string: apiUrl) else {
+              let url = URL(string: finalApiUrl) else {
             return nil
         }
 
@@ -179,6 +182,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     private func cancelPreviousTask() {
         task?.cancel()
         task = nil
+        
     }
 
     // MARK: - URL 会话数据委托
@@ -188,20 +192,33 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     ///   - session: URL会话
     ///   - dataTask: 数据任务
     ///   - data: 接收到的数据
-    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive data: Data
+    ) {
         guard let rawText = String(data: data, encoding: .utf8) else { return }
 
         #if DEBUG
         print("接收到原始数据：\n\(rawText)")
         #endif
-
-        // Ollama 直接返回 JSON，不使用 SSE 格式
-        if provider.lowercased() == "ollama" {
-            parseOllamaResponse(rawText)
-            return
-        }
         
-        // 智谱清言和通义千问使用 SSE 格式（data: 前缀）
+        switch provider.lowercased() {
+        case "zhipu":
+            parseSSEResponse(rawText)
+
+        case "qwen":
+            parseQwenResponse(rawText)
+
+        case "ollama":
+            parseOllamaResponse(rawText)
+
+        default:
+            break
+        }
+    }
+    /// 解析智谱的SSE逻辑
+    private func parseSSEResponse(_ rawText: String) {
         let lines = rawText
             .components(separatedBy: "\n")
             .filter { $0.starts(with: "data:") }
@@ -211,44 +228,16 @@ final class APIManager: NSObject, URLSessionDataDelegate {
 
             guard trimmed != "[DONE]" else { continue }
 
-            #if DEBUG
-            print("解码前：\(trimmed)")
-            #endif
+            guard let jsonData = trimmed.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
+            else { continue }
 
-            if let jsonData = trimmed.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
-
-                switch provider.lowercased() {
-                case "zhipu":
-                    if let choices = json["choices"] as? [[String: Any]],
-                       let delta = choices.first?["delta"] as? [String: Any],
-                       let content = delta["content"] as? String {
-                        DispatchQueue.main.async { [weak self] in
-                            self?.onReceive?(content)
-                        }
-                    }
-
-                case "qwen":
-                    if let choices = json["choices"] as? [[String: Any]],
-                       let delta = choices.first?["delta"] as? [String: Any],
-                       let content = delta["content"] as? String,
-                       !content.isEmpty
-                    {
-                        DispatchQueue.main.async { [weak self] in
-                            self?.onReceive?(content)
-                        }
-                    }
-
-                default:
-                    #if DEBUG
-                    print("未知 provider: \(provider)")
-                    #endif
+            if let choices = json["choices"] as? [[String: Any]],
+               let delta = choices.first?["delta"] as? [String: Any],
+               let content = delta["content"] as? String {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onReceive?(content)
                 }
-
-            } else {
-                #if DEBUG
-                print("JSON解析失败: \(trimmed)")
-                #endif
             }
         }
     }
@@ -286,6 +275,59 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             }
         }
     }
+    
+    /// 解析通义千问（OpenAI-compatible, SSE stream）
+    private func parseQwenResponse(_ rawText: String) {
+        let lines = rawText
+            .components(separatedBy: "\n")
+            .filter { !$0.isEmpty }
+
+        for line in lines {
+            // 处理 SSE 格式：剥离 "data: " 前缀
+            var jsonString = line
+            if line.starts(with: "data:") {
+                jsonString = String(line.dropFirst(5).trimmingCharacters(in: .whitespaces))
+            }
+            
+            // 跳过 [DONE] 标记
+            guard jsonString != "[DONE]" else {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onComplete?()
+                }
+                continue
+            }
+            
+            guard let jsonData = jsonString.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+                  let choices = json["choices"] as? [[String: Any]],
+                  let first = choices.first
+            else {
+                #if DEBUG
+                print("Qwen JSON解析失败: \(line)")
+                #endif
+                continue
+            }
+
+            // 结束
+            if let finish = first["finish_reason"] as? String,
+               finish == "stop" {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onComplete?()
+                }
+                return
+            }
+
+            // 内容（String）
+            if let delta = first["delta"] as? [String: Any],
+               let content = delta["content"] as? String,
+               !content.isEmpty {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onReceive?(content)
+                }
+            }
+        }
+    }
+
     
     /// 任务完成时的回调
     /// - Parameters:

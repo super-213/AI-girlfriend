@@ -310,11 +310,15 @@ extension PreferencesViewBackend {
                 updatedModel = "glm-4v-flash"
             }
         } else if newProvider == "qwen" {
-            if currentApiUrl.contains("bigmodel") || currentApiUrl.contains("localhost") || currentApiUrl.isEmpty {
-                updatedApiUrl = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
+            if currentApiUrl.contains("bigmodel")
+                || currentApiUrl.contains("localhost")
+                || currentApiUrl.isEmpty
+                || (currentApiUrl.contains("dashscope.aliyuncs.com/compatible-mode/v1")
+                    && !currentApiUrl.contains("/chat/completions")) {
+                updatedApiUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
             }
             if currentModel.isEmpty || currentModel.contains("glm") || currentModel.contains("llama") || currentModel.contains("gemma") {
-                updatedModel = "qwen-turbo"
+                updatedModel = "qwen-plus"
             }
         } else if newProvider == "ollama" {
             if currentApiUrl.contains("bigmodel") || currentApiUrl.contains("dashscope") || currentApiUrl.contains("aliyuncs") || currentApiUrl.isEmpty {

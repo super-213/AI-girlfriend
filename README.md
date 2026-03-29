@@ -301,8 +301,8 @@ aiModel: "glm-4v-flash"
 #### 2. 通义千问 (Qwen)
 ```swift
 provider: "qwen"
-apiUrl: "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
-aiModel: "qwen-turbo"
+apiUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+aiModel: "qwen-plus"
 ```
 
 #### 3. Ollama (本地)
