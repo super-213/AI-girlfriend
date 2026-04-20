@@ -14,6 +14,7 @@ import Combine
 /// 偏好设置视图的后端逻辑控制器
 /// 负责管理设置验证、角色绑定和数据持久化
 class PreferencesViewBackend: ObservableObject {
+    private static let currentAgentTemplateVersion = 2
     // MARK: - 属性
     
     /// 当前选中的设置分区
@@ -44,6 +45,20 @@ class PreferencesViewBackend: ObservableObject {
     
     /// 导入错误消息
     @Published var importErrorMessage: String = ""
+
+    // MARK: - Agent/Skill 文件管理
+    
+    /// 当前 agent.md 文件
+    @Published var agentFile: AgentFile? = nil
+    
+    /// 已添加的 skill.md 文件列表
+    @Published var skillFiles: [SkillFile] = []
+    
+    /// 技能文件操作错误提示
+    @Published var showSkillFileError: Bool = false
+    
+    /// 技能文件操作错误信息
+    @Published var skillFileErrorMessage: String = ""
     
     // MARK: - 取消操作的临时存储
     
@@ -63,6 +78,9 @@ class PreferencesViewBackend: ObservableObject {
         self.petViewBackend = petViewBackend
         loadCustomCharacters()
         loadStaticMessages()
+        loadAgentFile()
+        loadSkillFiles()
+        upgradeAgentTemplateIfNeeded()
     }
     
     // MARK: - 静态提示词管理
@@ -206,6 +224,262 @@ class PreferencesViewBackend: ObservableObject {
     }
 }
 
+// MARK: - Agent/Skill 文件管理
+
+extension PreferencesViewBackend {
+    private func agentSkillsDirectory() throws -> URL {
+        let fileManager = FileManager.default
+        guard let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            throw NSError(domain: "AgentSkills", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法访问应用支持目录"])
+        }
+        let appDirectory = appSupportURL.appendingPathComponent(Bundle.main.bundleIdentifier ?? "PetApp")
+        let agentSkillsURL = appDirectory.appendingPathComponent("AgentSkills")
+        if !fileManager.fileExists(atPath: agentSkillsURL.path) {
+            try fileManager.createDirectory(at: agentSkillsURL, withIntermediateDirectories: true)
+        }
+        return agentSkillsURL
+    }
+    
+    private func loadAgentFile() {
+        guard let data = UserDefaults.standard.data(forKey: AgentSkillStorageKeys.agentFile),
+              let saved = try? JSONDecoder().decode(AgentFile.self, from: data) else {
+            agentFile = nil
+            return
+        }
+        
+        if FileManager.default.fileExists(atPath: saved.path) {
+            agentFile = saved
+        } else {
+            agentFile = nil
+            UserDefaults.standard.removeObject(forKey: AgentSkillStorageKeys.agentFile)
+        }
+    }
+    
+    private func saveAgentFile() {
+        if let agentFile = agentFile, let data = try? JSONEncoder().encode(agentFile) {
+            UserDefaults.standard.set(data, forKey: AgentSkillStorageKeys.agentFile)
+        } else {
+            UserDefaults.standard.removeObject(forKey: AgentSkillStorageKeys.agentFile)
+        }
+    }
+    
+    private func loadSkillFiles() {
+        guard let data = UserDefaults.standard.data(forKey: AgentSkillStorageKeys.skillFiles),
+              let saved = try? JSONDecoder().decode([SkillFile].self, from: data) else {
+            skillFiles = []
+            return
+        }
+        
+        let fileManager = FileManager.default
+        let filtered = saved.filter { fileManager.fileExists(atPath: $0.path) }
+        skillFiles = filtered
+        
+        if filtered.count != saved.count {
+            saveSkillFiles()
+        }
+    }
+    
+    private func saveSkillFiles() {
+        if let data = try? JSONEncoder().encode(skillFiles) {
+            UserDefaults.standard.set(data, forKey: AgentSkillStorageKeys.skillFiles)
+        }
+    }
+    
+    func importAgentFile(from url: URL) -> Bool {
+        do {
+            let agentDir = try agentSkillsDirectory()
+            let destination = agentDir.appendingPathComponent("agent.md")
+            let fileManager = FileManager.default
+            
+            if fileManager.fileExists(atPath: destination.path) {
+                try fileManager.removeItem(at: destination)
+            }
+            try fileManager.copyItem(at: url, to: destination)
+            
+            agentFile = AgentFile(
+                name: "agent.md",
+                path: destination.path,
+                updatedAt: Date()
+            )
+            saveAgentFile()
+            return true
+        } catch {
+            skillFileErrorMessage = "导入 agent.md 失败：\(error.localizedDescription)"
+            showSkillFileError = true
+            return false
+        }
+    }
+    
+    func generateDefaultAgentFile() -> Bool {
+        let content = """
+        # Agent 指令规范
+        
+        ## 你的角色
+        你是一个智能任务执行助手，可以执行系统命令、调用预置技能、或直接回答问题。
+        
+        ## 交互模式
+        
+        你支持三种交互方式：
+        
+        ### 1. 执行系统命令
+        当需要操作文件系统、运行程序时，使用命令格式：
+        [命令] ls -la
+        
+        ### 2. 调用预置技能
+        当用户输入包含 "调用 XXX skill" 时，系统会自动加载对应技能说明。
+        你根据加载的技能说明执行任务，完成后回复：
+        [完成] 任务描述
+        
+        ### 3. 直接回答
+        当问题不需要命令或技能时，直接给出答案，最后标记：
+        [完成] 回答内容
+        
+        ## 输出格式规范
+        
+        系统命令：[命令] XXX
+        任务完成：[完成] XXX
+        技能调用：由用户触发（用户输入 "调用 XXX skill"）
+        
+        ## 严格禁止
+        
+        - 不要解释你的思考过程
+        - 不要添加额外说明或注释
+        - 不要使用代码块包裹命令
+        - 不要一次性输出多条命令
+        - 不要执行危险命令（如 rm -rf /）
+        
+        ## 工作流程
+        
+        1. 接收用户输入
+        2. 检测是否包含 "调用 XXX skill"
+        3. 如有，系统自动加载 skills/XXX/XXX.md 并注入上下文
+        4. 根据上下文（Agent.md + skill.md）生成回复
+        5. 使用正确格式输出（[命令]/[完成]）
+
+        ## 执行规则
+        
+        - 需要本地操作时，直接输出：命令: <command>
+        - 权限确认由客户端弹窗处理，不要声明“没有权限/无法访问”
+        - 只有在命令执行结果明确失败（Permission denied）时才说明权限问题
+        - 不要用委婉话术替代命令输出
+        
+        ## 示例
+        
+        ### 示例 1：技能调用
+        用户：调用 weather skill 查询北京天气
+        AI：[完成] 北京今天天气：晴，18°C ~ 26°C，适合户外活动
+        
+        ### 示例 2：命令执行
+        用户：查看当前目录有哪些文件
+        AI：命令: ls -la
+        用户：[执行完成] ...
+        AI：完成: 当前目录共有 5 个文件
+        
+        ### 示例 3：直接回答
+        用户：Python 中如何定义函数？
+        AI：完成: 使用 def 关键字：def 函数名 (参数): 缩进代码块
+        
+        ## 安全原则
+        
+        - 不执行需要用户交互的命令（如 vi、python 交互模式）
+        - 不执行可能破坏系统的命令（如格式化、删除系统文件）
+        - 敏感操作前先向用户确认
+        - 优先使用只读命令（如 ls、cat、pwd）
+        - 命令失败时分析原因并给出替代方案
+        
+        ## 开始工作
+        
+        等待用户指令，根据任务类型选择最合适的交互方式。
+        """
+        
+        do {
+            let agentDir = try agentSkillsDirectory()
+            let destination = agentDir.appendingPathComponent("agent.md")
+            let fileManager = FileManager.default
+            
+            if fileManager.fileExists(atPath: destination.path) {
+                try fileManager.removeItem(at: destination)
+            }
+            try content.write(to: destination, atomically: true, encoding: .utf8)
+            
+            agentFile = AgentFile(
+                name: "agent.md",
+                path: destination.path,
+                updatedAt: Date()
+            )
+            saveAgentFile()
+            UserDefaults.standard.set(Self.currentAgentTemplateVersion, forKey: AgentSkillStorageKeys.agentTemplateVersion)
+            return true
+        } catch {
+            skillFileErrorMessage = "生成 agent.md 失败：\(error.localizedDescription)"
+            showSkillFileError = true
+            return false
+        }
+    }
+
+    private func upgradeAgentTemplateIfNeeded() {
+        guard agentFile != nil else { return }
+        let storedVersion = UserDefaults.standard.integer(forKey: AgentSkillStorageKeys.agentTemplateVersion)
+        if storedVersion < Self.currentAgentTemplateVersion {
+            _ = generateDefaultAgentFile()
+        }
+    }
+    
+    func removeAgentFile() {
+        guard let agentFile = agentFile else { return }
+        try? FileManager.default.removeItem(at: URL(fileURLWithPath: agentFile.path))
+        self.agentFile = nil
+        saveAgentFile()
+    }
+    
+    func importSkillFiles(from urls: [URL]) -> Int {
+        guard !urls.isEmpty else { return 0 }
+        var imported = 0
+        
+        do {
+            let agentDir = try agentSkillsDirectory()
+            let fileManager = FileManager.default
+            
+            for url in urls {
+                let baseName = url.deletingPathExtension().lastPathComponent
+                let safeName = baseName.isEmpty ? "skill" : baseName
+                var destination = agentDir.appendingPathComponent("\(safeName).md")
+                
+                if fileManager.fileExists(atPath: destination.path) {
+                    let timestamp = Int(Date().timeIntervalSince1970)
+                    destination = agentDir.appendingPathComponent("\(safeName)_\(timestamp).md")
+                }
+                
+                try fileManager.copyItem(at: url, to: destination)
+                
+                let newSkill = SkillFile(
+                    id: UUID(),
+                    name: destination.lastPathComponent,
+                    path: destination.path,
+                    addedAt: Date()
+                )
+                skillFiles.append(newSkill)
+                imported += 1
+            }
+            
+            saveSkillFiles()
+            return imported
+        } catch {
+            skillFileErrorMessage = "导入 skill.md 失败：\(error.localizedDescription)"
+            showSkillFileError = true
+            return imported
+        }
+    }
+    
+    func deleteSkillFile(at index: Int) {
+        guard index < skillFiles.count else { return }
+        let skill = skillFiles[index]
+        try? FileManager.default.removeItem(at: URL(fileURLWithPath: skill.path))
+        skillFiles.remove(at: index)
+        saveSkillFiles()
+    }
+}
+
 
 // MARK: - 偏好设置分区枚举
 
@@ -216,6 +490,7 @@ extension PreferencesViewBackend {
         case style = "风格"
         case model = "模型设置"
         case layout = "布局"
+        case skills = "技能"
         case characterBinding = "角色绑定"
         case about = "关于"
         
@@ -226,6 +501,7 @@ extension PreferencesViewBackend {
             case .style: return "person.crop.circle"
             case .model: return "network"
             case .layout: return "rectangle.stack"
+            case .skills: return "hammer.circle"
             case .characterBinding: return "person.2.crop.square.stack"
             case .about: return "info.circle"
             }

@@ -131,22 +131,11 @@ struct EnhancedButtonStyle: ViewModifier {
 
 // MARK: - 平滑滚动样式
 
-/// 提供带有自定义滚动条样式的平滑滚动的视图修饰器
-/// 隐藏默认滚动条并显示细圆角的自定义滚动条
+/// 提供平滑滚动行为的视图修饰器
+/// 使用系统默认滚动条
 struct SmoothScrollStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .scrollIndicators(.hidden)
-            .overlay(
-                // 自定义滚动条覆盖层
-                GeometryReader { geometry in
-                    Rectangle()
-                        .fill(DesignColors.border)
-                        .frame(width: 4)
-                        .cornerRadius(2)
-                        .padding(.trailing, 2)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                }
-            )
+            .scrollIndicators(.automatic)
     }
 }

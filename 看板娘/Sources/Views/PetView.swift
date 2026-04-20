@@ -58,6 +58,16 @@ struct PetView: View {
         .onDisappear {
             petViewBackend.onDisappear()
         }
+        .alert("执行命令确认", isPresented: $petViewBackend.showCommandConfirm) {
+            Button("执行", role: .none) {
+                petViewBackend.confirmAndRunCommand()
+            }
+            Button("取消", role: .cancel) {
+                petViewBackend.cancelPendingCommand()
+            }
+        } message: {
+            Text("将执行命令：\(petViewBackend.pendingCommand)")
+        }
     }
     
     // MARK: - 子视图
@@ -81,6 +91,7 @@ struct PetView: View {
             Text(petViewBackend.streamedResponse)
                 .font(DesignFonts.body)
                 .lineSpacing(4)
+                .textSelection(.enabled)
                 .padding(DesignSpacing.md)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .transition(.opacity.combined(with: .move(edge: .top)))

@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AppKit
 
 @main
 struct PetApp: App {
@@ -58,9 +59,14 @@ struct PetApp: App {
 
 /// 应用程序委托，负责窗口配置和生命周期管理
 class AppDelegate: NSObject, NSApplicationDelegate {
+    private var localKeyMonitor: Any?
+    private var globalKeyMonitor: Any?
+    private let dialogWindowController = DialogWindowController.shared
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 配置主窗口
         configureMainWindow()
+        registerDialogHotkey()
         
         // 隐藏 Dock 图标（可选，如果想要纯悬浮效果）
         // NSApp.setActivationPolicy(.accessory)
@@ -68,6 +74,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func applicationDidBecomeActive(_ notification: Notification) {
         configureMainWindow()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        unregisterDialogHotkey()
     }
     
     private func configureMainWindow() {
@@ -87,5 +97,42 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.isMovableByWindowBackground = true
+    }
+
+    private func registerDialogHotkey() {
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            guard self.matchesDialogHotkey(event) else { return event }
+
+            self.dialogWindowController.showDialog()
+            return nil
+        }
+
+        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, self.matchesDialogHotkey(event) else { return }
+            DispatchQueue.main.async {
+                self.dialogWindowController.showDialog()
+            }
+        }
+    }
+
+    private func unregisterDialogHotkey() {
+        if let localKeyMonitor {
+            NSEvent.removeMonitor(localKeyMonitor)
+            self.localKeyMonitor = nil
+        }
+        if let globalKeyMonitor {
+            NSEvent.removeMonitor(globalKeyMonitor)
+            self.globalKeyMonitor = nil
+        }
+    }
+
+    private func matchesDialogHotkey(_ event: NSEvent) -> Bool {
+        guard !event.isARepeat else { return false }
+
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags == [.command] else { return false }
+
+        return event.charactersIgnoringModifiers?.lowercased() == "c"
     }
 }

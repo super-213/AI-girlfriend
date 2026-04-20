@@ -65,9 +65,26 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         onReceive: @escaping (String) -> Void,
         onComplete: @escaping () -> Void
     ) {
+        let messages: [[String: String]] = [
+            systemMessage(),
+            ["role": "user", "content": userInput]
+        ]
+        sendStreamRequest(messages: messages, onReceive: onReceive, onComplete: onComplete)
+    }
+
+    /// 发送包含历史消息的流式请求
+    /// - Parameters:
+    ///   - messages: 完整消息历史（需包含 system）
+    ///   - onReceive: 接收到新内容时的回调
+    ///   - onComplete: 请求完成时的回调
+    func sendStreamRequest(
+        messages: [[String: String]],
+        onReceive: @escaping (String) -> Void,
+        onComplete: @escaping () -> Void
+    ) {
         cancelPreviousTask()
 
-        guard let request = buildRequest(with: userInput) else {
+        guard let request = buildRequest(with: messages) else {
             #if DEBUG
             print(" 请求构建失败")
             #endif
@@ -91,14 +108,9 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     // MARK: - 构建请求体
     
     /// 根据提供商构建API请求
-    /// - Parameter userInput: 用户输入的文本
+    /// - Parameter messages: 完整消息历史（需包含 system）
     /// - Returns: 构建好的URLRequest，如果失败则返回nil
-    private func buildRequest(with userInput: String) -> URLRequest? {
-        // 通用消息体
-        let messages: [[String: String]] = [
-            ["role": "system", "content": systemPrompt],
-            ["role": "user", "content": userInput]
-        ]
+    private func buildRequest(with messages: [[String: String]]) -> URLRequest? {
         
         // 区分平台，构建 payload
         var payload: [String: Any] = [:]
@@ -174,6 +186,63 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         }
         
         return request
+    }
+
+    // MARK: - Agent/Skill 注入
+    
+    private func buildAugmentedSystemPrompt() -> String {
+        var attachments: [String] = []
+        
+        if let agentContent = loadAgentContent() {
+            attachments.append("## agent.md\n\(agentContent)")
+        }
+        
+        let skillContents = loadSkillContents()
+        attachments.append(contentsOf: skillContents)
+        
+        guard !attachments.isEmpty else {
+            return systemPrompt
+        }
+        
+        let appendix = "\n\n工具/技能说明段:\n" + attachments.joined(separator: "\n\n")
+        return systemPrompt + appendix
+    }
+    
+    private func systemMessage() -> [String: String] {
+        ["role": "system", "content": buildAugmentedSystemPrompt()]
+    }
+
+    func systemPromptContent() -> String {
+        buildAugmentedSystemPrompt()
+    }
+    
+    private func loadAgentContent() -> String? {
+        guard let data = UserDefaults.standard.data(forKey: AgentSkillStorageKeys.agentFile),
+              let saved = try? JSONDecoder().decode(AgentFile.self, from: data) else {
+            return nil
+        }
+        
+        let url = URL(fileURLWithPath: saved.path)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try? String(contentsOf: url, encoding: .utf8)
+    }
+    
+    private func loadSkillContents() -> [String] {
+        guard let data = UserDefaults.standard.data(forKey: AgentSkillStorageKeys.skillFiles),
+              let saved = try? JSONDecoder().decode([SkillFile].self, from: data) else {
+            return []
+        }
+        
+        var contents: [String] = []
+        for skill in saved {
+            let url = URL(fileURLWithPath: skill.path)
+            guard FileManager.default.fileExists(atPath: url.path),
+                  let text = try? String(contentsOf: url, encoding: .utf8) else {
+                continue
+            }
+            contents.append("## \(skill.name)\n\(text)")
+        }
+        return contents
     }
 
     // MARK: - 清理旧任务
