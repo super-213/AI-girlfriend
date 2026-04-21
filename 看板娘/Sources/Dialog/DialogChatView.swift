@@ -11,6 +11,17 @@ import SwiftUI
 struct DialogChatView: View {
     @ObservedObject var viewModel: DialogChatViewModel
     let onClose: () -> Void
+    @State private var isCloseButtonHovered = false
+    @State private var isNewChatButtonHovered = false
+    
+    private let hasselbladOrange = Color(
+        nsColor: NSColor(
+            srgbRed: 0.89,
+            green: 0.49,
+            blue: 0.18,
+            alpha: 1.0
+        )
+    )
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,26 +53,47 @@ struct DialogChatView: View {
                     .padding(6)
                     .background(
                         Circle()
-                            .fill(Color.red.opacity(0.9))
+                            .fill(
+                                isCloseButtonHovered
+                                ? Color.red.opacity(0.92)
+                                : Color.gray.opacity(0.72)
+                            )
                     )
+            }
+            .scaleEffect(isCloseButtonHovered ? 1.12 : 1.0)
+            .animation(.spring(response: 0.22, dampingFraction: 0.65), value: isCloseButtonHovered)
+            .onHover { isHovered in
+                isCloseButtonHovered = isHovered
             }
             .buttonStyle(.plain)
             .help("关闭")
 
             Spacer()
 
-            Button("新建对话") {
+            Button(action: {
                 viewModel.startNewConversation()
+            }) {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(isNewChatButtonHovered ? .white : .primary)
+                    .frame(width: 18, height: 18)
+                    .padding(8)
+                    .background(
+                        Circle()
+                            .fill(
+                                isNewChatButtonHovered
+                                ? hasselbladOrange
+                                : Color.secondary.opacity(0.16)
+                            )
+                    )
+            }
+            .scaleEffect(isNewChatButtonHovered ? 1.12 : 1.0)
+            .animation(.spring(response: 0.22, dampingFraction: 0.65), value: isNewChatButtonHovered)
+            .onHover { isHovered in
+                isNewChatButtonHovered = isHovered
             }
             .buttonStyle(.plain)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color.secondary.opacity(0.16))
-            )
+            .help("新建对话")
         }
         .padding(.horizontal, 14)
         .frame(height: 48)

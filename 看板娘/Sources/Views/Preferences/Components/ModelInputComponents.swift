@@ -7,6 +7,14 @@
 
 import SwiftUI
 
+private enum ModelInputStyle {
+    static let width: CGFloat = 400
+    static let cornerRadius: CGFloat = 16
+    static let singleLineHeight: CGFloat = 40
+    static let apiUrlHeight: CGFloat = 120
+    static let backgroundColor = Color(nsColor: .textBackgroundColor)
+}
+
 /// Ollama 使用说明视图
 struct OllamaInstructionsView: View {
     var body: some View {
@@ -65,8 +73,16 @@ struct ModelInputField: View {
             Text("模型：")
                 .font(DesignFonts.headline)
             TextField(placeholderText, text: $aiModel)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-                .frame(width: LayoutConstants.textFieldWidth)
+                .textFieldStyle(.plain)
+                .font(DesignFonts.input)
+                .padding(.horizontal, DesignSpacing.md)
+                .frame(width: ModelInputStyle.width, height: ModelInputStyle.singleLineHeight)
+                .background(
+                    RoundedRectangle(cornerRadius: ModelInputStyle.cornerRadius, style: .continuous)
+                        .fill(ModelInputStyle.backgroundColor)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: ModelInputStyle.cornerRadius, style: .continuous))
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .focused(focusedField, equals: .model)
                 .accessibilityLabel("AI 模型名称")
                 .accessibilityHint(accessibilityHintText)
@@ -100,9 +116,27 @@ struct APIUrlInputField: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("API 地址：")
                 .font(DesignFonts.headline)
-            TextField(placeholderText, text: $apiUrl)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-                .frame(width: LayoutConstants.textFieldWidth)
+            TextEditor(text: $apiUrl)
+                .font(DesignFonts.input)
+                .padding(DesignSpacing.sm)
+                .frame(width: ModelInputStyle.width, height: ModelInputStyle.apiUrlHeight, alignment: .topLeading)
+                .scrollContentBackground(.hidden)
+                .overlay(alignment: .topLeading) {
+                    if apiUrl.isEmpty {
+                        Text(placeholderText)
+                            .font(DesignFonts.input)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, DesignSpacing.md)
+                            .padding(.vertical, DesignSpacing.sm + 1)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: ModelInputStyle.cornerRadius, style: .continuous)
+                        .fill(ModelInputStyle.backgroundColor)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: ModelInputStyle.cornerRadius, style: .continuous))
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .focused(focusedField, equals: .apiUrl)
                 .accessibilityLabel("API 服务地址")
                 .accessibilityHint(accessibilityHintText)
@@ -116,7 +150,7 @@ struct APIUrlInputField: View {
         default: return "例如: http://localhost:11434/api/chat"
         }
     }
-    
+
     private var accessibilityHintText: String {
         provider == "ollama" 
             ? "输入 Ollama 服务地址，默认为 http://localhost:11434/api/chat"
@@ -140,14 +174,21 @@ struct APIKeyInputField: View {
                     .font(DesignFonts.caption)
                     .foregroundColor(.secondary)
                     .padding(8)
-                    .frame(width: LayoutConstants.textFieldWidth, alignment: .leading)
+                    .frame(width: ModelInputStyle.width, alignment: .leading)
                     .background(Color.gray.opacity(0.05))
                     .cornerRadius(6)
             } else {
                 TextEditor(text: $apiKey)
-                    .frame(height: LayoutConstants.textEditorMinHeight)
-                    .border(DesignColors.border, width: LayoutConstants.borderWidth)
                     .font(DesignFonts.input)
+                    .padding(DesignSpacing.sm)
+                    .frame(width: ModelInputStyle.width, height: LayoutConstants.textEditorMinHeight, alignment: .topLeading)
+                    .scrollContentBackground(.hidden)
+                    .background(
+                        RoundedRectangle(cornerRadius: ModelInputStyle.cornerRadius, style: .continuous)
+                            .fill(ModelInputStyle.backgroundColor)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: ModelInputStyle.cornerRadius, style: .continuous))
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .focused(focusedField, equals: .apiKey)
                     .accessibilityLabel("API 密钥")
                     .accessibilityHint("输入您的 API 密钥以访问 AI 服务")
