@@ -133,6 +133,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         guard flags == [.control] else { return false }
 
-        return event.keyCode == 49
+        return event.charactersIgnoringModifiers?.lowercased() == "t"
     }
 }
