@@ -131,8 +131,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard !event.isARepeat else { return false }
 
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard flags == [.command] else { return false }
+        guard flags == [.control] else { return false }
 
-        return event.charactersIgnoringModifiers?.lowercased() == "c"
+        return event.keyCode == 49
     }
 }
