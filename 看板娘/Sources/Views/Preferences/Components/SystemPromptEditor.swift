@@ -14,6 +14,9 @@ struct SystemPromptEditor: View {
     let characterLimit: Int = 500
     let defaultPrompt: String
     var focusedField: FocusState<PreferencesView.FocusableField?>.Binding
+    private let editorWidth: CGFloat = 400
+    private let editorCornerRadius: CGFloat = 16
+    private let editorBackgroundColor = Color(nsColor: .textBackgroundColor)
     
     var characterCount: Int {
         text.count
@@ -40,9 +43,20 @@ struct SystemPromptEditor: View {
             
             // 文本编辑器
             TextEditor(text: $text)
-                .frame(height: LayoutConstants.systemPromptHeight)
-                .border(DesignColors.border, width: LayoutConstants.borderWidth)
                 .font(DesignFonts.input)
+                .padding(DesignSpacing.sm)
+                .frame(
+                    width: editorWidth,
+                    height: LayoutConstants.systemPromptHeight,
+                    alignment: .topLeading
+                )
+                .scrollContentBackground(.hidden)
+                .background(
+                    RoundedRectangle(cornerRadius: editorCornerRadius, style: .continuous)
+                        .fill(editorBackgroundColor)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: editorCornerRadius, style: .continuous))
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .focused(focusedField, equals: .systemPrompt)
                 .accessibilityLabel("系统提示词文本编辑器")
                 .accessibilityValue(text)

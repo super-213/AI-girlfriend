@@ -14,7 +14,7 @@ struct LayoutConstants {
     static let horizontalPadding: CGFloat = 20
     static let textFieldWidth: CGFloat = 360
     static let textEditorMinHeight: CGFloat = 100
-    static let systemPromptHeight: CGFloat = 180
+    static let systemPromptHeight: CGFloat = 240
     static let cornerRadius: CGFloat = 8
     static let borderWidth: CGFloat = 1
 }
