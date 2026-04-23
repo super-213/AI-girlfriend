@@ -71,6 +71,7 @@ struct PetView: View {
     private var inputField: some View {
         TextField("我会帮助指挥官解决问题...", text: $petViewBackend.userInput)
             .textFieldStyle(PlainTextFieldStyle())
+            .foregroundColor(.black)
             .modifier(EnhancedTextFieldStyle())
             .padding([.top, .leading, .trailing])
             .onSubmit {
@@ -85,6 +86,7 @@ struct PetView: View {
         ScrollView {
             Text(petViewBackend.streamedResponse)
                 .font(DesignFonts.body)
+                .foregroundColor(.black)
                 .lineSpacing(4)
                 .textSelection(.enabled)
                 .padding(DesignSpacing.md)
