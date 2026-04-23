@@ -22,13 +22,15 @@ struct PetView: View {
     
     /// 界面重叠比例
     @AppStorage("overlapRatio") private var overlapRatio: Double = 0.3
+
+    private let layoutMetrics = PetLayoutMetrics.live
     
     // MARK: - 主体
     var body: some View {
         VStack(spacing: 0) {
             inputField
             
-            Spacer().frame(height: 8)  // inputField 和 chatOutput 之间的间距
+            Spacer().frame(height: layoutMetrics.inputToChatSpacing)  // inputField 和 chatOutput 之间的间距
             
             // 使用 ZStack 实现重叠效果
             ZStack(alignment: .top) {
@@ -38,17 +40,10 @@ struct PetView: View {
                 }
                 
                 VStack(spacing: 0) {
-                    // 根据重叠比例计算偏移量
-                    let chatHeight: CGFloat = 80
-                    let noOverlapSpacing: CGFloat = 30  // 0% 时的间距（30像素）
-                    let maxOverlap = chatHeight + noOverlapSpacing  // 最大重叠量（从30px间距到完全重叠）
-                    let overlapAmount = maxOverlap * overlapRatio
-                    
-                    // 从 chatHeight + 30px 开始，随着 overlapRatio 增加而减少间距
-                    Spacer().frame(height: chatHeight + noOverlapSpacing - overlapAmount)
+                    Spacer().frame(height: layoutMetrics.petTopSpacing(for: overlapRatio))
                     
                     petImage
-                        .frame(width: 200, height: 200)
+                        .frame(width: layoutMetrics.petFrameSize, height: layoutMetrics.petFrameSize)
                 }
             }
         }
@@ -96,7 +91,7 @@ struct PetView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .transition(.opacity.combined(with: .move(edge: .top)))
         }
-        .frame(maxWidth: .infinity, maxHeight: 80)
+        .frame(maxWidth: .infinity, maxHeight: layoutMetrics.chatHeight)
         .background(
             RoundedRectangle(cornerRadius: 8)
                 .fill(DesignColors.surfaceLight)

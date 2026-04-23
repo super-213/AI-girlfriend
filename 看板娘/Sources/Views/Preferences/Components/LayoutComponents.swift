@@ -42,18 +42,14 @@ struct OverlapSliderControl: View {
 /// 重叠预览组件
 struct OverlapPreview: View {
     let overlapRatio: Double
+
+    private let previewMetrics = PetLayoutMetrics.live.scaled(by: 0.4)
     
     var body: some View {
-        GeometryReader { geometry in
-            let _ = geometry.size.height
+        GeometryReader { _ in
             let inputHeight: CGFloat = 24
-            let chatHeight: CGFloat = 60
-            let petHeight: CGFloat = 80
-            let inputChatSpacing: CGFloat = 8
-            let noOverlapSpacing: CGFloat = 30
-            let maxOverlap = chatHeight + noOverlapSpacing
-            let overlapAmount = maxOverlap * overlapRatio
-            
+            let previewTopSpacing = previewMetrics.petTopSpacing(for: overlapRatio)
+
             VStack(spacing: 0) {
                 Spacer()
                 
@@ -68,7 +64,7 @@ struct OverlapPreview: View {
                     )
                     .padding(.horizontal, DesignSpacing.lg)
                 
-                Spacer().frame(height: inputChatSpacing)
+                Spacer().frame(height: previewMetrics.inputToChatSpacing)
                 
                 // 重叠区域容器
                 ZStack(alignment: .top) {
@@ -76,7 +72,7 @@ struct OverlapPreview: View {
                     VStack {
                         RoundedRectangle(cornerRadius: 8)
                             .fill(Color.blue.opacity(0.15))
-                            .frame(height: chatHeight)
+                            .frame(height: previewMetrics.chatHeight)
                             .overlay(
                                 VStack(spacing: 4) {
                                     Text("对话输出区域")
@@ -94,11 +90,11 @@ struct OverlapPreview: View {
                     
                     // petImage 预览
                     VStack {
-                        Spacer().frame(height: chatHeight + noOverlapSpacing - overlapAmount)
+                        Spacer().frame(height: previewTopSpacing)
                         
                         RoundedRectangle(cornerRadius: 8)
                             .fill(Color.orange.opacity(0.2))
-                            .frame(height: petHeight)
+                            .frame(height: previewMetrics.petFrameSize)
                             .overlay(
                                 VStack(spacing: 4) {
                                     Image(systemName: "heart.fill")
@@ -114,7 +110,7 @@ struct OverlapPreview: View {
                         Spacer()
                     }
                 }
-                .frame(height: chatHeight + noOverlapSpacing - overlapAmount + petHeight)
+                .frame(height: previewTopSpacing + previewMetrics.petFrameSize)
                 .padding(.horizontal, DesignSpacing.lg)
                 
                 Spacer()
