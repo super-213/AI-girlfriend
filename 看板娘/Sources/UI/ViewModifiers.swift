@@ -77,6 +77,7 @@ struct EnhancedButtonStyle: ViewModifier {
     
     func body(content: Content) -> some View {
         content
+            .buttonStyle(.plain)
             .padding(.horizontal, DesignSpacing.lg)
             .padding(.vertical, DesignSpacing.sm)
             .background(
