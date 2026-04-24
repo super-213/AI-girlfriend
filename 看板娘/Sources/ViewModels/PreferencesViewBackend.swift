@@ -491,6 +491,7 @@ extension PreferencesViewBackend {
         case model = "模型设置"
         case layout = "布局"
         case skills = "技能"
+        case automation = "自动化"
         case characterBinding = "角色绑定"
         case about = "关于"
         
@@ -502,6 +503,7 @@ extension PreferencesViewBackend {
             case .model: return "network"
             case .layout: return "rectangle.stack"
             case .skills: return "hammer.circle"
+            case .automation: return "clock.arrow.circlepath"
             case .characterBinding: return "person.2.crop.square.stack"
             case .about: return "info.circle"
             }

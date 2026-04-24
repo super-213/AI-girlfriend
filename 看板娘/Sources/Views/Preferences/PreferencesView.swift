@@ -13,6 +13,7 @@ import UniformTypeIdentifiers
 struct PreferencesView: View {
     @ObservedObject var petViewBackend: PetViewBackend
     @StateObject private var backend: PreferencesViewBackend
+    @StateObject private var automationStore = AutomationStore.shared
     
     @AppStorage("apiKey") private var apiKey = "<默认API Key>f"
     @AppStorage("aiModel") private var aiModel = "glm-4v-flash"
@@ -177,6 +178,9 @@ extension PreferencesView {
                 onImportSkills: showSkillImportDialog,
                 onDeleteSkill: backend.deleteSkillFile(at:)
             )
+
+        case .automation:
+            AutomationSettingsTab(store: automationStore)
             
         case .characterBinding:
             CharacterBindingTab(

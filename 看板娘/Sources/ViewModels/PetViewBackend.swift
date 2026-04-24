@@ -65,6 +65,9 @@ class PetViewBackend: ObservableObject {
     
     /// API管理器实例
     private let apiManager = APIManager()
+
+    /// 自动化流程存储
+    private let automationStore = AutomationStore.shared
     
     // MARK: - 自动交互定时器
     
@@ -73,6 +76,12 @@ class PetViewBackend: ObservableObject {
     
     /// 定期内存清理定时器
     private var memoryCleanupTimer: AnyCancellable?
+
+    /// 自动化流程调度定时器
+    private var automationTimer: Timer?
+
+    /// 自动化数据变更监听
+    private var automationStoreCancellable: AnyCancellable?
     
     // MARK: - 初始化
     
@@ -90,12 +99,17 @@ class PetViewBackend: ObservableObject {
         
         // 启动定期内存清理（每5分钟）
         startPeriodicMemoryCleanup()
+        observeAutomationChanges()
+        scheduleNextAutomationAction()
     }
     
     /// 清理资源和观察者
     deinit {
         NotificationCenter.default.removeObserver(self)
         cancelAutoActionLoop()
+        automationTimer?.invalidate()
+        automationTimer = nil
+        automationStoreCancellable?.cancel()
         memoryCleanupTimer?.cancel()
     }
     
@@ -142,6 +156,18 @@ class PetViewBackend: ObservableObject {
         messageHistory.append(["role": "user", "content": userInput])
         sendRequest()
         userInput = ""
+    }
+
+    /// 提交自动化提示词，输出沿用主宠物对话输出框
+    private func submitAutomationPrompt(_ prompt: String) {
+        let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPrompt.isEmpty else { return }
+
+        lastUserInput = trimmedPrompt
+        commandIterationCount = 0
+        messageHistory = [["role": "system", "content": apiManager.systemPromptContent()]]
+        messageHistory.append(["role": "user", "content": trimmedPrompt])
+        sendRequest()
     }
     
     /// 处理宠物点击事件
@@ -462,6 +488,54 @@ class PetViewBackend: ObservableObject {
     private func cancelAutoActionLoop() {
         periodicAutoActionTimer?.cancel()
         periodicAutoActionTimer = nil
+    }
+
+    // MARK: - 自动化流程调度
+
+    private func observeAutomationChanges() {
+        automationStoreCancellable = automationStore.$automations
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.scheduleNextAutomationAction()
+            }
+    }
+
+    private func scheduleNextAutomationAction() {
+        automationTimer?.invalidate()
+        automationTimer = nil
+
+        guard let nextDate = automationStore.nextEnabledAutomationDate() else { return }
+
+        let interval = max(nextDate.timeIntervalSinceNow, 1)
+        let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
+            self?.handleAutomationTimer()
+        }
+        timer.tolerance = min(max(interval * 0.1, 1), 60)
+        RunLoop.main.add(timer, forMode: .common)
+        automationTimer = timer
+    }
+
+    private func handleAutomationTimer() {
+        automationTimer?.invalidate()
+        automationTimer = nil
+        runDueAutomationIfPossible()
+        scheduleNextAutomationAction()
+    }
+
+    private func runDueAutomationIfPossible() {
+        guard let automation = automationStore.dueAutomations().sorted(by: {
+            ($0.nextRunAt ?? .distantFuture) < ($1.nextRunAt ?? .distantFuture)
+        }).first else {
+            return
+        }
+
+        guard !isThinking, !isExecutingCommand else {
+            automationStore.markDeferred(automation)
+            return
+        }
+
+        automationStore.markCompleted(automation)
+        submitAutomationPrompt(automation.prompt)
     }
     
     // MARK: - 内存管理
