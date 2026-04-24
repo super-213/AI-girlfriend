@@ -153,10 +153,12 @@ struct AutomationSettingsTab: View {
                         .font(DesignFonts.input)
                         .frame(minHeight: 96)
                         .padding(DesignSpacing.sm)
+                        .scrollContentBackground(.hidden)
                         .background(
                             RoundedRectangle(cornerRadius: 18, style: .continuous)
                                 .fill(DesignColors.surfaceLight)
                         )
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 18, style: .continuous)
                                 .stroke(DesignColors.border.opacity(0.7), lineWidth: 1)
