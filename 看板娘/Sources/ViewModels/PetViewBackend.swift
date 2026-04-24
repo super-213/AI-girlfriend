@@ -87,6 +87,8 @@ class PetViewBackend: ObservableObject {
     
     /// 初始化后端并注册通知观察者
     init() {
+        PetControlService.shared.register(petViewBackend: self)
+
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(onAppDidBecomeActive),
                                                name: NSApplication.didBecomeActiveNotification,
@@ -141,21 +143,29 @@ class PetViewBackend: ObservableObject {
     /// 提交用户输入
     /// 处理音乐播放请求或发送到AI模型
     func submitInput() {
-        guard !userInput.isEmpty else { return }
-        lastUserInput = userInput
+        let submittedInput = userInput
+        guard !submittedInput.isEmpty else { return }
+        submitExternalInput(submittedInput)
+        userInput = ""
+    }
+
+    /// 供控制服务和机器入口调用的结构化消息提交入口
+    func submitExternalInput(_ input: String) {
+        let trimmedInput = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedInput.isEmpty else { return }
+
+        lastUserInput = trimmedInput
         commandIterationCount = 0
         messageHistory = [["role": "system", "content": apiManager.systemPromptContent()]]
         
-        if userInput.contains("我想听") || userInput.contains("播放") || userInput.contains("来一首") {
-            let songName = MusicPlayerService.extractSongName(from: userInput)
+        if trimmedInput.contains("我想听") || trimmedInput.contains("播放") || trimmedInput.contains("来一首") {
+            let songName = MusicPlayerService.extractSongName(from: trimmedInput)
             streamedResponse = MusicPlayerService.playSong(named: songName)
-            userInput = ""
             return
         }
 
-        messageHistory.append(["role": "user", "content": userInput])
+        messageHistory.append(["role": "user", "content": trimmedInput])
         sendRequest()
-        userInput = ""
     }
 
     /// 提交自动化提示词，输出沿用主宠物对话输出框
@@ -163,11 +173,7 @@ class PetViewBackend: ObservableObject {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedPrompt.isEmpty else { return }
 
-        lastUserInput = trimmedPrompt
-        commandIterationCount = 0
-        messageHistory = [["role": "system", "content": apiManager.systemPromptContent()]]
-        messageHistory.append(["role": "user", "content": trimmedPrompt])
-        sendRequest()
+        submitExternalInput(trimmedPrompt)
     }
     
     /// 处理宠物点击事件

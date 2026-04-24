@@ -69,6 +69,9 @@ class PreferencesViewBackend: ObservableObject {
     
     /// 宠物视图后端的引用
     private let petViewBackend: PetViewBackend
+
+    /// 稳定机器控制服务
+    private let controlService = PetControlService.shared
     
     // MARK: - 初始化
     
@@ -435,40 +438,31 @@ extension PreferencesViewBackend {
     func importSkillFiles(from urls: [URL]) -> Int {
         guard !urls.isEmpty else { return 0 }
         var imported = 0
-        
-        do {
-            let agentDir = try agentSkillsDirectory()
-            let fileManager = FileManager.default
-            
-            for url in urls {
-                let baseName = url.deletingPathExtension().lastPathComponent
-                let safeName = baseName.isEmpty ? "skill" : baseName
-                var destination = agentDir.appendingPathComponent("\(safeName).md")
-                
-                if fileManager.fileExists(atPath: destination.path) {
-                    let timestamp = Int(Date().timeIntervalSince1970)
-                    destination = agentDir.appendingPathComponent("\(safeName)_\(timestamp).md")
-                }
-                
-                try fileManager.copyItem(at: url, to: destination)
-                
+
+        for url in urls {
+            do {
+                let dto = try controlService.importSkill(
+                    ImportSkillRequest(
+                        filePath: url.path,
+                        context: PetControlRequestContext(source: .ui)
+                    )
+                )
                 let newSkill = SkillFile(
-                    id: UUID(),
-                    name: destination.lastPathComponent,
-                    path: destination.path,
-                    addedAt: Date()
+                    id: dto.id,
+                    name: dto.name,
+                    path: dto.path,
+                    addedAt: dto.addedAt
                 )
                 skillFiles.append(newSkill)
                 imported += 1
+            } catch {
+                skillFileErrorMessage = "导入 skill.md 失败：\(error.localizedDescription)"
+                showSkillFileError = true
             }
-            
-            saveSkillFiles()
-            return imported
-        } catch {
-            skillFileErrorMessage = "导入 skill.md 失败：\(error.localizedDescription)"
-            showSkillFileError = true
-            return imported
         }
+
+        loadSkillFiles()
+        return imported
     }
     
     func deleteSkillFile(at index: Int) {
@@ -679,8 +673,17 @@ extension PreferencesViewBackend {
     /// 切换到指定索引的角色
     /// - Parameter index: 角色索引
     func switchCharacter(to index: Int) {
-        let newCharacter = availableCharacters[index]
-        petViewBackend.switchToCharacter(newCharacter)
+        do {
+            _ = try controlService.switchCharacter(
+                SwitchCharacterRequest(
+                    index: index,
+                    context: PetControlRequestContext(source: .ui)
+                )
+            )
+        } catch {
+            errorAlertMessage = "切换角色失败：\(error.localizedDescription)"
+            showErrorAlert = true
+        }
     }
     
     /// 获取当前角色在列表中的索引

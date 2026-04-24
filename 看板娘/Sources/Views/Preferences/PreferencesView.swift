@@ -282,14 +282,7 @@ extension PreferencesView {
     }
     
     private func handleCharacterChange(_ newIndex: Int) {
-        if newIndex < availableCharacters.count {
-            backend.switchCharacter(to: newIndex)
-        } else {
-            let customIndex = newIndex - availableCharacters.count
-            if customIndex < backend.customCharacters.count {
-                petViewBackend.switchToCharacter(backend.customCharacters[customIndex])
-            }
-        }
+        backend.switchCharacter(to: newIndex)
     }
 }
 

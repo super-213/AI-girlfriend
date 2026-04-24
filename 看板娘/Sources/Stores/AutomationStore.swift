@@ -30,6 +30,10 @@ final class AutomationStore: ObservableObject {
         save()
     }
 
+    func automation(id: UUID) -> AutomationFlow? {
+        automations.first { $0.id == id }
+    }
+
     func updateAutomation(_ automation: AutomationFlow) {
         guard let index = automations.firstIndex(where: { $0.id == automation.id }) else { return }
 
