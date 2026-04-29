@@ -29,9 +29,15 @@ final class DialogChatViewModel: ObservableObject {
     @Published var messages: [DialogMessage] = []
     @Published var inputText: String = ""
     @Published var isRequesting: Bool = false
+    @Published var showCommandConfirm: Bool = false
+    @Published var pendingCommand: String = ""
+    @Published var isExecutingCommand: Bool = false
 
     private let apiManager = APIManager()
     private var activeStreamToken = UUID()
+    private var lastUserInput: String = ""
+    private let maxCommandIterations = 5
+    private var commandIterationCount = 0
 
     func sendCurrentInput() {
         send(inputText)
@@ -39,8 +45,10 @@ final class DialogChatViewModel: ObservableObject {
 
     func send(_ rawText: String) {
         let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isRequesting else { return }
+        guard !trimmed.isEmpty, !isRequesting, !isExecutingCommand else { return }
 
+        lastUserInput = trimmed
+        commandIterationCount = 0
         messages.append(DialogMessage(role: .user, content: trimmed))
         inputText = ""
         requestAssistantReply()
@@ -49,8 +57,62 @@ final class DialogChatViewModel: ObservableObject {
     func startNewConversation() {
         activeStreamToken = UUID()
         isRequesting = false
+        isExecutingCommand = false
+        showCommandConfirm = false
+        pendingCommand = ""
+        lastUserInput = ""
+        commandIterationCount = 0
         messages.removeAll()
         inputText = ""
+    }
+
+    func confirmAndRunCommand() {
+        let command = pendingCommand
+        showCommandConfirm = false
+        pendingCommand = ""
+
+        guard !command.isEmpty else { return }
+
+        guard CommandExecutionSupport.isCommandSafe(command) else {
+            appendAssistantStatus("[完成] 已阻止危险或交互式命令: \(command)")
+            return
+        }
+
+        isExecutingCommand = true
+        isRequesting = true
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let (exitCode, output) = CommandExecutionSupport.runShell(command)
+            let trimmedOutput = output.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            DispatchQueue.main.async {
+                self.isExecutingCommand = false
+                self.commandIterationCount += 1
+
+                guard self.commandIterationCount <= self.maxCommandIterations else {
+                    self.isRequesting = false
+                    self.appendAssistantStatus("[完成] 命令执行次数过多，已停止自动执行")
+                    return
+                }
+
+                let resultText = """
+                执行完毕
+                命令: \(command)
+                退出码: \(exitCode)
+                输出:
+                \(trimmedOutput.isEmpty ? "(无输出)" : trimmedOutput)
+                """
+                self.messages.append(DialogMessage(role: .user, content: resultText))
+                self.requestAssistantReply()
+            }
+        }
+    }
+
+    func cancelPendingCommand() {
+        showCommandConfirm = false
+        pendingCommand = ""
+        isRequesting = false
+        appendAssistantStatus("[完成] 已取消执行命令")
     }
 
     private func requestAssistantReply() {
@@ -87,7 +149,34 @@ final class DialogChatViewModel: ObservableObject {
         let content = messages[index].content.trimmingCharacters(in: .whitespacesAndNewlines)
         if content.isEmpty {
             messages[index].content = "（未收到模型回复）"
+            return
         }
+
+        handleAssistantReply(messageID: messageID, assistantReply: content)
+    }
+
+    private func handleAssistantReply(messageID: UUID, assistantReply: String) {
+        guard !CommandExecutionSupport.isCompletionReply(assistantReply) else { return }
+        guard !isExecutingCommand else { return }
+        guard let command = CommandExecutionSupport.extractCommand(from: assistantReply) else { return }
+
+        let normalized = CommandExecutionSupport.normalizeCommand(command, basedOn: lastUserInput)
+        pendingCommand = normalized
+
+        guard let index = messages.firstIndex(where: { $0.id == messageID }) else { return }
+        if normalized != command, let range = messages[index].content.range(of: command) {
+            messages[index].content.replaceSubrange(range, with: normalized)
+        }
+
+        if !CommandExecutionSupport.hasCommandTag(in: messages[index].content) {
+            messages[index].content += "\n[命令] \(normalized)"
+        }
+
+        showCommandConfirm = true
+    }
+
+    private func appendAssistantStatus(_ status: String) {
+        messages.append(DialogMessage(role: .assistant, content: status))
     }
 
     private func buildOutgoingMessages() -> [[String: String]] {

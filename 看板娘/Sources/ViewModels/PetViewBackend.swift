@@ -248,13 +248,13 @@ class PetViewBackend: ObservableObject {
             messageHistory.append(["role": "assistant", "content": assistantReply])
         }
         
-        if isCompletionReply(assistantReply) {
+        if CommandExecutionSupport.isCompletionReply(assistantReply) {
             return
         }
         
         guard !isExecutingCommand else { return }
-        guard let command = extractCommand(from: streamedResponse) else { return }
-        let normalized = normalizeCommand(command, basedOn: lastUserInput)
+        guard let command = CommandExecutionSupport.extractCommand(from: streamedResponse) else { return }
+        let normalized = CommandExecutionSupport.normalizeCommand(command, basedOn: lastUserInput)
         pendingCommand = normalized
         
         if normalized != command {
@@ -263,105 +263,11 @@ class PetViewBackend: ObservableObject {
             }
         }
         
-        if !hasCommandTag(in: streamedResponse) {
+        if !CommandExecutionSupport.hasCommandTag(in: streamedResponse) {
             streamedResponse += "\n[命令] \(normalized)"
         }
         
         showCommandConfirm = true
-    }
-    
-    private func extractCommand(from text: String) -> String? {
-        if let command = extractCommandByToken(text, token: "命令:") {
-            return command
-        }
-        
-        let tags = ["[命令]", "[系统指令]", "[系统命令]", "[command]"]
-        
-        for tag in tags {
-            if let range = text.range(of: tag) {
-                let tail = text[range.upperBound...]
-                let line = tail.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first
-                let command = line.map(String.init) ?? String(tail)
-                let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                    return trimmed
-                }
-            }
-        }
-        
-        let lines = text.split(separator: "\n")
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            for tag in tags {
-                if trimmed.hasPrefix(tag) {
-                    let cleaned = trimmed.replacingOccurrences(of: tag, with: "")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !cleaned.isEmpty {
-                        return cleaned
-                    }
-                }
-            }
-        }
-
-        if let fallback = extractCommandWithoutTag(from: text) {
-            return fallback
-        }
-
-        return nil
-    }
-
-    private func extractCommandByToken(_ text: String, token: String) -> String? {
-        guard let range = text.range(of: token) else { return nil }
-        let tail = text[range.upperBound...]
-        let line = tail.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first
-        let command = line.map(String.init) ?? String(tail)
-        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    private func extractCommandWithoutTag(from text: String) -> String? {
-        let candidates = ["ls", "zip", "tar", "cp", "mv", "cat", "pwd", "mkdir", "rmdir"]
-        let lines = text.split(separator: "\n")
-        for line in lines {
-            let raw = String(line)
-            for cmd in candidates {
-                if let range = raw.range(of: "\(cmd) ") ?? (raw.hasPrefix("\(cmd)\t") ? raw.range(of: cmd) : nil) {
-                    let tail = raw[range.lowerBound...]
-                    let cleaned = String(tail).trimmingCharacters(in: .whitespacesAndNewlines)
-                    if cleaned.count > 1 {
-                        return cleaned
-                    }
-                }
-            }
-        }
-        return nil
-    }
-    
-    private func hasCommandTag(in text: String) -> Bool {
-        let tags = ["[命令]", "[系统指令]", "[系统命令]", "[command]"]
-        return tags.contains { text.contains($0) }
-    }
-    
-    private func isCompletionReply(_ text: String) -> Bool {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.hasPrefix("完成:") || trimmed.hasPrefix("[完成]")
-    }
-    
-    private func normalizeCommand(_ command: String, basedOn input: String) -> String {
-        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        let lower = trimmed.lowercased()
-        let inputLower = input.lowercased()
-        let listingIntent = input.contains("目录") || input.contains("文件") || input.contains("列表")
-            || inputLower.contains("list")
-        
-        if listingIntent, lower.hasPrefix("ls -l"), !lower.contains(" -a") {
-            if lower.hasPrefix("ls -lh") {
-                return trimmed.replacingOccurrences(of: "ls -lh", with: "ls -lha")
-            }
-            return trimmed.replacingOccurrences(of: "ls -l", with: "ls -la")
-        }
-        
-        return trimmed
     }
     
     func confirmAndRunCommand() {
@@ -371,7 +277,7 @@ class PetViewBackend: ObservableObject {
         
         guard !command.isEmpty else { return }
         
-        guard isCommandSafe(command) else {
+        guard CommandExecutionSupport.isCommandSafe(command) else {
             streamedResponse = "[完成] 已阻止危险或交互式命令: \(command)"
             return
         }
@@ -381,7 +287,7 @@ class PetViewBackend: ObservableObject {
         streamedResponse = ""
         
         DispatchQueue.global(qos: .userInitiated).async {
-            let (exitCode, output) = self.runShell(command)
+            let (exitCode, output) = CommandExecutionSupport.runShell(command)
             let trimmedOutput = output.trimmingCharacters(in: .whitespacesAndNewlines)
             
             DispatchQueue.main.async {
@@ -410,7 +316,77 @@ class PetViewBackend: ObservableObject {
         streamedResponse = "[完成] 已取消执行命令"
     }
     
-    private func isCommandSafe(_ command: String) -> Bool {
+}
+
+enum CommandExecutionSupport {
+    static func extractCommand(from text: String) -> String? {
+        if let command = extractCommandByToken(text, token: "命令:") {
+            return command
+        }
+
+        let tags = ["[命令]", "[系统指令]", "[系统命令]", "[command]"]
+
+        for tag in tags {
+            if let range = text.range(of: tag) {
+                let tail = text[range.upperBound...]
+                let line = tail.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first
+                let command = line.map(String.init) ?? String(tail)
+                let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    return trimmed
+                }
+            }
+        }
+
+        let lines = text.split(separator: "\n")
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            for tag in tags {
+                if trimmed.hasPrefix(tag) {
+                    let cleaned = trimmed.replacingOccurrences(of: tag, with: "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !cleaned.isEmpty {
+                        return cleaned
+                    }
+                }
+            }
+        }
+
+        if let fallback = extractCommandWithoutTag(from: text) {
+            return fallback
+        }
+
+        return nil
+    }
+
+    static func hasCommandTag(in text: String) -> Bool {
+        let tags = ["[命令]", "[系统指令]", "[系统命令]", "[command]"]
+        return tags.contains { text.contains($0) }
+    }
+
+    static func isCompletionReply(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.hasPrefix("完成:") || trimmed.hasPrefix("[完成]")
+    }
+
+    static func normalizeCommand(_ command: String, basedOn input: String) -> String {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+        let inputLower = input.lowercased()
+        let listingIntent = input.contains("目录") || input.contains("文件") || input.contains("列表")
+            || inputLower.contains("list")
+
+        if listingIntent, lower.hasPrefix("ls -l"), !lower.contains(" -a") {
+            if lower.hasPrefix("ls -lh") {
+                return trimmed.replacingOccurrences(of: "ls -lh", with: "ls -lha")
+            }
+            return trimmed.replacingOccurrences(of: "ls -l", with: "ls -la")
+        }
+
+        return trimmed
+    }
+
+    static func isCommandSafe(_ command: String) -> Bool {
         let lower = command.lowercased()
         let allowPrefixes = [
             "ls", "pwd", "cat", "zip", "tar", "cp", "mv", "mkdir", "rmdir"
@@ -430,8 +406,8 @@ class PetViewBackend: ObservableObject {
         }
         return true
     }
-    
-    private func runShell(_ command: String) -> (Int32, String) {
+
+    static func runShell(_ command: String) -> (Int32, String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-lc", command]
@@ -453,7 +429,35 @@ class PetViewBackend: ObservableObject {
         return (process.terminationStatus, output)
     }
 
-    
+    private static func extractCommandByToken(_ text: String, token: String) -> String? {
+        guard let range = text.range(of: token) else { return nil }
+        let tail = text[range.upperBound...]
+        let line = tail.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first
+        let command = line.map(String.init) ?? String(tail)
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func extractCommandWithoutTag(from text: String) -> String? {
+        let candidates = ["ls", "zip", "tar", "cp", "mv", "cat", "pwd", "mkdir", "rmdir"]
+        let lines = text.split(separator: "\n")
+        for line in lines {
+            let raw = String(line)
+            for cmd in candidates {
+                if let range = raw.range(of: "\(cmd) ") ?? (raw.hasPrefix("\(cmd)\t") ? raw.range(of: cmd) : nil) {
+                    let tail = raw[range.lowerBound...]
+                    let cleaned = String(tail).trimmingCharacters(in: .whitespacesAndNewlines)
+                    if cleaned.count > 1 {
+                        return cleaned
+                    }
+                }
+            }
+        }
+        return nil
+    }
+}
+
+extension PetViewBackend {
     // MARK: - 自动定时交互
     
     /// 启动自动行为循环

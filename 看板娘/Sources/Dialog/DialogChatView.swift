@@ -41,6 +41,16 @@ struct DialogChatView: View {
             RoundedRectangle(cornerRadius: 30, style: .continuous)
                 .fill(Color(nsColor: .windowBackgroundColor).opacity(0.98))
         )
+        .alert("执行命令确认", isPresented: $viewModel.showCommandConfirm) {
+            Button("执行", role: .none) {
+                viewModel.confirmAndRunCommand()
+            }
+            Button("取消", role: .cancel) {
+                viewModel.cancelPendingCommand()
+            }
+        } message: {
+            Text("将执行命令：\(viewModel.pendingCommand)")
+        }
     }
 
     private var toolbar: some View {
@@ -149,7 +159,7 @@ struct DialogChatView: View {
                     }
                 )
                 .frame(height: 34)
-                .disabled(viewModel.isRequesting)
+                .disabled(viewModel.isRequesting || viewModel.isExecutingCommand)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 4)
@@ -163,7 +173,7 @@ struct DialogChatView: View {
                     )
             )
 
-            if viewModel.isRequesting {
+            if viewModel.isRequesting || viewModel.isExecutingCommand {
                 ProgressView()
                     .controlSize(.small)
                     .frame(width: 18, height: 18)
