@@ -69,9 +69,14 @@ struct PetView: View {
     
     /// 用户输入框
     private var inputField: some View {
-        TextField("我会帮助指挥官解决问题...", text: $petViewBackend.userInput)
+        TextField(
+            "用户输入",
+            text: $petViewBackend.userInput,
+            prompt: Text("我会帮助指挥官解决问题...")
+                .foregroundColor(.gray) // 占位符颜色
+        )
             .textFieldStyle(PlainTextFieldStyle())
-            .foregroundColor(.black)
+            .foregroundColor(.black) // 输入框颜色
             .modifier(EnhancedTextFieldStyle())
             .padding([.top, .leading, .trailing])
             .onSubmit {
