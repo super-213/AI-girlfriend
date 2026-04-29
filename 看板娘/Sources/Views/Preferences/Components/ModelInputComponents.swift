@@ -92,7 +92,7 @@ struct ModelInputField: View {
     private var placeholderText: String {
         switch provider {
         case "zhipu": return "例如: glm-4v-flash"
-        case "qwen": return "例如: qwen-turbo"
+        case "qwen": return "例如: qwen-plus, gpt-4o-mini, local-model"
         default: return "例如: qwen2.5, llama3"
         }
     }
@@ -100,7 +100,7 @@ struct ModelInputField: View {
     private var accessibilityHintText: String {
         switch provider {
         case "zhipu": return "输入智谱清言的模型名称，例如 glm-4v-flash"
-        case "qwen": return "输入通义千问的模型名称，例如 qwen-turbo"
+        case "qwen": return "输入 OpenAI-Compatible 服务的模型名称，例如 qwen-plus 或本地模型 ID"
         default: return "输入 Ollama 模型名称，例如 qwen2.5 或 llama3"
         }
     }
@@ -146,15 +146,20 @@ struct APIUrlInputField: View {
     private var placeholderText: String {
         switch provider {
         case "zhipu": return "例如: https://open.bigmodel.cn/api/paas/v4/..."
-        case "qwen": return "例如: https://dashscope.aliyuncs.com/api/v1/..."
+        case "qwen": return "例如: http://localhost:1234/v1/chat/completions"
         default: return "例如: http://localhost:11434/api/chat"
         }
     }
 
     private var accessibilityHintText: String {
-        provider == "ollama" 
-            ? "输入 Ollama 服务地址，默认为 http://localhost:11434/api/chat"
-            : "输入 AI 服务的 API 地址，必须是 HTTPS 协议"
+        switch provider {
+        case "ollama":
+            return "输入 Ollama 服务地址，默认为 http://localhost:11434/api/chat"
+        case "qwen":
+            return "输入 OpenAI-Compatible 的 /v1/chat/completions 地址，可使用本地 HTTP 服务或云端 HTTPS 服务"
+        default:
+            return "输入 AI 服务的 API 地址，必须是 HTTPS 协议"
+        }
     }
 }
 

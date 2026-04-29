@@ -24,7 +24,7 @@
 ### 主要特性
 
 - 🎭 **多角色支持**：内置角色 + 自定义角色（最多 3 个）
-- 🤖 **AI 对话**：支持智谱清言、通义千问、Ollama（流式输出）
+- 🤖 **AI 对话**：支持智谱清言、OpenAI-Compatible、Ollama（流式输出）
 - 🪟 **悬浮对话窗**：`Ctrl + T` 呼出独立无边框聊天窗口
 - 🧠 **技能注入**：支持导入 `agent.md` 与多个 `skill.md`
 - ⏱️ **自动化流程**：在偏好设置中创建常用提示词，按一次、15 分钟、小时、天、周、月、年等频率自动发送给模型
@@ -353,12 +353,14 @@ apiUrl: "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 aiModel: "glm-4v-flash"
 ```
 
-#### 2. 通义千问（qwen）
+#### 2. OpenAI-Compatible（qwen）
 ```swift
 provider: "qwen"
 apiUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 aiModel: "qwen-plus"
 ```
+
+`qwen` 是历史保留的 provider ID，实际按 OpenAI-compatible `/v1/chat/completions` 流式接口发送和解析。可用于 DashScope、LM Studio、vLLM、LocalAI 等兼容服务；LM Studio 常用地址为 `http://localhost:1234/v1/chat/completions`。
 
 #### 3. Ollama（本地）
 ```swift

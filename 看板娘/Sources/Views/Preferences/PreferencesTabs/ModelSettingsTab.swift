@@ -26,7 +26,7 @@ struct ModelSettingsTab: View {
                 // 提供商选择器
                 ProviderPicker(selectedProvider: $provider)
                     .accessibilityLabel("AI 服务提供商选择器")
-                    .accessibilityHint("选择智谱清言、通义千问或 Ollama 本地模型作为 AI 服务提供商")
+                    .accessibilityHint("选择智谱清言、OpenAI-Compatible 或 Ollama 本地模型作为 AI 服务提供商")
                     .focused(focusedField, equals: .provider)
                     .onChange(of: provider) { _, newValue in
                         onProviderChange(newValue)

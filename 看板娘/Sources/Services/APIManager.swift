@@ -11,7 +11,7 @@ import SwiftUI
 // MARK: - API管理器
 
 /// AI API通信管理器
-/// 负责与智谱清言和通义千问API进行流式通信
+/// 负责与智谱清言、OpenAI-Compatible 和 Ollama API 进行流式通信
 final class APIManager: NSObject, URLSessionDataDelegate {
     
     // MARK: - 配置存储
@@ -277,7 +277,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             parseSSEResponse(rawText)
 
         case "qwen":
-            parseQwenResponse(rawText)
+            parseOpenAICompatibleResponse(rawText)
 
         case "ollama":
             parseOllamaResponse(rawText)
@@ -345,8 +345,8 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         }
     }
     
-    /// 解析通义千问（OpenAI-compatible, SSE stream）
-    private func parseQwenResponse(_ rawText: String) {
+    /// 解析 OpenAI-compatible SSE stream
+    private func parseOpenAICompatibleResponse(_ rawText: String) {
         let lines = rawText
             .components(separatedBy: "\n")
             .filter { !$0.isEmpty }
@@ -372,7 +372,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
                   let first = choices.first
             else {
                 #if DEBUG
-                print("Qwen JSON解析失败: \(line)")
+                print("OpenAI-Compatible JSON解析失败: \(line)")
                 #endif
                 continue
             }

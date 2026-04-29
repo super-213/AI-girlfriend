@@ -8,13 +8,13 @@
 import SwiftUI
 
 /// 提供商选择器组件
-/// 用于选择AI服务提供商（智谱清言、通义千问或Ollama）
+/// 用于选择AI服务提供商（智谱清言、OpenAI-Compatible 或 Ollama）
 struct ProviderPicker: View {
     @Binding var selectedProvider: String
     
     let providers: [Provider] = [
         Provider(id: "zhipu", name: "智谱清言"),
-        Provider(id: "qwen", name: "通义千问"),
+        Provider(id: "qwen", name: "OpenAI-Compatible"),
         Provider(id: "ollama", name: "Ollama 本地")
     ]
     
