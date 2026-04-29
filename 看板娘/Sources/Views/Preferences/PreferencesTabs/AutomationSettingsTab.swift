@@ -165,7 +165,11 @@ struct AutomationSettingsTab: View {
                         )
                 }
 
-                FrequencyEditor(kind: $draft.frequencyKind, dayInterval: $draft.dayInterval)
+                FrequencyEditor(
+                    kind: $draft.frequencyKind,
+                    dayInterval: $draft.dayInterval,
+                    scheduledAt: $draft.scheduledAt
+                )
 
                 HStack {
                     Button {
@@ -209,6 +213,7 @@ struct AutomationSettingsTab: View {
         automation.title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
         automation.prompt = draft.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         automation.frequency = AutomationFrequency.from(kind: draft.frequencyKind, dayInterval: draft.dayInterval)
+        automation.scheduledAt = draft.scheduledAt
         store.updateAutomation(automation)
     }
 
@@ -313,6 +318,7 @@ private struct AutomationRow: View {
 private struct FrequencyEditor: View {
     @Binding var kind: AutomationFrequency.Kind
     @Binding var dayInterval: Int
+    @Binding var scheduledAt: Date
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignSpacing.sm) {
@@ -326,6 +332,14 @@ private struct FrequencyEditor: View {
                 }
             }
             .pickerStyle(.menu)
+
+            DatePicker("计划时间", selection: $scheduledAt, displayedComponents: [.date, .hourAndMinute])
+                .datePickerStyle(.compact)
+                .padding(DesignSpacing.md)
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(DesignColors.surfaceLight)
+                )
 
             if kind == .everyNDays {
                 Stepper(value: $dayInterval, in: 2...7) {
@@ -365,6 +379,7 @@ private struct AutomationDraft {
     var prompt: String = ""
     var frequencyKind: AutomationFrequency.Kind = .daily
     var dayInterval: Int = 2
+    var scheduledAt: Date = Date()
 
     init() {}
 
@@ -372,6 +387,7 @@ private struct AutomationDraft {
         title = automation.title
         prompt = automation.prompt
         frequencyKind = automation.frequency.kind
+        scheduledAt = automation.scheduledAt
         if case let .everyNDays(interval) = automation.frequency {
             dayInterval = AutomationFrequency.clampedDayInterval(interval)
         }

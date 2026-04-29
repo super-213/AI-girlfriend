@@ -150,6 +150,7 @@ struct AutomationDTO: Codable, Identifiable, Equatable {
     var isEnabled: Bool
     var createdAt: Date
     var updatedAt: Date
+    var scheduledAt: Date
     var lastRunAt: Date?
     var nextRunAt: Date?
 }
@@ -160,6 +161,7 @@ struct UpdateAutomationRequest: Codable {
     var prompt: String?
     var frequency: AutomationFrequency?
     var isEnabled: Bool?
+    var scheduledAt: Date?
     var context: PetControlRequestContext
 
     init(
@@ -168,6 +170,7 @@ struct UpdateAutomationRequest: Codable {
         prompt: String? = nil,
         frequency: AutomationFrequency? = nil,
         isEnabled: Bool? = nil,
+        scheduledAt: Date? = nil,
         context: PetControlRequestContext = PetControlRequestContext()
     ) {
         self.id = id
@@ -175,6 +178,7 @@ struct UpdateAutomationRequest: Codable {
         self.prompt = prompt
         self.frequency = frequency
         self.isEnabled = isEnabled
+        self.scheduledAt = scheduledAt
         self.context = context
     }
 }
@@ -366,6 +370,9 @@ final class PetControlService: PetControlling {
             }
             if let isEnabled = request.isEnabled {
                 automation.isEnabled = isEnabled
+            }
+            if let scheduledAt = request.scheduledAt {
+                automation.scheduledAt = scheduledAt
             }
 
             guard !automation.normalizedTitle.isEmpty else {
@@ -637,6 +644,7 @@ private extension AutomationDTO {
             isEnabled: flow.isEnabled,
             createdAt: flow.createdAt,
             updatedAt: flow.updatedAt,
+            scheduledAt: flow.scheduledAt,
             lastRunAt: flow.lastRunAt,
             nextRunAt: flow.nextRunAt
         )

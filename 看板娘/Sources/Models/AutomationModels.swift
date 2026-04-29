@@ -94,25 +94,62 @@ enum AutomationFrequency: Codable, Equatable, Hashable {
         }
     }
 
-    func nextRunDate(after date: Date, calendar: Calendar = .current) -> Date? {
+    func nextRunDate(after date: Date, anchoredAt anchor: Date, calendar: Calendar = .current) -> Date? {
         switch self {
         case .runOnce:
             return nil
         case .every15Minutes:
-            return date.addingTimeInterval(15 * 60)
+            return nextFixedIntervalDate(after: date, anchoredAt: anchor, interval: 15 * 60)
         case .hourly:
-            return date.addingTimeInterval(60 * 60)
+            return nextFixedIntervalDate(after: date, anchoredAt: anchor, interval: 60 * 60)
         case .daily:
-            return calendar.date(byAdding: .day, value: 1, to: date)
+            return nextCalendarDate(after: date, anchoredAt: anchor) {
+                calendar.date(byAdding: .day, value: 1, to: $0)
+            }
         case let .everyNDays(interval):
-            return calendar.date(byAdding: .day, value: Self.clampedDayInterval(interval), to: date)
+            return nextCalendarDate(after: date, anchoredAt: anchor) {
+                calendar.date(byAdding: .day, value: Self.clampedDayInterval(interval), to: $0)
+            }
         case .weekly:
-            return calendar.date(byAdding: .weekOfYear, value: 1, to: date)
+            return nextCalendarDate(after: date, anchoredAt: anchor) {
+                calendar.date(byAdding: .weekOfYear, value: 1, to: $0)
+            }
         case .monthly:
-            return calendar.date(byAdding: .month, value: 1, to: date)
+            return nextCalendarDate(after: date, anchoredAt: anchor) {
+                calendar.date(byAdding: .month, value: 1, to: $0)
+            }
         case .yearly:
-            return calendar.date(byAdding: .year, value: 1, to: date)
+            return nextCalendarDate(after: date, anchoredAt: anchor) {
+                calendar.date(byAdding: .year, value: 1, to: $0)
+            }
         }
+    }
+
+    private func nextFixedIntervalDate(after date: Date, anchoredAt anchor: Date, interval: TimeInterval) -> Date {
+        guard anchor <= date else { return anchor }
+
+        let elapsed = date.timeIntervalSince(anchor)
+        let completedIntervals = floor(elapsed / interval) + 1
+        return anchor.addingTimeInterval(completedIntervals * interval)
+    }
+
+    private func nextCalendarDate(
+        after date: Date,
+        anchoredAt anchor: Date,
+        advancingBy advance: (Date) -> Date?
+    ) -> Date? {
+        guard anchor <= date else { return anchor }
+
+        var candidate = anchor
+        for _ in 0..<10_000 {
+            guard let next = advance(candidate) else { return nil }
+            candidate = next
+            if candidate > date {
+                return candidate
+            }
+        }
+
+        return nil
     }
 
     static func from(kind: Kind, dayInterval: Int) -> AutomationFrequency {
@@ -149,8 +186,60 @@ struct AutomationFlow: Codable, Identifiable, Equatable {
     var isEnabled: Bool
     var createdAt: Date
     var updatedAt: Date
+    var scheduledAt: Date
     var lastRunAt: Date?
     var nextRunAt: Date?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case prompt
+        case frequency
+        case isEnabled
+        case createdAt
+        case updatedAt
+        case scheduledAt
+        case lastRunAt
+        case nextRunAt
+    }
+
+    init(
+        id: UUID,
+        title: String,
+        prompt: String,
+        frequency: AutomationFrequency,
+        isEnabled: Bool,
+        createdAt: Date,
+        updatedAt: Date,
+        scheduledAt: Date,
+        lastRunAt: Date?,
+        nextRunAt: Date?
+    ) {
+        self.id = id
+        self.title = title
+        self.prompt = prompt
+        self.frequency = frequency
+        self.isEnabled = isEnabled
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.scheduledAt = scheduledAt
+        self.lastRunAt = lastRunAt
+        self.nextRunAt = nextRunAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        prompt = try container.decode(String.self, forKey: .prompt)
+        frequency = try container.decode(AutomationFrequency.self, forKey: .frequency)
+        isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        lastRunAt = try container.decodeIfPresent(Date.self, forKey: .lastRunAt)
+        nextRunAt = try container.decodeIfPresent(Date.self, forKey: .nextRunAt)
+        scheduledAt = try container.decodeIfPresent(Date.self, forKey: .scheduledAt) ?? nextRunAt ?? createdAt
+    }
 
     var normalizedTitle: String {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -166,6 +255,7 @@ struct AutomationFlow: Codable, Identifiable, Equatable {
             isEnabled: true,
             createdAt: now,
             updatedAt: now,
+            scheduledAt: now,
             lastRunAt: nil,
             nextRunAt: now
         )

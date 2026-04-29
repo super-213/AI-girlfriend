@@ -38,9 +38,10 @@ final class AutomationStore: ObservableObject {
         guard let index = automations.firstIndex(where: { $0.id == automation.id }) else { return }
 
         var updated = automation
-        updated.updatedAt = Date()
+        let now = Date()
+        updated.updatedAt = now
         if updated.isEnabled {
-            updated.nextRunAt = nextRunDate(for: updated, from: Date())
+            updated.nextRunAt = nextRunDate(for: updated, from: now)
         } else {
             updated.nextRunAt = nil
         }
@@ -80,7 +81,7 @@ final class AutomationStore: ObservableObject {
             automations[index].isEnabled = false
             automations[index].nextRunAt = nil
         } else {
-            automations[index].nextRunAt = automations[index].frequency.nextRunDate(after: date, calendar: calendar)
+            automations[index].nextRunAt = nextRunDate(for: automations[index], from: date)
         }
 
         save()
@@ -119,7 +120,7 @@ final class AutomationStore: ObservableObject {
             }
 
             var repaired = automation
-            repaired.nextRunAt = nextRunDate(for: automation, from: Date())
+            repaired.nextRunAt = nextRunDate(for: repaired, from: Date())
             return repaired
         }
         save()
@@ -134,9 +135,9 @@ final class AutomationStore: ObservableObject {
         guard automation.isEnabled else { return nil }
 
         if automation.frequency == .runOnce {
-            return automation.lastRunAt == nil ? date : nil
+            return automation.lastRunAt == nil ? automation.scheduledAt : nil
         }
 
-        return automation.frequency.nextRunDate(after: date, calendar: calendar)
+        return automation.frequency.nextRunDate(after: date, anchoredAt: automation.scheduledAt, calendar: calendar)
     }
 }
