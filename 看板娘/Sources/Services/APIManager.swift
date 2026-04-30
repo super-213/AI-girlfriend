@@ -20,7 +20,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     @AppStorage("aiModel") private var aiModel = "glm-4v-flash"
     
     /// API密钥
-    @AppStorage("apiKey") private var apiKey = "<默认API Key>"
+    @AppStorage("apiKey") private var apiKey = ""
     
     /// 系统提示词
     @AppStorage("systemPrompt") private var systemPrompt = "你的名字叫布偶熊·觅语，用80%可爱和20%傲娇的风格回答问题，在回答问题前都要说：指挥官，你好。"

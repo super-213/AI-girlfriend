@@ -15,7 +15,7 @@ struct PreferencesView: View {
     @StateObject private var backend: PreferencesViewBackend
     @StateObject private var automationStore = AutomationStore.shared
     
-    @AppStorage("apiKey") private var apiKey = "<默认API Key>f"
+    @AppStorage("apiKey") private var apiKey = ""
     @AppStorage("aiModel") private var aiModel = "glm-4v-flash"
     @AppStorage("systemPrompt") private var systemPrompt = "你的名字叫布偶熊·觅语，用80%可爱和20%傲娇的风格回答问题，在回答问题前都要说：指挥官，你好。"
     @AppStorage("apiUrl") private var apiUrl = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
@@ -399,128 +399,5 @@ extension UTType {
             return type
         }
         return .text
-    }
-}
-
-// MARK: - Skills Tab
-
-struct SkillsSettingsTab: View {
-    let agentFile: AgentFile?
-    let skillFiles: [SkillFile]
-    let onImportAgent: () -> Void
-    let onGenerateAgent: () -> Void
-    let onRemoveAgent: () -> Void
-    let onImportSkills: () -> Void
-    let onDeleteSkill: (Int) -> Void
-    
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: LayoutConstants.sectionSpacing) {
-                agentSection
-                
-                Divider()
-                    .padding(.vertical, LayoutConstants.fieldSpacing)
-                
-                skillsSection
-            }
-            .padding(LayoutConstants.horizontalPadding)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("技能设置标签")
-    }
-    
-    private var agentSection: some View {
-        VStack(alignment: .leading, spacing: DesignSpacing.md) {
-            Text("agent.md")
-                .font(DesignFonts.headline)
-            
-            Text("用于控制模型根据用户输入选择正常输出、调用系统命令或使用 skill。")
-                .font(DesignFonts.caption)
-                .foregroundColor(DesignColors.textSecondary)
-            
-            if let agentFile = agentFile {
-                SkillFileRow(
-                    title: agentFile.name,
-                    subtitle: agentFile.path,
-                    onDelete: onRemoveAgent
-                )
-            } else {
-                Text("未添加 agent.md")
-                    .font(DesignFonts.caption)
-                    .foregroundColor(DesignColors.textSecondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, DesignSpacing.sm)
-            }
-            
-            HStack(spacing: DesignSpacing.sm) {
-                Button(action: onImportAgent) {
-                    Label(agentFile == nil ? "导入 agent.md" : "替换 agent.md", systemImage: "doc.fill.badge.plus")
-                }
-                
-                Button(action: onGenerateAgent) {
-                    Label("生成示例", systemImage: "wand.and.stars")
-                }
-            }
-        }
-    }
-    
-    private var skillsSection: some View {
-        VStack(alignment: .leading, spacing: DesignSpacing.md) {
-            HStack {
-                Text("skill.md")
-                    .font(DesignFonts.headline)
-                Spacer()
-                Button(action: onImportSkills) {
-                    Label("导入", systemImage: "plus.circle.fill")
-                }
-            }
-            
-            Text("一个或多个 skill 文件，用于扩展模型的能力。")
-                .font(DesignFonts.caption)
-                .foregroundColor(DesignColors.textSecondary)
-            
-            if skillFiles.isEmpty {
-                Text("暂无 skill.md，点击导入按钮添加")
-                    .font(DesignFonts.caption)
-                    .foregroundColor(DesignColors.textSecondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, DesignSpacing.lg)
-            } else {
-                ForEach(Array(skillFiles.enumerated()), id: \.element.id) { index, skill in
-                    SkillFileRow(
-                        title: skill.name,
-                        subtitle: skill.path,
-                        onDelete: { onDeleteSkill(index) }
-                    )
-                }
-            }
-        }
-    }
-}
-
-struct SkillFileRow: View {
-    let title: String
-    let subtitle: String
-    let onDelete: () -> Void
-    
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(DesignFonts.body)
-                Text(subtitle)
-                    .font(DesignFonts.caption)
-                    .foregroundColor(DesignColors.textSecondary)
-            }
-            Spacer()
-            Button(action: onDelete) {
-                Image(systemName: "trash")
-                    .foregroundColor(.red)
-            }
-            .buttonStyle(PlainButtonStyle())
-        }
-        .padding()
-        .background(Color.gray.opacity(0.1))
-        .cornerRadius(8)
     }
 }
