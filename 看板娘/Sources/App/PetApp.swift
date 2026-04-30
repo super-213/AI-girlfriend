@@ -12,6 +12,7 @@ import AppKit
 struct PetApp: App {
     @StateObject private var backend = PetViewBackend()
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    private static var preferencesWindow: NSWindow?
 
     init() {
         // 初始化内存优化器
@@ -39,6 +40,16 @@ struct PetApp: App {
 
 
     private func showPreferencesWindow() {
+        if let window = Self.preferencesWindow {
+            if window.isMiniaturized {
+                window.deminiaturize(nil)
+            }
+
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -50,6 +61,8 @@ struct PetApp: App {
 
         // 传入同一个 backend 实例
         window.contentView = NSHostingView(rootView: PreferencesView(petViewBackend: backend))
+        Self.preferencesWindow = window
+        NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.level = .normal
     }
