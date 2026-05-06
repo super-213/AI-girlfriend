@@ -25,17 +25,44 @@ struct PetView: View {
 
     private let layoutMetrics = PetLayoutMetrics.live
     
+    /// 鼠标是否悬停在宠物动图上
+    @State private var isHoveringPet = false
+    
+    /// 输入框获得焦点时保持显示
+    @FocusState private var isInputFocused: Bool
+    
+    /// 输入框是否应该显示（悬停或聚焦时）
+    private var shouldShowInput: Bool {
+        isHoveringPet || isInputFocused || !petViewBackend.userInput.isEmpty
+    }
+    
     // MARK: - 主体
     var body: some View {
         VStack(spacing: 0) {
+            // 输入框：始终占据布局空间，通过 opacity 控制显隐
+            // 当输出框不显示时，输入框紧贴动图上方；有输出框时在输出框上方
             inputField
+                .opacity(shouldShowInput ? 1 : 0)
+                .scaleEffect(shouldShowInput ? 1 : 0.9)
+                .offset(y: shouldShowInput ? 0 : 10)
+                .allowsHitTesting(shouldShowInput)
+                .animation(.spring(response: 0.4, dampingFraction: 0.75), value: shouldShowInput)
             
-            Spacer().frame(height: layoutMetrics.inputToChatSpacing)  // inputField 和 chatOutput 之间的间距
+            Spacer().frame(height: layoutMetrics.inputToChatSpacing)
             
-            // 使用 ZStack 实现重叠效果
+            // 使用 ZStack 实现重叠效果（保持原始布局）
             ZStack(alignment: .top) {
                 VStack(spacing: 0) {
+                    // 输出框：始终占据布局空间，通过 opacity 控制显隐
                     chatOutput
+                        .opacity(petViewBackend.showOutputBox ? 1 : 0)
+                        .scaleEffect(petViewBackend.showOutputBox ? 1 : 0.92)
+                        .offset(y: petViewBackend.showOutputBox ? 0 : -8)
+                        .allowsHitTesting(petViewBackend.showOutputBox)
+                        .animation(
+                            .spring(response: 0.5, dampingFraction: 0.7, blendDuration: 0.1),
+                            value: petViewBackend.showOutputBox
+                        )
                     Spacer()
                 }
                 
@@ -73,15 +100,20 @@ struct PetView: View {
             "用户输入",
             text: $petViewBackend.userInput,
             prompt: Text("我会帮助指挥官解决问题...")
-                .foregroundColor(.gray) // 占位符颜色
+                .foregroundColor(.gray)
         )
             .textFieldStyle(PlainTextFieldStyle())
-            .foregroundColor(.black) // 输入框颜色
+            .foregroundColor(.black)
             .modifier(EnhancedTextFieldStyle())
+            .focused($isInputFocused)
             .padding([.top, .leading, .trailing])
             .onSubmit {
                 withAnimation(DesignAnimation.spring) {
                     petViewBackend.submitInput()
+                }
+                // 提交后延迟取消焦点，让输入框优雅消失
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    isInputFocused = false
                 }
             }
     }
@@ -105,9 +137,14 @@ struct PetView: View {
         )
         .modifier(SmoothScrollStyle())
         .padding([.leading, .trailing])
+        .onTapGesture {
+            // 点击输出框时重置自动隐藏计时器
+            petViewBackend.revealOutputBox(autoHideAfter: 15)
+        }
     }
     
     /// 宠物图像显示
+    /// 使用 AlphaHitTestOverlay 实现透明像素穿透，只有点击到非透明区域才触发动作
     private var petImage: some View {
         Group {
             if petViewBackend.currentGif.hasPrefix("/") {
@@ -117,11 +154,12 @@ struct PetView: View {
                     .id(petViewBackend.currentGif)
                     .scaledToFit()
                     .frame(width: 300, height: 300)
-                    .onTapGesture {
-                        petViewBackend.handleTap()
-                    }
+                    .overlay(
+                        AlphaHitTestOverlay {
+                            petViewBackend.handleTap()
+                        }
+                    )
                     .onDisappear {
-                        // 清理GIF缓存
                         SDImageCache.shared.clearMemory()
                     }
             } else {
@@ -131,14 +169,18 @@ struct PetView: View {
                     .id(petViewBackend.currentGif)
                     .scaledToFit()
                     .frame(width: 300, height: 300)
-                    .onTapGesture {
-                        petViewBackend.handleTap()
-                    }
+                    .overlay(
+                        AlphaHitTestOverlay {
+                            petViewBackend.handleTap()
+                        }
+                    )
                     .onDisappear {
-                        // 清理GIF缓存
                         SDImageCache.shared.clearMemory()
                     }
             }
+        }
+        .onHover { hovering in
+            isHoveringPet = hovering
         }
     }
 }

@@ -47,6 +47,12 @@ class PetViewBackend: ObservableObject {
     /// 是否正在执行命令
     @Published var isExecutingCommand = false
     
+    /// 是否显示输出框（定时/自动化任务触发时显示）
+    @Published var showOutputBox = false
+    
+    /// 输出框自动隐藏定时器
+    private var outputBoxHideTimer: AnyCancellable?
+    
     /// 最近一次用户输入
     private var lastUserInput: String = ""
     
@@ -107,6 +113,8 @@ class PetViewBackend: ObservableObject {
     deinit {
         NotificationCenter.default.removeObserver(self)
         cancelAutoActionLoop()
+        outputBoxHideTimer?.cancel()
+        outputBoxHideTimer = nil
         automationTimer?.invalidate()
         automationTimer = nil
         automationStoreCancellable?.cancel()
@@ -159,10 +167,13 @@ class PetViewBackend: ObservableObject {
         if trimmedInput.contains("我想听") || trimmedInput.contains("播放") || trimmedInput.contains("来一首") {
             let songName = MusicPlayerService.extractSongName(from: trimmedInput)
             streamedResponse = MusicPlayerService.playSong(named: songName)
+            revealOutputBox(autoHideAfter: 10)
             return
         }
 
         messageHistory.append(["role": "user", "content": trimmedInput])
+        // 用户主动输入时显示输出框
+        revealOutputBox(autoHideAfter: 30)
         sendRequest()
     }
 
@@ -171,6 +182,8 @@ class PetViewBackend: ObservableObject {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedPrompt.isEmpty else { return }
 
+        // 自动化任务触发时显示输出框
+        revealOutputBox(autoHideAfter: 20)
         submitExternalInput(trimmedPrompt)
     }
     
@@ -314,6 +327,28 @@ class PetViewBackend: ObservableObject {
         streamedResponse = "[完成] 已取消执行命令"
     }
     
+    // MARK: - 输出框显示控制
+    
+    /// 显示输出框并在指定时间后自动隐藏
+    /// - Parameter duration: 显示持续时间（秒），默认15秒后自动隐藏
+    func revealOutputBox(autoHideAfter duration: TimeInterval = 15) {
+        outputBoxHideTimer?.cancel()
+        showOutputBox = true
+        
+        outputBoxHideTimer = Just(())
+            .delay(for: .seconds(duration), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.dismissOutputBox()
+            }
+    }
+    
+    /// 隐藏输出框
+    func dismissOutputBox() {
+        outputBoxHideTimer?.cancel()
+        outputBoxHideTimer = nil
+        showOutputBox = false
+    }
+    
 }
 
 extension PetViewBackend {
@@ -351,6 +386,9 @@ extension PetViewBackend {
         } else {
             streamedResponse = currentCharacter.autoMessages.randomElement() ?? ""
         }
+        
+        // 自动行为触发时显示输出框
+        revealOutputBox(autoHideAfter: 10)
     }
     
     /// 取消自动行为循环
