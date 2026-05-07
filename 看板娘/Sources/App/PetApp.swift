@@ -109,7 +109,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.hasShadow = false
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        window.isMovableByWindowBackground = true
+        // 不使用 isMovableByWindowBackground，改为通过宠物图片区域（AlphaHitTestNSView）拖动
+        // 避免拦截 chatBox 中 TextField 的点击事件
+        window.isMovableByWindowBackground = false
+        // 允许窗口接受鼠标移动事件，确保 hover 检测正常
+        window.acceptsMouseMovedEvents = true
         
         // 隐藏红绿灯按钮（关闭、最小化、全屏）
         window.standardWindowButton(.closeButton)?.isHidden = true

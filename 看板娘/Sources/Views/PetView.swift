@@ -28,12 +28,18 @@ struct PetView: View {
     /// 鼠标是否悬停在宠物动图上
     @State private var isHoveringPet = false
     
+    /// 鼠标是否悬停在输入框区域
+    @State private var isHoveringInput = false
+    
+    /// 延迟隐藏用的标记（鼠标离开后短暂保持显示）
+    @State private var keepInputVisible = false
+    
     /// 输入框获得焦点时保持显示
     @FocusState private var isInputFocused: Bool
     
-    /// 输入框是否应该显示（悬停或聚焦时）
+    /// 输入框是否应该显示（悬停、聚焦、或延迟隐藏期间）
     private var shouldShowInput: Bool {
-        isHoveringPet || isInputFocused || !petViewBackend.userInput.isEmpty
+        isHoveringPet || isHoveringInput || isInputFocused || keepInputVisible || !petViewBackend.userInput.isEmpty
     }
     
     // MARK: - 主体
@@ -107,6 +113,9 @@ struct PetView: View {
             .modifier(EnhancedTextFieldStyle())
             .focused($isInputFocused)
             .padding([.top, .leading, .trailing])
+            .onHover { hovering in
+                isHoveringInput = hovering
+            }
             .onSubmit {
                 withAnimation(DesignAnimation.spring) {
                     petViewBackend.submitInput()
@@ -155,9 +164,10 @@ struct PetView: View {
                     .scaledToFit()
                     .frame(width: 300, height: 300)
                     .overlay(
-                        AlphaHitTestOverlay {
-                            petViewBackend.handleTap()
-                        }
+                        AlphaHitTestOverlay(
+                            onTap: { petViewBackend.handleTap() },
+                            onHover: { hovering in handlePetHover(hovering) }
+                        )
                     )
                     .onDisappear {
                         SDImageCache.shared.clearMemory()
@@ -170,17 +180,34 @@ struct PetView: View {
                     .scaledToFit()
                     .frame(width: 300, height: 300)
                     .overlay(
-                        AlphaHitTestOverlay {
-                            petViewBackend.handleTap()
-                        }
+                        AlphaHitTestOverlay(
+                            onTap: { petViewBackend.handleTap() },
+                            onHover: { hovering in handlePetHover(hovering) }
+                        )
                     )
                     .onDisappear {
                         SDImageCache.shared.clearMemory()
                     }
             }
         }
-        .onHover { hovering in
-            isHoveringPet = hovering
+    }
+    
+    // MARK: - 辅助方法
+    
+    /// 处理基于 alpha 检测的宠物悬停状态变化
+    private func handlePetHover(_ hovering: Bool) {
+        isHoveringPet = hovering
+        if hovering {
+            // 鼠标进入宠物非透明区域，立即显示并取消延迟隐藏
+            keepInputVisible = true
+        } else {
+            // 鼠标离开宠物非透明区域，延迟 0.8 秒后再判断是否隐藏
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                // 如果此时鼠标既不在宠物上也不在输入框上，且输入框没有焦点，才隐藏
+                if !isHoveringPet && !isHoveringInput && !isInputFocused {
+                    keepInputVisible = false
+                }
+            }
         }
     }
 }
