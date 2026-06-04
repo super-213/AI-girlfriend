@@ -14,6 +14,7 @@ enum LocalMP3PlayerError: LocalizedError {
     case fileNotFound
     case unreadableFile
     case unsupportedFile
+    case playerOpenFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -27,6 +28,8 @@ enum LocalMP3PlayerError: LocalizedError {
             return "MP3 文件不可读或无访问权限"
         case .unsupportedFile:
             return "请选择 .mp3 文件"
+        case let .playerOpenFailed(reason):
+            return "MP3 文件打开失败：\(reason)"
         }
     }
 }
@@ -70,10 +73,16 @@ final class LocalMP3PlayerService: NSObject, AVAudioPlayerDelegate {
             throw LocalMP3PlayerError.fileNotFound
         }
 
-        guard FileManager.default.isReadableFile(atPath: url.path),
-              url.startAccessingSecurityScopedResource() else {
+        guard url.startAccessingSecurityScopedResource() else {
             throw LocalMP3PlayerError.unreadableFile
         }
+
+        guard FileManager.default.isReadableFile(atPath: url.path) else {
+            url.stopAccessingSecurityScopedResource()
+            throw LocalMP3PlayerError.unreadableFile
+        }
+
+        scopedURL = url
 
         do {
             let player = try AVAudioPlayer(contentsOf: url)
@@ -82,7 +91,6 @@ final class LocalMP3PlayerService: NSObject, AVAudioPlayerDelegate {
             player.prepareToPlay()
 
             self.player = player
-            self.scopedURL = url
             self.activeTriggerId = triggerId
             self.onFinish = onFinish
 
@@ -92,7 +100,7 @@ final class LocalMP3PlayerService: NSObject, AVAudioPlayerDelegate {
             }
         } catch {
             cleanupScopedResource()
-            throw error
+            throw LocalMP3PlayerError.playerOpenFailed(error.localizedDescription)
         }
     }
 

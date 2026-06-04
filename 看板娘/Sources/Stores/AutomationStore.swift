@@ -89,7 +89,7 @@ final class AutomationStore: ObservableObject {
 
     func nextEnabledAutomationDate() -> Date? {
         automations
-            .filter { $0.isEnabled && !$0.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .filter { $0.isEnabled && $0.hasRunnableContent }
             .compactMap(\.nextRunAt)
             .min()
     }
@@ -97,7 +97,7 @@ final class AutomationStore: ObservableObject {
     func dueAutomations(asOf date: Date = Date()) -> [AutomationFlow] {
         automations.filter { automation in
             guard automation.isEnabled,
-                  !automation.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  automation.hasRunnableContent,
                   let nextRunAt = automation.nextRunAt else {
                 return false
             }
@@ -115,7 +115,7 @@ final class AutomationStore: ObservableObject {
         automations = decoded.map { automation in
             guard automation.isEnabled,
                   automation.nextRunAt == nil,
-                  !automation.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                  automation.hasRunnableContent else {
                 return automation
             }
 
@@ -139,5 +139,11 @@ final class AutomationStore: ObservableObject {
         }
 
         return automation.frequency.nextRunDate(after: date, anchoredAt: automation.scheduledAt, calendar: calendar)
+    }
+}
+
+private extension AutomationFlow {
+    var hasRunnableContent: Bool {
+        triggerId != nil || !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }

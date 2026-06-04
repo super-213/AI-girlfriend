@@ -78,7 +78,7 @@ final class TriggerStore: ObservableObject {
     func updateAudioFile(for trigger: TriggerDefinition, url: URL) throws {
         guard var updated = self.trigger(id: trigger.id) else { return }
         let bookmarkData = try url.bookmarkData(
-            options: [.withSecurityScope],
+            options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
             includingResourceValuesForKeys: nil,
             relativeTo: nil
         )

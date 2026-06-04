@@ -181,7 +181,7 @@ extension PreferencesView {
             )
 
         case .automation:
-            AutomationSettingsTab(store: automationStore)
+            AutomationSettingsTab(store: automationStore, triggerStore: triggerStore)
 
         case .triggers:
             TriggerSettingsTab(store: triggerStore)

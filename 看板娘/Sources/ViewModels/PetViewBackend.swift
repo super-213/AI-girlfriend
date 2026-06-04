@@ -222,6 +222,36 @@ class PetViewBackend: ObservableObject {
         revealOutputBox(autoHideAfter: 20)
         submitExternalInput(trimmedPrompt)
     }
+
+    func submitAutomation(_ automation: AutomationFlow) {
+        if let triggerId = automation.triggerId {
+            submitAutomationTrigger(triggerId)
+        } else {
+            submitAutomationPrompt(automation.prompt)
+        }
+    }
+
+    private func submitAutomationTrigger(_ triggerId: UUID) {
+        isThinking = true
+        streamedResponse = ""
+        revealOutputBox(autoHideAfter: 20)
+
+        let result = triggerDispatcher.runEnabledTrigger(id: triggerId)
+        switch result {
+        case .executed(let message):
+            isThinking = false
+            streamedResponse = message
+            revealOutputBox(autoHideAfter: 10)
+        case .failed(let message):
+            isThinking = false
+            streamedResponse = "自动化触发器执行失败：\(message)"
+            revealOutputBox(autoHideAfter: 15)
+        case .noEnabledTriggers, .notMatched:
+            isThinking = false
+            streamedResponse = "自动化触发器未执行"
+            revealOutputBox(autoHideAfter: 10)
+        }
+    }
     
     /// 处理宠物点击事件
     func handleTap() {
@@ -478,7 +508,7 @@ extension PetViewBackend {
         }
 
         automationStore.markCompleted(automation)
-        submitAutomationPrompt(automation.prompt)
+        submitAutomation(automation)
     }
     
     // MARK: - 内存管理

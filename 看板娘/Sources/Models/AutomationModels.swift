@@ -182,6 +182,7 @@ struct AutomationFlow: Codable, Identifiable, Equatable {
     var id: UUID
     var title: String
     var prompt: String
+    var triggerId: UUID?
     var frequency: AutomationFrequency
     var isEnabled: Bool
     var createdAt: Date
@@ -194,6 +195,7 @@ struct AutomationFlow: Codable, Identifiable, Equatable {
         case id
         case title
         case prompt
+        case triggerId
         case frequency
         case isEnabled
         case createdAt
@@ -207,6 +209,7 @@ struct AutomationFlow: Codable, Identifiable, Equatable {
         id: UUID,
         title: String,
         prompt: String,
+        triggerId: UUID?,
         frequency: AutomationFrequency,
         isEnabled: Bool,
         createdAt: Date,
@@ -218,6 +221,7 @@ struct AutomationFlow: Codable, Identifiable, Equatable {
         self.id = id
         self.title = title
         self.prompt = prompt
+        self.triggerId = triggerId
         self.frequency = frequency
         self.isEnabled = isEnabled
         self.createdAt = createdAt
@@ -232,6 +236,7 @@ struct AutomationFlow: Codable, Identifiable, Equatable {
         id = try container.decode(UUID.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
         prompt = try container.decode(String.self, forKey: .prompt)
+        triggerId = try container.decodeIfPresent(UUID.self, forKey: .triggerId)
         frequency = try container.decode(AutomationFrequency.self, forKey: .frequency)
         isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
@@ -251,6 +256,7 @@ struct AutomationFlow: Codable, Identifiable, Equatable {
             id: UUID(),
             title: "新的自动化",
             prompt: "",
+            triggerId: nil,
             frequency: .daily,
             isEnabled: true,
             createdAt: now,

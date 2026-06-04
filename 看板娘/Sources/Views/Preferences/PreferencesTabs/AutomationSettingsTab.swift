@@ -9,6 +9,7 @@ import SwiftUI
 
 struct AutomationSettingsTab: View {
     @ObservedObject var store: AutomationStore
+    @ObservedObject var triggerStore: TriggerStore
 
     @State private var selectedAutomationID: UUID?
     @State private var draft = AutomationDraft()
@@ -107,6 +108,7 @@ struct AutomationSettingsTab: View {
             ForEach(store.automations) { automation in
                 AutomationRow(
                     automation: automation,
+                    triggerTitle: triggerTitle(for: automation.triggerId),
                     isSelected: automation.id == selectedAutomation?.id,
                     onSelect: {
                         selectedAutomationID = automation.id
@@ -146,23 +148,57 @@ struct AutomationSettingsTab: View {
                 }
 
                 VStack(alignment: .leading, spacing: DesignSpacing.sm) {
-                    Text("提示词")
+                    Text("运行内容")
                         .font(DesignFonts.caption)
                         .foregroundColor(DesignColors.textSecondary)
-                    TextEditor(text: $draft.prompt)
-                        .font(DesignFonts.input)
-                        .frame(minHeight: 96)
-                        .padding(DesignSpacing.sm)
-                        .scrollContentBackground(.hidden)
-                        .background(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .fill(DesignColors.surfaceLight)
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .stroke(DesignColors.border.opacity(0.7), lineWidth: 1)
-                        )
+
+                    Picker("运行内容", selection: $draft.runMode) {
+                        Text("发送提示词").tag(AutomationRunMode.prompt)
+                        Text("运行触发器").tag(AutomationRunMode.trigger)
+                    }
+                    .pickerStyle(.segmented)
+
+                    if draft.runMode == .prompt {
+                        TextEditor(text: $draft.prompt)
+                            .font(DesignFonts.input)
+                            .frame(minHeight: 96)
+                            .padding(DesignSpacing.sm)
+                            .scrollContentBackground(.hidden)
+                            .background(
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .fill(DesignColors.surfaceLight)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .stroke(DesignColors.border.opacity(0.7), lineWidth: 1)
+                            )
+                    } else {
+                        if runnableTriggers.isEmpty {
+                            Text("暂无已启用且配置完整的触发器")
+                                .font(DesignFonts.caption)
+                                .foregroundColor(DesignColors.warning)
+                                .padding(DesignSpacing.md)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                        .fill(DesignColors.surfaceLight)
+                                )
+                        } else {
+                            Picker("触发器", selection: $draft.triggerIDString) {
+                                Text("选择触发器").tag("")
+                                ForEach(runnableTriggers) { trigger in
+                                    Text(trigger.normalizedTitle).tag(trigger.id.uuidString)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .padding(DesignSpacing.md)
+                            .background(
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .fill(DesignColors.surfaceLight)
+                            )
+                        }
+                    }
                 }
 
                 FrequencyEditor(
@@ -211,7 +247,8 @@ struct AutomationSettingsTab: View {
     private func saveDraft() {
         guard var automation = selectedAutomation else { return }
         automation.title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        automation.prompt = draft.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        automation.prompt = draft.runMode == .prompt ? draft.prompt.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        automation.triggerId = draft.runMode == .trigger ? UUID(uuidString: draft.triggerIDString) : nil
         automation.frequency = AutomationFrequency.from(kind: draft.frequencyKind, dayInterval: draft.dayInterval)
         automation.scheduledAt = draft.scheduledAt
         store.updateAutomation(automation)
@@ -232,10 +269,20 @@ struct AutomationSettingsTab: View {
             draft = AutomationDraft(automation: selectedAutomation)
         }
     }
+
+    private var runnableTriggers: [TriggerDefinition] {
+        triggerStore.triggers.filter { $0.isEnabled && $0.hasRunnableAction }
+    }
+
+    private func triggerTitle(for triggerId: UUID?) -> String? {
+        guard let triggerId else { return nil }
+        return triggerStore.trigger(id: triggerId)?.normalizedTitle
+    }
 }
 
 private struct AutomationRow: View {
     let automation: AutomationFlow
+    let triggerTitle: String?
     let isSelected: Bool
     let onSelect: () -> Void
     let onToggle: (Bool) -> Void
@@ -301,6 +348,17 @@ private struct AutomationRow: View {
     private var statusText: String {
         if !automation.isEnabled {
             return "已停用"
+        }
+
+        if automation.triggerId != nil, triggerTitle == nil {
+            return "请选择已启用触发器"
+        }
+
+        if let triggerTitle {
+            if let nextRunAt = automation.nextRunAt {
+                return "运行触发器：\(triggerTitle) · \(nextRunAt.formatted(date: .abbreviated, time: .shortened))"
+            }
+            return "运行触发器：\(triggerTitle)"
         }
 
         if automation.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -374,9 +432,18 @@ private struct FrequencyEditor: View {
     }
 }
 
+private enum AutomationRunMode: String, CaseIterable, Identifiable {
+    case prompt
+    case trigger
+
+    var id: String { rawValue }
+}
+
 private struct AutomationDraft {
     var title: String = ""
     var prompt: String = ""
+    var runMode: AutomationRunMode = .prompt
+    var triggerIDString: String = ""
     var frequencyKind: AutomationFrequency.Kind = .daily
     var dayInterval: Int = 2
     var scheduledAt: Date = Date()
@@ -386,6 +453,13 @@ private struct AutomationDraft {
     init(automation: AutomationFlow) {
         title = automation.title
         prompt = automation.prompt
+        if let triggerId = automation.triggerId {
+            runMode = .trigger
+            triggerIDString = triggerId.uuidString
+        } else {
+            runMode = .prompt
+            triggerIDString = ""
+        }
         frequencyKind = automation.frequency.kind
         scheduledAt = automation.scheduledAt
         if case let .everyNDays(interval) = automation.frequency {
@@ -394,6 +468,11 @@ private struct AutomationDraft {
     }
 
     var canSave: Bool {
-        !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        switch runMode {
+        case .prompt:
+            return !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .trigger:
+            return UUID(uuidString: triggerIDString) != nil
+        }
     }
 }

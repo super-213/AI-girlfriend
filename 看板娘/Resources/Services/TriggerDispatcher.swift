@@ -54,6 +54,22 @@ final class TriggerDispatcher {
         }
     }
 
+    func runEnabledTrigger(id triggerId: UUID) -> TriggerHandlingResult {
+        guard let trigger = store.trigger(id: triggerId) else {
+            return .failed("未找到指定触发器")
+        }
+
+        guard trigger.isEnabled else {
+            return .failed("触发器未启用")
+        }
+
+        guard trigger.hasRunnableAction else {
+            return .failed("触发器缺少可执行动作配置")
+        }
+
+        return start(trigger)
+    }
+
     private func dispatch(_ result: TriggerRecognitionResult) -> TriggerHandlingResult {
         guard let triggerId = result.triggerId,
               let type = result.type,

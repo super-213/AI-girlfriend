@@ -146,6 +146,7 @@ struct AutomationDTO: Codable, Identifiable, Equatable {
     var id: UUID
     var title: String
     var prompt: String
+    var triggerId: UUID?
     var frequency: AutomationFrequency
     var isEnabled: Bool
     var createdAt: Date
@@ -159,6 +160,7 @@ struct UpdateAutomationRequest: Codable {
     var id: UUID
     var title: String?
     var prompt: String?
+    var triggerId: UUID?
     var frequency: AutomationFrequency?
     var isEnabled: Bool?
     var scheduledAt: Date?
@@ -168,6 +170,7 @@ struct UpdateAutomationRequest: Codable {
         id: UUID,
         title: String? = nil,
         prompt: String? = nil,
+        triggerId: UUID? = nil,
         frequency: AutomationFrequency? = nil,
         isEnabled: Bool? = nil,
         scheduledAt: Date? = nil,
@@ -176,6 +179,7 @@ struct UpdateAutomationRequest: Codable {
         self.id = id
         self.title = title
         self.prompt = prompt
+        self.triggerId = triggerId
         self.frequency = frequency
         self.isEnabled = isEnabled
         self.scheduledAt = scheduledAt
@@ -365,6 +369,9 @@ final class PetControlService: PetControlling {
             if let prompt = request.prompt {
                 automation.prompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
             }
+            if let triggerId = request.triggerId {
+                automation.triggerId = triggerId
+            }
             if let frequency = request.frequency {
                 automation.frequency = frequency
             }
@@ -399,6 +406,7 @@ final class PetControlService: PetControlling {
             }
 
             let prompt: String
+            var automationToSubmit: AutomationFlow?
             var automationID: UUID?
 
             if let id = request.id {
@@ -408,6 +416,7 @@ final class PetControlService: PetControlling {
                 prompt = automation.prompt
                 automationID = automation.id
                 automationStore.markCompleted(automation)
+                automationToSubmit = automation
             } else if let requestPrompt = request.prompt {
                 prompt = requestPrompt
             } else {
@@ -415,11 +424,15 @@ final class PetControlService: PetControlling {
             }
 
             let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmedPrompt.isEmpty else {
+            guard automationToSubmit?.triggerId != nil || !trimmedPrompt.isEmpty else {
                 throw PetControlError.invalidInput("自动化提示词不能为空")
             }
 
-            backend.submitExternalInput(trimmedPrompt)
+            if let automationToSubmit {
+                backend.submitAutomation(automationToSubmit)
+            } else {
+                backend.submitExternalInput(trimmedPrompt)
+            }
             let result = AutomationRunResult(
                 requestID: request.context.requestID,
                 automationID: automationID,
@@ -640,6 +653,7 @@ private extension AutomationDTO {
             id: flow.id,
             title: flow.normalizedTitle,
             prompt: flow.prompt,
+            triggerId: flow.triggerId,
             frequency: flow.frequency,
             isEnabled: flow.isEnabled,
             createdAt: flow.createdAt,
