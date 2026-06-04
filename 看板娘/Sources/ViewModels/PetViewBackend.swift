@@ -72,6 +72,9 @@ class PetViewBackend: ObservableObject {
 
     /// 自动化流程存储
     private let automationStore = AutomationStore.shared
+
+    /// 触发器调度器
+    private let triggerDispatcher = TriggerDispatcher.shared
     
     // MARK: - 自动交互定时器
     
@@ -163,16 +166,49 @@ class PetViewBackend: ObservableObject {
         lastUserInput = trimmedInput
         commandIterationCount = 0
         messageHistory = [["role": "system", "content": apiManager.systemPromptContent()]]
-        
-        if trimmedInput.contains("我想听") || trimmedInput.contains("播放") || trimmedInput.contains("来一首") {
-            let songName = MusicPlayerService.extractSongName(from: trimmedInput)
-            streamedResponse = MusicPlayerService.playSong(named: songName)
-            revealOutputBox(autoHideAfter: 10)
-            return
+
+        isThinking = true
+        streamedResponse = ""
+        revealOutputBox(autoHideAfter: 30)
+
+        triggerDispatcher.handleUserInput(trimmedInput) { [weak self] result in
+            guard let self else { return }
+
+            switch result {
+            case .executed(let message):
+                self.isThinking = false
+                self.streamedResponse = message
+                self.revealOutputBox(autoHideAfter: 10)
+
+            case .failed(let message):
+                self.isThinking = false
+                self.streamedResponse = "触发器执行失败：\(message)"
+                self.revealOutputBox(autoHideAfter: 15)
+
+            case .noEnabledTriggers, .notMatched:
+                if !self.tryLegacyAppleMusicFallback(trimmedInput) {
+                    self.continueChatProcessing(trimmedInput)
+                }
+            }
+        }
+    }
+
+    private func tryLegacyAppleMusicFallback(_ trimmedInput: String) -> Bool {
+        guard trimmedInput.contains("我想听")
+                || trimmedInput.contains("播放")
+                || trimmedInput.contains("来一首") else {
+            return false
         }
 
+        let songName = MusicPlayerService.extractSongName(from: trimmedInput)
+        streamedResponse = MusicPlayerService.playSong(named: songName)
+        isThinking = false
+        revealOutputBox(autoHideAfter: 10)
+        return true
+    }
+
+    private func continueChatProcessing(_ trimmedInput: String) {
         messageHistory.append(["role": "user", "content": trimmedInput])
-        // 用户主动输入时显示输出框
         revealOutputBox(autoHideAfter: 30)
         sendRequest()
     }

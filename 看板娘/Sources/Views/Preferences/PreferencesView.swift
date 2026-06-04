@@ -14,6 +14,7 @@ struct PreferencesView: View {
     @ObservedObject var petViewBackend: PetViewBackend
     @StateObject private var backend: PreferencesViewBackend
     @StateObject private var automationStore = AutomationStore.shared
+    @StateObject private var triggerStore = TriggerStore.shared
     
     @AppStorage("apiKey") private var apiKey = ""
     @AppStorage("aiModel") private var aiModel = "glm-4v-flash"
@@ -181,6 +182,9 @@ extension PreferencesView {
 
         case .automation:
             AutomationSettingsTab(store: automationStore)
+
+        case .triggers:
+            TriggerSettingsTab(store: triggerStore)
             
         case .characterBinding:
             CharacterBindingTab(

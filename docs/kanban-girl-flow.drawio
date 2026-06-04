@@ -1,0 +1,449 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/24.7.17 Chrome/128.0.6613.36 Electron/32.0.1 Safari/537.36" version="24.7.17" pages="3">
+  <diagram id="overview" name="01 总览">
+    <mxGraphModel dx="2187" dy="1660" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="1600" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="o_start" value="启动 App" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#5b9bd5;fontStyle=1;fontSize=16;" parent="1" vertex="1">
+          <mxGeometry x="120" y="220" width="180" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="o_petapp" value="PetApp&lt;br&gt;创建 PetViewBackend&lt;br&gt;初始化 MemoryOptimizer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#5b9bd5;fontSize=15;" parent="1" vertex="1">
+          <mxGeometry x="420" y="195" width="300" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="o_delegate" value="AppDelegate&lt;br&gt;设置透明悬浮主窗口&lt;br&gt;注册 Ctrl+T 热键" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#5b9bd5;fontSize=15;" parent="1" vertex="1">
+          <mxGeometry x="840" y="195" width="310" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="o_petview" value="PetView&lt;br&gt;输入框 / 输出框 / GIF 宠物" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;" parent="1" vertex="1">
+          <mxGeometry x="1270" y="195" width="310" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="o_backend" value="PetViewBackend&lt;br&gt;统一管理角色、动画、输入、AI 请求、自动行为与自动化调度" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;" parent="1" vertex="1">
+          <mxGeometry x="1700" y="175" width="360" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="o_input" value="用户输入 / 外部输入 / 自动化提示词" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=15;" parent="1" vertex="1">
+          <mxGeometry x="130" y="520" width="300" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="o_route" value="submitExternalInput()&lt;br&gt;判断音乐请求，否则组装消息历史" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;" parent="1" vertex="1">
+          <mxGeometry x="570" y="490" width="230" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="o_music" value="MusicPlayerService&lt;br&gt;打开 Apple Music 搜索&lt;br&gt;返回提示文本" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#82b366;fontSize=15;" parent="1" vertex="1">
+          <mxGeometry x="950" y="445" width="300" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="o_api" value="APIManager&lt;br&gt;读取 provider / model / apiKey / apiUrl&lt;br&gt;构建流式请求" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;" parent="1" vertex="1">
+          <mxGeometry x="950" y="640" width="300" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="o_llm" value="AI Provider&lt;br&gt;智谱 / Qwen OpenAI-compatible / Ollama" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;" parent="1" vertex="1">
+          <mxGeometry x="1410" y="650" width="320" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="o_render" value="streamedResponse&lt;br&gt;流式更新主窗口输出框" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;" parent="1" vertex="1">
+          <mxGeometry x="1870" y="650" width="310" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="o_prefs" value="PreferencesView&lt;br&gt;风格 / 模型 / 布局 / 技能 / 自动化 / 角色" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=15;" parent="1" vertex="1">
+          <mxGeometry x="173" y="840" width="340" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="o_defaults" value="UserDefaults&lt;br&gt;设置、静态消息、自定义角色、自动化流程索引" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffffff;strokeColor=#9673a6;fontSize=15;" parent="1" vertex="1">
+          <mxGeometry x="630" y="980" width="310" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="o_files" value="Application Support&lt;br&gt;CustomAnimations&lt;br&gt;AgentSkills / AuditLogs" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffffff;strokeColor=#9673a6;fontSize=15;" parent="1" vertex="1">
+          <mxGeometry x="1090" y="980" width="310" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="o_control" value="PetControlService&lt;br&gt;机器可调用控制面&lt;br&gt;sendMessage / switchCharacter / runAutomation / updateSettings / importSkill" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d0e9f2;strokeColor=#6c8ebf;fontSize=15;" parent="1" vertex="1">
+          <mxGeometry x="1550" y="950" width="360" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="o_external" value="外部入口与独立对话窗&lt;br&gt;Ctrl+T DialogWindow&lt;br&gt;未来 AppIntents / Shortcuts / URL / HTTP / WebSocket / MCP" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d0e9f2;strokeColor=#6c8ebf;fontSize=15;" parent="1" vertex="1">
+          <mxGeometry x="1980" y="950" width="340" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="oe1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#5b9bd5;strokeWidth=2;" parent="1" source="o_start" target="o_petapp" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#5b9bd5;strokeWidth=2;" parent="1" source="o_petapp" target="o_delegate" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#5b9bd5;strokeWidth=2;" parent="1" source="o_delegate" target="o_petview" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;strokeWidth=2;" parent="1" source="o_petview" target="o_backend" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;strokeWidth=2;" parent="1" source="o_input" target="o_route" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe6" value="音乐关键词" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;strokeWidth=2;" parent="1" source="o_route" target="o_music" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe7" value="普通对话" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#d6b656;strokeWidth=2;" parent="1" source="o_route" target="o_api" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#d6b656;strokeWidth=2;" parent="1" source="o_api" target="o_llm" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe9" value="流式响应" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#d6b656;strokeWidth=2;" parent="1" source="o_llm" target="o_render" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe10" value="更新配置" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;strokeWidth=2;" parent="1" source="o_prefs" target="o_defaults" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe11" value="导入文件" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;strokeWidth=2;" parent="1" source="o_prefs" target="o_files" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe12" value="读配置" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;dashed=1;" parent="1" source="o_defaults" target="o_api" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe13" value="注入 agent / skill" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;dashed=1;" parent="1" source="o_files" target="o_api" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe14" value="结构化动作" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#6c8ebf;strokeWidth=2;" parent="1" source="o_external" target="o_control" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe15" value="调用 backend" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#6c8ebf;dashed=1;" parent="1" source="o_control" target="o_backend" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="chat-command" name="02 对话与命令执行">
+    <mxGraphModel dx="1800" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="1700" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title_chat" value="主窗口对话、流式响应与命令执行闭环" style="text;html=1;strokeColor=none;fillColor=none;fontSize=30;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="220" y="40" width="1960" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="c1" value="PetView 输入框&lt;br&gt;用户回车提交" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="120" y="180" width="280" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="c2" value="submitInput()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="540" y="180" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="c3" value="submitExternalInput(text)&lt;br&gt;清空旧会话命令计数&lt;br&gt;构造 system message" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="920" y="155" width="330" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="c4" value="音乐关键词？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1410" y="155" width="210" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="c5" value="MusicPlayerService&lt;br&gt;打开 Apple Music 搜索&lt;br&gt;显示成功/失败提示" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#82b366;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1790" y="120" width="320" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="c6" value="append user message&lt;br&gt;revealOutputBox(30s)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1790" y="310" width="320" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="c7" value="APIManager.systemPromptContent()&lt;br&gt;基础 systemPrompt" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="120" y="540" width="330" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="c8" value="读取 AgentSkillStorageKeys&lt;br&gt;agent.md + skill.md 列表" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="560" y="540" width="330" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="c9" value="buildAugmentedSystemPrompt()&lt;br&gt;合并工具/技能说明段" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="530" width="340" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="c10" value="buildRequest(messages)&lt;br&gt;provider: zhipu / qwen / ollama&lt;br&gt;stream=true" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1450" y="520" width="340" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="c11" value="URLSessionDataTask&lt;br&gt;发送到模型接口" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1900" y="540" width="300" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="c12" value="didReceive data&lt;br&gt;parseSSEResponse / parseOpenAICompatibleResponse / parseOllamaResponse" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="120" y="840" width="390" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="c13" value="onReceive(chunk)&lt;br&gt;追加 streamedResponse&lt;br&gt;限制最多 5000 字" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="640" y="840" width="330" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="c14" value="PetView.chatOutput&lt;br&gt;实时渲染回复" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="850" width="290" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="c15" value="didCompleteWithError / [DONE]&lt;br&gt;onComplete()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1520" y="850" width="300" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="c16" value="handleAssistantReply()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1940" y="860" width="260" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="c17" value="包含命令标记？&lt;br&gt;命令: / [命令] / [command]" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="130" y="1180" width="250" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="c18" value="无命令或 [完成]&lt;br&gt;结束本轮回复" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="540" y="1200" width="270" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="c19" value="extractCommand + normalizeCommand&lt;br&gt;补齐 [命令] 标签&lt;br&gt;设置 pendingCommand" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="940" y="1175" width="340" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="c20" value="弹窗确认&lt;br&gt;执行 / 取消" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1420" y="1200" width="280" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="c21" value="CommandExecutionSupport.isCommandSafe()&lt;br&gt;白名单前缀 + 危险 token 拦截" style="rhombus;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1850" y="1165" width="270" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="c22" value="阻止危险/交互式命令&lt;br&gt;输出 [完成]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1510" y="1440" width="300" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="c23" value="runShell()&lt;br&gt;/bin/zsh -lc command&lt;br&gt;收集退出码和输出" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1920" y="1420" width="310" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="c24" value="执行结果回注为 user 消息&lt;br&gt;commandIterationCount &lt;= 5&lt;br&gt;再次 sendRequest()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="1410" width="350" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="ce1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;strokeWidth=2;" edge="1" parent="1" source="c1" target="c2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;strokeWidth=2;" edge="1" parent="1" source="c2" target="c3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;strokeWidth=2;" edge="1" parent="1" source="c3" target="c4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce4" value="是" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;strokeWidth=2;" edge="1" parent="1" source="c4" target="c5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce5" value="否" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;strokeWidth=2;" edge="1" parent="1" source="c4" target="c6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#d6b656;strokeWidth=2;" edge="1" parent="1" source="c6" target="c7">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1950" y="470" />
+              <mxPoint x="285" y="470" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ce7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;strokeWidth=2;" edge="1" parent="1" source="c7" target="c8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#d6b656;strokeWidth=2;" edge="1" parent="1" source="c8" target="c9">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#d6b656;strokeWidth=2;" edge="1" parent="1" source="c9" target="c10">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#d6b656;strokeWidth=2;" edge="1" parent="1" source="c10" target="c11">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce11" value="stream" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#d6b656;strokeWidth=2;" edge="1" parent="1" source="c11" target="c12">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2050" y="740" />
+              <mxPoint x="315" y="740" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ce12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;strokeWidth=2;" edge="1" parent="1" source="c12" target="c13">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;strokeWidth=2;" edge="1" parent="1" source="c13" target="c14">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce14" value="complete" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#d6b656;strokeWidth=2;" edge="1" parent="1" source="c12" target="c15">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="315" y="1020" />
+              <mxPoint x="1670" y="1020" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ce15" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#d6b656;strokeWidth=2;" edge="1" parent="1" source="c15" target="c16">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce16" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#d6b656;strokeWidth=2;" edge="1" parent="1" source="c16" target="c17">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2070" y="1090" />
+              <mxPoint x="255" y="1090" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ce17" value="否" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#d6b656;strokeWidth=2;" edge="1" parent="1" source="c17" target="c18">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce18" value="是" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;strokeWidth=2;" edge="1" parent="1" source="c17" target="c19">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce19" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;strokeWidth=2;" edge="1" parent="1" source="c19" target="c20">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce20" value="执行" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;strokeWidth=2;" edge="1" parent="1" source="c20" target="c21">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce21" value="否" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;strokeWidth=2;" edge="1" parent="1" source="c21" target="c22">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce22" value="是" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;strokeWidth=2;" edge="1" parent="1" source="c21" target="c23">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce23" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;strokeWidth=2;" edge="1" parent="1" source="c23" target="c24">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce24" value="循环总结" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;dashed=1;" edge="1" parent="1" source="c24" target="c10">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1205" y="1360" />
+              <mxPoint x="1620" y="1360" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="settings-automation" name="03 设置与自动化">
+    <mxGraphModel dx="1800" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="1700" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title_settings" value="偏好设置、技能导入、角色绑定与自动化调度" style="text;html=1;strokeColor=none;fillColor=none;fontSize=30;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="220" y="40" width="1960" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="s1" value="Cmd+, 菜单命令" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="140" y="180" width="250" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="s2" value="PetApp.showPreferencesWindow()&lt;br&gt;复用现有窗口或创建 NSWindow" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="520" y="165" width="330" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="s3" value="PreferencesView&lt;br&gt;传入同一个 PetViewBackend" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="980" y="165" width="330" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="s4" value="PreferencesViewBackend&lt;br&gt;加载临时值、自定义角色、静态消息、agent/skill 文件" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1440" y="145" width="380" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="s5" value="NavigationSplitView 分区&lt;br&gt;风格 / 模型 / 布局 / 技能 / 自动化 / 角色绑定 / 关于" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1950" y="145" width="340" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="s6" value="风格、模型、布局设置" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="140" y="510" width="280" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="s7" value="saveSettings()&lt;br&gt;保存 staticMessages&lt;br&gt;发出 SettingsChanged 通知" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="560" y="485" width="340" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="s8" value="UserDefaults&lt;br&gt;apiKey / apiUrl / aiModel / provider&lt;br&gt;systemPrompt / overlapRatio / staticMessages" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffffff;strokeColor=#9673a6;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="470" width="330" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="s9" value="技能设置" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="140" y="760" width="280" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="s10" value="导入 / 生成 agent.md&lt;br&gt;导入 skill.md" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="560" y="740" width="340" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="s11" value="Application Support / AgentSkills&lt;br&gt;agent.md&lt;br&gt;多个 skill.md" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffffff;strokeColor=#9673a6;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="720" width="330" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="s12" value="APIManager 请求前读取&lt;br&gt;追加到 system prompt" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1510" y="745" width="320" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="s13" value="角色绑定" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="140" y="1020" width="280" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="s14" value="切换内置角色&lt;br&gt;或导入自定义 GIF&lt;br&gt;最多 3 个自定义角色" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="560" y="990" width="340" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="s15" value="PetControlService.switchCharacter()&lt;br&gt;PetViewBackend.switchToCharacter()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d0e9f2;strokeColor=#6c8ebf;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="1000" width="340" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="s16" value="CustomAnimations + UserDefaults&lt;br&gt;保存 GIF 路径和角色数据" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffffff;strokeColor=#9673a6;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1510" y="985" width="320" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="s17" value="自动化设置页" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="140" y="1310" width="280" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="s18" value="AutomationStore&lt;br&gt;add / update / delete / setEnabled&lt;br&gt;计算 nextRunAt 并持久化" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="560" y="1275" width="350" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="s19" value="PetViewBackend 监听 $automations&lt;br&gt;scheduleNextAutomationAction()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1050" y="1290" width="350" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="s20" value="Timer 到期&lt;br&gt;dueAutomations()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1530" y="1300" width="300" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="s21" value="后端忙碌？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1980" y="1280" width="220" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="s22" value="忙碌：markDeferred(+60s)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1720" y="1510" width="270" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="s23" value="空闲：markCompleted()&lt;br&gt;submitAutomationPrompt()&lt;br&gt;进入主对话流程" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="2050" y="1490" width="300" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="se1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;strokeWidth=2;" edge="1" parent="1" source="s1" target="s2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="se2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;strokeWidth=2;" edge="1" parent="1" source="s2" target="s3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="se3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;strokeWidth=2;" edge="1" parent="1" source="s3" target="s4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="se4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;strokeWidth=2;" edge="1" parent="1" source="s4" target="s5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="se5" value="设置分区" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;strokeWidth=2;" edge="1" parent="1" source="s5" target="s6">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2120" y="390" />
+              <mxPoint x="280" y="390" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="se6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;strokeWidth=2;" edge="1" parent="1" source="s6" target="s7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="se7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;strokeWidth=2;" edge="1" parent="1" source="s7" target="s8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="se8" value="技能分区" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;strokeWidth=2;" edge="1" parent="1" source="s5" target="s9">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2140" y="690" />
+              <mxPoint x="280" y="690" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="se9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;strokeWidth=2;" edge="1" parent="1" source="s9" target="s10">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="se10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;strokeWidth=2;" edge="1" parent="1" source="s10" target="s11">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="se11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#d6b656;dashed=1;" edge="1" parent="1" source="s11" target="s12">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="se12" value="角色分区" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;strokeWidth=2;" edge="1" parent="1" source="s5" target="s13">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2160" y="950" />
+              <mxPoint x="280" y="950" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="se13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;strokeWidth=2;" edge="1" parent="1" source="s13" target="s14">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="se14" value="切换" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#6c8ebf;strokeWidth=2;" edge="1" parent="1" source="s14" target="s15">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="se15" value="导入" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;strokeWidth=2;" edge="1" parent="1" source="s14" target="s16">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="se16" value="自动化分区" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;strokeWidth=2;" edge="1" parent="1" source="s5" target="s17">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2180" y="1230" />
+              <mxPoint x="280" y="1230" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="se17" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;strokeWidth=2;" edge="1" parent="1" source="s17" target="s18">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="se18" value="$automations" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;strokeWidth=2;" edge="1" parent="1" source="s18" target="s19">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="se19" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;strokeWidth=2;" edge="1" parent="1" source="s19" target="s20">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="se20" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;strokeWidth=2;" edge="1" parent="1" source="s20" target="s21">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="se21" value="是" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;strokeWidth=2;" edge="1" parent="1" source="s21" target="s22">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="se22" value="否" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;strokeWidth=2;" edge="1" parent="1" source="s21" target="s23">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

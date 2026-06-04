@@ -1,0 +1,195 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/24.7.17 Chrome/128.0.6613.36 Electron/32.0.1 Safari/537.36" version="24.7.17" pages="2">
+  <diagram id="core-er" name="01 核心数据ER">
+    <mxGraphModel dx="5211" dy="2134" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="1600" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="app_config" value="&lt;b&gt;PreferencesData / Settings&lt;/b&gt;&lt;hr&gt;apiKey: String&lt;br&gt;apiUrl: String&lt;br&gt;aiModel: String&lt;br&gt;provider: String&lt;br&gt;systemPrompt: String&lt;br&gt;overlapRatio: Double" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#5b9bd5;fontSize=15;align=left;spacingLeft=14;" parent="1" vertex="1">
+          <mxGeometry x="100" y="400" width="360" height="230" as="geometry" />
+        </mxCell>
+        <mxCell id="provider" value="&lt;b&gt;Provider&lt;/b&gt;&lt;hr&gt;id: String&lt;br&gt;name: String&lt;br&gt;&lt;br&gt;可用值：zhipu / qwen / ollama" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#5b9bd5;fontSize=15;align=left;spacingLeft=14;" parent="1" vertex="1">
+          <mxGeometry x="650" y="180" width="320" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="static_message" value="&lt;b&gt;StaticMessage&lt;/b&gt;&lt;hr&gt;value: String&lt;br&gt;&lt;br&gt;UserDefaults key:&lt;br&gt;staticMessages" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;align=left;spacingLeft=14;" parent="1" vertex="1">
+          <mxGeometry x="370" y="738" width="320" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="pet_character" value="&lt;b&gt;PetCharacter&lt;/b&gt;&lt;hr&gt;name: String&lt;br&gt;normalGif: String&lt;br&gt;clickGif: String&lt;br&gt;autoMessages: [String]&lt;br&gt;&lt;br&gt;内置角色 + 自定义角色" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;align=left;spacingLeft=14;" parent="1" vertex="1">
+          <mxGeometry x="-91" y="810" width="360" height="230" as="geometry" />
+        </mxCell>
+        <mxCell id="gif_asset" value="&lt;b&gt;GifAsset&lt;/b&gt;&lt;hr&gt;pathOrBundleName: String&lt;br&gt;kind: normal | click&lt;br&gt;storage: Bundle | Application Support&lt;br&gt;&lt;br&gt;以 String 路径保存" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;align=left;spacingLeft=14;" parent="1" vertex="1">
+          <mxGeometry x="744" y="823" width="330" height="210" as="geometry" />
+        </mxCell>
+        <mxCell id="agent_file" value="&lt;b&gt;AgentFile&lt;/b&gt;&lt;hr&gt;name: String&lt;br&gt;path: String&lt;br&gt;updatedAt: Date&lt;br&gt;&lt;br&gt;UserDefaults key: agentFile" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=15;align=left;spacingLeft=14;" parent="1" vertex="1">
+          <mxGeometry x="-357" y="14" width="340" height="190" as="geometry" />
+        </mxCell>
+        <mxCell id="skill_file" value="&lt;b&gt;SkillFile&lt;/b&gt;&lt;hr&gt;id: UUID&lt;br&gt;name: String&lt;br&gt;path: String&lt;br&gt;addedAt: Date&lt;br&gt;&lt;br&gt;UserDefaults key: skillFiles" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=15;align=left;spacingLeft=14;" parent="1" vertex="1">
+          <mxGeometry x="1190" y="410" width="340" height="210" as="geometry" />
+        </mxCell>
+        <mxCell id="agent_storage" value="&lt;b&gt;AgentSkillsDirectory&lt;/b&gt;&lt;hr&gt;Application Support / AgentSkills&lt;br&gt;agent.md&lt;br&gt;*.md skill files&lt;br&gt;&lt;br&gt;FileManager 复制/删除文件" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffffff;strokeColor=#9673a6;fontSize=15;align=left;spacingLeft=14;" parent="1" vertex="1">
+          <mxGeometry x="1690" y="410" width="360" height="230" as="geometry" />
+        </mxCell>
+        <mxCell id="automation_store" value="&lt;b&gt;AutomationStore&lt;/b&gt;&lt;hr&gt;automations: [AutomationFlow]&lt;br&gt;defaults: UserDefaults&lt;br&gt;calendar: Calendar&lt;br&gt;&lt;br&gt;UserDefaults key: automationFlows" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;align=left;spacingLeft=14;" parent="1" vertex="1">
+          <mxGeometry x="1150" y="870" width="350" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="automation_flow" value="&lt;b&gt;AutomationFlow&lt;/b&gt;&lt;hr&gt;id: UUID&lt;br&gt;title: String&lt;br&gt;prompt: String&lt;br&gt;frequency: AutomationFrequency&lt;br&gt;isEnabled: Bool&lt;br&gt;createdAt: Date&lt;br&gt;updatedAt: Date&lt;br&gt;scheduledAt: Date&lt;br&gt;lastRunAt: Date?&lt;br&gt;nextRunAt: Date?" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;align=left;spacingLeft=14;" parent="1" vertex="1">
+          <mxGeometry x="1690" y="810" width="370" height="340" as="geometry" />
+        </mxCell>
+        <mxCell id="automation_frequency" value="&lt;b&gt;AutomationFrequency&lt;/b&gt;&lt;hr&gt;kind: Kind&lt;br&gt;dayInterval: Int?&lt;br&gt;&lt;br&gt;runOnce&lt;br&gt;every15Minutes&lt;br&gt;hourly / daily&lt;br&gt;everyNDays(2...7)&lt;br&gt;weekly / monthly / yearly" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;align=left;spacingLeft=14;" parent="1" vertex="1">
+          <mxGeometry x="1690" y="1210" width="370" height="250" as="geometry" />
+        </mxCell>
+        <mxCell id="user_defaults" value="&lt;b&gt;UserDefaults&lt;/b&gt;&lt;hr&gt;apiKey / apiUrl / aiModel / provider&lt;br&gt;systemPrompt / overlapRatio&lt;br&gt;staticMessages&lt;br&gt;customCharacters&lt;br&gt;agentFile / skillFiles&lt;br&gt;automationFlows" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffffff;strokeColor=#666666;fontSize=15;align=left;spacingLeft=14;" parent="1" vertex="1">
+          <mxGeometry x="650" y="1200" width="360" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="ce1" value="selects 1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERone;strokeColor=#5b9bd5;strokeWidth=2;" parent="1" source="app_config" target="provider" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce2" value="has 0..*" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERmany;startArrow=ERone;strokeColor=#82b366;strokeWidth=2;" parent="1" source="app_config" target="static_message" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce3" value="has 2 GIF refs" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERmany;startArrow=ERone;strokeColor=#82b366;strokeWidth=2;" parent="1" source="pet_character" target="gif_asset" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce4" value="stored as customCharacters" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERmany;startArrow=ERone;strokeColor=#666666;dashed=1;" parent="1" source="user_defaults" target="pet_character" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce5" value="stores settings" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERone;strokeColor=#666666;dashed=1;" parent="1" source="user_defaults" target="app_config" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce6" value="stores list" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERmany;startArrow=ERone;strokeColor=#666666;dashed=1;" parent="1" source="user_defaults" target="static_message" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce7" value="0..1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERone;strokeColor=#9673a6;strokeWidth=2;" parent="1" source="app_config" target="agent_file" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce8" value="0..*" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERmany;startArrow=ERone;strokeColor=#9673a6;strokeWidth=2;" parent="1" source="app_config" target="skill_file" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce9" value="path points to" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERone;strokeColor=#9673a6;strokeWidth=2;" parent="1" source="agent_file" target="agent_storage" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce10" value="path points to" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#9673a6;strokeWidth=2;" parent="1" source="skill_file" target="agent_storage" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce11" value="stores metadata" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERmany;startArrow=ERone;strokeColor=#666666;dashed=1;" parent="1" source="user_defaults" target="skill_file" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce12" value="stores metadata" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERone;strokeColor=#666666;dashed=1;" parent="1" source="user_defaults" target="agent_file" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce13" value="manages 0..*" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERmany;startArrow=ERone;strokeColor=#b85450;strokeWidth=2;" parent="1" source="automation_store" target="automation_flow" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce14" value="uses 1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERone;strokeColor=#d6b656;strokeWidth=2;" parent="1" source="automation_flow" target="automation_frequency" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce15" value="stores automationFlows" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERmany;startArrow=ERone;strokeColor=#666666;dashed=1;" parent="1" source="user_defaults" target="automation_flow" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Lb4LfU-DlsdZs28PPjtf-1" value="&lt;span style=&quot;color: rgb(0, 0, 0); font-family: Helvetica; font-size: 15px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: 400; letter-spacing: normal; orphans: 2; text-align: center; text-indent: 0px; text-transform: none; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; white-space: normal; background-color: rgb(251, 251, 251); text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial; display: inline !important; float: none;&quot;&gt;说明：项目未使用关系型数据库，主要通过 UserDefaults 和 Application Support 文件目录持久化；此图按数据模型抽象 ER 关系。&lt;/span&gt;" style="text;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="1112" y="202" width="560" height="60" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="control-er" name="02 控制服务DTO关系">
+    <mxGraphModel dx="1800" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="1600" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title_control" value="PetControlService - 请求、响应与 DTO 数据关系" style="text;html=1;strokeColor=none;fillColor=none;fontSize=30;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="220" y="40" width="1960" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="note_control" value="说明：本页是外部控制 API 的数据结构关系，不代表数据库表；多数 DTO 由核心实体映射而来。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="610" y="110" width="1180" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="ctx" value="&lt;b&gt;PetControlRequestContext&lt;/b&gt;&lt;hr&gt;requestID: UUID&lt;br&gt;source: PetControlActionSource&lt;br&gt;actorID: String&lt;br&gt;requiresUserConfirmation: Bool&lt;br&gt;createdAt: Date" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d0e9f2;strokeColor=#6c8ebf;fontSize=15;align=left;spacingLeft=14;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="250" width="370" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="source" value="&lt;b&gt;PetControlActionSource&lt;/b&gt;&lt;hr&gt;ui&lt;br&gt;appIntent&lt;br&gt;shortcut&lt;br&gt;urlScheme&lt;br&gt;localHTTP&lt;br&gt;websocket&lt;br&gt;mcp&lt;br&gt;automation&lt;br&gt;unknown" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d0e9f2;strokeColor=#6c8ebf;fontSize=15;align=left;spacingLeft=14;" vertex="1" parent="1">
+          <mxGeometry x="1510" y="240" width="310" height="250" as="geometry" />
+        </mxCell>
+        <mxCell id="send_req" value="&lt;b&gt;SendMessageRequest&lt;/b&gt;&lt;hr&gt;text: String&lt;br&gt;context: PetControlRequestContext" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#5b9bd5;fontSize=15;align=left;spacingLeft=14;" vertex="1" parent="1">
+          <mxGeometry x="120" y="250" width="320" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="switch_req" value="&lt;b&gt;SwitchCharacterRequest&lt;/b&gt;&lt;hr&gt;index: Int?&lt;br&gt;name: String?&lt;br&gt;context: PetControlRequestContext" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#5b9bd5;fontSize=15;align=left;spacingLeft=14;" vertex="1" parent="1">
+          <mxGeometry x="120" y="480" width="320" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="import_req" value="&lt;b&gt;ImportSkillRequest&lt;/b&gt;&lt;hr&gt;filePath: String&lt;br&gt;displayName: String?&lt;br&gt;context: PetControlRequestContext" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#5b9bd5;fontSize=15;align=left;spacingLeft=14;" vertex="1" parent="1">
+          <mxGeometry x="120" y="720" width="320" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="update_auto_req" value="&lt;b&gt;UpdateAutomationRequest&lt;/b&gt;&lt;hr&gt;id: UUID&lt;br&gt;title: String?&lt;br&gt;prompt: String?&lt;br&gt;frequency: AutomationFrequency?&lt;br&gt;isEnabled: Bool?&lt;br&gt;scheduledAt: Date?&lt;br&gt;context: PetControlRequestContext" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#5b9bd5;fontSize=15;align=left;spacingLeft=14;" vertex="1" parent="1">
+          <mxGeometry x="120" y="960" width="340" height="250" as="geometry" />
+        </mxCell>
+        <mxCell id="settings_patch" value="&lt;b&gt;SettingsPatch&lt;/b&gt;&lt;hr&gt;apiKey: String?&lt;br&gt;apiUrl: String?&lt;br&gt;aiModel: String?&lt;br&gt;provider: String?&lt;br&gt;systemPrompt: String?&lt;br&gt;overlapRatio: Double?&lt;br&gt;staticMessages: [String]?&lt;br&gt;context: PetControlRequestContext" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#5b9bd5;fontSize=15;align=left;spacingLeft=14;" vertex="1" parent="1">
+          <mxGeometry x="120" y="1280" width="340" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="state" value="&lt;b&gt;PetRuntimeStateSnapshot&lt;/b&gt;&lt;hr&gt;currentCharacterName: String&lt;br&gt;currentGif: String&lt;br&gt;isThinking: Bool&lt;br&gt;isExecutingCommand: Bool&lt;br&gt;streamedResponse: String" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;align=left;spacingLeft=14;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="620" width="370" height="210" as="geometry" />
+        </mxCell>
+        <mxCell id="send_result" value="&lt;b&gt;SendMessageResult&lt;/b&gt;&lt;hr&gt;requestID: UUID&lt;br&gt;accepted: Bool&lt;br&gt;state: PetRuntimeStateSnapshot" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;align=left;spacingLeft=14;" vertex="1" parent="1">
+          <mxGeometry x="1510" y="600" width="330" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="auto_run_result" value="&lt;b&gt;AutomationRunResult&lt;/b&gt;&lt;hr&gt;requestID: UUID&lt;br&gt;automationID: UUID?&lt;br&gt;accepted: Bool&lt;br&gt;state: PetRuntimeStateSnapshot" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;align=left;spacingLeft=14;" vertex="1" parent="1">
+          <mxGeometry x="1930" y="600" width="330" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="character_dto" value="&lt;b&gt;CharacterDTO&lt;/b&gt;&lt;hr&gt;id: String&lt;br&gt;index: Int&lt;br&gt;name: String&lt;br&gt;normalGif: String&lt;br&gt;clickGif: String&lt;br&gt;isCustom: Bool" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;align=left;spacingLeft=14;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="950" width="330" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="skill_dto" value="&lt;b&gt;SkillDTO&lt;/b&gt;&lt;hr&gt;id: UUID&lt;br&gt;name: String&lt;br&gt;path: String&lt;br&gt;addedAt: Date" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;align=left;spacingLeft=14;" vertex="1" parent="1">
+          <mxGeometry x="1510" y="950" width="310" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="automation_dto" value="&lt;b&gt;AutomationDTO&lt;/b&gt;&lt;hr&gt;id: UUID&lt;br&gt;title: String&lt;br&gt;prompt: String&lt;br&gt;frequency: AutomationFrequency&lt;br&gt;isEnabled: Bool&lt;br&gt;createdAt: Date&lt;br&gt;updatedAt: Date&lt;br&gt;scheduledAt: Date&lt;br&gt;lastRunAt: Date?&lt;br&gt;nextRunAt: Date?" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;align=left;spacingLeft=14;" vertex="1" parent="1">
+          <mxGeometry x="1930" y="900" width="340" height="310" as="geometry" />
+        </mxCell>
+        <mxCell id="settings_snapshot" value="&lt;b&gt;SettingsSnapshot&lt;/b&gt;&lt;hr&gt;apiUrl: String&lt;br&gt;aiModel: String&lt;br&gt;provider: String&lt;br&gt;systemPrompt: String&lt;br&gt;overlapRatio: Double&lt;br&gt;staticMessages: [String]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;align=left;spacingLeft=14;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="1300" width="350" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="audit" value="&lt;b&gt;PetControlAuditEvent&lt;/b&gt;&lt;hr&gt;id: UUID&lt;br&gt;action: String&lt;br&gt;requestID: UUID&lt;br&gt;source: PetControlActionSource&lt;br&gt;actorID: String&lt;br&gt;status: String&lt;br&gt;message: String&lt;br&gt;createdAt: Date&lt;br&gt;&lt;br&gt;写入 AuditLogs/pet-control.jsonl" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;align=left;spacingLeft=14;" vertex="1" parent="1">
+          <mxGeometry x="1510" y="1280" width="390" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="r1" value="has 1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERone;strokeColor=#6c8ebf;strokeWidth=2;" edge="1" parent="1" source="send_req" target="ctx">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r2" value="has 1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERone;strokeColor=#6c8ebf;strokeWidth=2;" edge="1" parent="1" source="switch_req" target="ctx">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r3" value="has 1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERone;strokeColor=#6c8ebf;strokeWidth=2;" edge="1" parent="1" source="import_req" target="ctx">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r4" value="has 1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERone;strokeColor=#6c8ebf;strokeWidth=2;" edge="1" parent="1" source="update_auto_req" target="ctx">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r5" value="has 1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERone;strokeColor=#6c8ebf;strokeWidth=2;" edge="1" parent="1" source="settings_patch" target="ctx">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r6" value="source enum" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERone;strokeColor=#6c8ebf;strokeWidth=2;" edge="1" parent="1" source="ctx" target="source">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r7" value="contains state" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERone;strokeColor=#82b366;strokeWidth=2;" edge="1" parent="1" source="send_result" target="state">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r8" value="contains state" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERone;strokeColor=#82b366;strokeWidth=2;" edge="1" parent="1" source="auto_run_result" target="state">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r9" value="returns" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;dashed=1;" edge="1" parent="1" source="switch_req" target="character_dto">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r10" value="returns" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;dashed=1;" edge="1" parent="1" source="import_req" target="skill_dto">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r11" value="returns" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;dashed=1;" edge="1" parent="1" source="update_auto_req" target="automation_dto">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r12" value="returns" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;dashed=1;" edge="1" parent="1" source="settings_patch" target="settings_snapshot">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r13" value="audit context" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=ERone;startArrow=ERmany;strokeColor=#d6b656;strokeWidth=2;" edge="1" parent="1" source="audit" target="source">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r14" value="requestID copied" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#d6b656;dashed=1;" edge="1" parent="1" source="ctx" target="audit">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

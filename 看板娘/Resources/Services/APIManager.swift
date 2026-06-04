@@ -84,7 +84,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     ) {
         cancelPreviousTask()
 
-        guard let request = buildRequest(with: messages) else {
+        guard let request = buildRequest(with: messages, stream: true) else {
             #if DEBUG
             print(" 请求构建失败")
             #endif
@@ -105,12 +105,43 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         task?.resume()
     }
 
+    /// 发送非流式 JSON 请求，用于触发器意图检测等结构化输出场景
+    func sendJSONRequest(
+        messages: [[String: String]],
+        onComplete: @escaping (String) -> Void
+    ) {
+        guard let request = buildRequest(with: messages, stream: false) else {
+            DispatchQueue.main.async {
+                onComplete("")
+            }
+            return
+        }
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
+            let content: String
+            if let error {
+                #if DEBUG
+                print("JSON 请求出错：\(error.localizedDescription)")
+                #endif
+                content = ""
+            } else if let data {
+                content = self?.parseNonStreamContent(data) ?? ""
+            } else {
+                content = ""
+            }
+
+            DispatchQueue.main.async {
+                onComplete(content)
+            }
+        }.resume()
+    }
+
     // MARK: - 构建请求体
     
     /// 根据提供商构建API请求
     /// - Parameter messages: 完整消息历史（需包含 system）
     /// - Returns: 构建好的URLRequest，如果失败则返回nil
-    private func buildRequest(with messages: [[String: String]]) -> URLRequest? {
+    private func buildRequest(with messages: [[String: String]], stream: Bool) -> URLRequest? {
         
         // 区分平台，构建 payload
         var payload: [String: Any] = [:]
@@ -122,8 +153,10 @@ final class APIManager: NSObject, URLSessionDataDelegate {
                 "messages": messages,
                 "top_p": 0.7,
                 "temperature": 0.9,
-                "stream": true,
-                "tools": [
+                "stream": stream
+            ]
+            if stream {
+                payload["tools"] = [
                     [
                         "type": "web_search",
                         "web_search": [
@@ -132,22 +165,22 @@ final class APIManager: NSObject, URLSessionDataDelegate {
                         ]
                     ]
                 ]
-            ]
+            }
             
         case "qwen":
             payload = [
                 "model": aiModel,
                 "messages": messages,
-                "stream": true
+                "stream": stream
             ]
             
         case "ollama":
             payload = [
                 "model": aiModel,
                 "messages": messages,
-                "stream": true,
+                "stream": stream,
                 "options": [
-                    "temperature": 0.9,
+                    "temperature": stream ? 0.9 : 0.0,
                     "top_p": 0.7
                 ]
             ]
@@ -186,6 +219,29 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         }
         
         return request
+    }
+
+    private func parseNonStreamContent(_ data: Data) -> String {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return ""
+        }
+
+        switch provider.lowercased() {
+        case "ollama":
+            if let message = json["message"] as? [String: Any],
+               let content = message["content"] as? String {
+                return content
+            }
+
+        default:
+            if let choices = json["choices"] as? [[String: Any]],
+               let message = choices.first?["message"] as? [String: Any],
+               let content = message["content"] as? String {
+                return content
+            }
+        }
+
+        return ""
     }
 
     // MARK: - Agent/Skill 注入

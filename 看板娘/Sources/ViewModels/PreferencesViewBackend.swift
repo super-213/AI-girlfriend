@@ -486,6 +486,7 @@ extension PreferencesViewBackend {
         case layout = "布局"
         case skills = "技能"
         case automation = "自动化"
+        case triggers = "触发器"
         case characterBinding = "角色绑定"
         case about = "关于"
         
@@ -498,6 +499,7 @@ extension PreferencesViewBackend {
             case .layout: return "rectangle.stack"
             case .skills: return "hammer.circle"
             case .automation: return "clock.arrow.circlepath"
+            case .triggers: return "bolt.badge.clock"
             case .characterBinding: return "person.2.crop.square.stack"
             case .about: return "info.circle"
             }
