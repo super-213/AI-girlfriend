@@ -156,6 +156,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func applyTransparentStyle(to window: NSWindow) {
+        // 桌宠只在按住 Option 时通过自定义边框等比例缩放。移除系统原生
+        // resize 命中，避免它绕过 PetWindowController 只改变透明画布。
+        window.styleMask.remove(.resizable)
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.isOpaque = false

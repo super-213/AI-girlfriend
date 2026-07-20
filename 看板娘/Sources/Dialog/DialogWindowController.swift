@@ -8,11 +8,26 @@
 import AppKit
 import SwiftUI
 
+@MainActor
 final class DialogWindow: NSWindow {
+    weak var resizeOverlay: OptionWindowResizeNSView?
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .flagsChanged {
+            updateResizeMode(for: event.modifierFlags)
+        }
+        super.sendEvent(event)
+    }
+
+    func updateResizeMode(for modifierFlags: NSEvent.ModifierFlags) {
+        resizeOverlay?.updateModifierFlags(modifierFlags)
+    }
 }
 
+@MainActor
 final class DialogWindowController {
     static let shared = DialogWindowController()
 
@@ -33,9 +48,11 @@ final class DialogWindowController {
 
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        window.updateResizeMode(for: NSEvent.modifierFlags)
     }
 
     func closeDialog() {
+        window?.updateResizeMode(for: [])
         window?.orderOut(nil)
     }
 
@@ -48,7 +65,7 @@ final class DialogWindowController {
         let frame = NSRect(x: 0, y: 0, width: 560, height: 440)
         let window = DialogWindow(
             contentRect: frame,
-            styleMask: [.borderless],
+            styleMask: [.borderless, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -61,6 +78,7 @@ final class DialogWindowController {
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.isMovableByWindowBackground = true
+        window.contentMinSize = NSSize(width: 420, height: 320)
 
         let rootView = DialogChatView(
             viewModel: chatViewModel,
@@ -69,11 +87,25 @@ final class DialogWindowController {
             }
         )
         let hostingView = NSHostingView(rootView: rootView)
+        hostingView.frame = NSRect(origin: .zero, size: frame.size)
+        hostingView.autoresizingMask = [.width, .height]
         hostingView.wantsLayer = true
         hostingView.layer?.cornerRadius = 30
         hostingView.layer?.masksToBounds = true
 
-        window.contentView = hostingView
+        let resizeOverlay = OptionWindowResizeNSView(frame: hostingView.bounds)
+        resizeOverlay.minimumSize = window.contentMinSize
+        resizeOverlay.cornerRadius = 30
+        resizeOverlay.autoresizingMask = [.width, .height]
+
+        let containerView = NSView(frame: hostingView.frame)
+        containerView.autoresizesSubviews = true
+        containerView.addSubview(hostingView)
+        containerView.addSubview(resizeOverlay, positioned: .above, relativeTo: hostingView)
+
+        window.resizeOverlay = resizeOverlay
+        window.contentView = containerView
+        window.updateResizeMode(for: NSEvent.modifierFlags)
         window.center()
         return window
     }

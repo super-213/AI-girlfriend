@@ -8,6 +8,7 @@ import SwiftUI
 struct PetRootView: View {
     @ObservedObject var petViewBackend: PetViewBackend
     @ObservedObject private var coordinator: PetStateCoordinator
+    @ObservedObject private var windowController: PetWindowController
     @AppStorage("commandConfirmationStyle") private var commandConfirmationStyle = "nearPet"
 
     @State private var isHoveringPet = false
@@ -20,6 +21,7 @@ struct PetRootView: View {
     init(petViewBackend: PetViewBackend) {
         self.petViewBackend = petViewBackend
         _coordinator = ObservedObject(wrappedValue: petViewBackend.stateCoordinator)
+        _windowController = ObservedObject(wrappedValue: PetWindowController.shared)
     }
 
     private var shouldShowInput: Bool {
@@ -66,8 +68,8 @@ struct PetRootView: View {
                     .transition(.scale(scale: 0.9).combined(with: .opacity))
             }
 
-            // 始终保留输入框的布局槽。悬浮只改变槽内内容的呈现，不能改变
-            // 根视图或 NSWindow 的尺寸，否则窗口重排会让桌宠在屏幕上漂移。
+            // 始终保留输入框的布局槽。悬浮不改变根视图的固有尺寸；用户通过
+            // Option 调整窗口时，由窗口控制器在固有尺寸之外统一缩放整套界面。
             ZStack(alignment: .bottom) {
                 if shouldShowInput {
                     PetInputView(
@@ -106,6 +108,7 @@ struct PetRootView: View {
         .fixedSize(horizontal: true, vertical: true)
         .background(PetWindowAccessor())
         .reportPetWindowContentSize()
+        .scaleEffect(windowController.contentScale, anchor: .bottom)
         .opacity(hasAppeared ? 1 : 0)
         .scaleEffect(hasAppeared ? 1 : 0.96, anchor: .bottom)
         .onAppear {

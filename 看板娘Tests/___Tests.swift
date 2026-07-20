@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import SwiftUI
 import Testing
 @testable import 看板娘
 
@@ -178,5 +179,240 @@ struct PetWindowGeometryTests {
         #expect(expanded.minY == current.minY)
         #expect(expanded.maxX > visible.maxX)
         #expect(expanded.maxY > visible.maxY)
+    }
+
+    @Test
+    func contentCanShrinkWindowToOneHundredEightyPoints() {
+        let current = NSRect(x: 500, y: 160, width: 336, height: 346)
+        let visible = NSRect(x: 0, y: 40, width: 1_440, height: 860)
+
+        let shrunk = PetWindowGeometry.anchoredFrame(
+            currentFrame: current,
+            proposedContentSize: CGSize(width: 120, height: 140),
+            visibleFrame: visible
+        )
+
+        #expect(shrunk.size == PetWindowSizing.minimumSize)
+        #expect(shrunk.midX == current.midX)
+        #expect(shrunk.minY == current.minY)
+    }
+}
+
+struct WindowResizeGeometryTests {
+    private let initial = NSRect(x: 100, y: 100, width: 560, height: 440)
+    private let visible = NSRect(x: 0, y: 40, width: 1_440, height: 860)
+    private let minimum = NSSize(width: 420, height: 320)
+
+    @Test
+    func draggingTopRightCornerExpandsBothDimensions() {
+        let resized = WindowResizeGeometry.resizedFrame(
+            initialFrame: initial,
+            screenDelta: NSPoint(x: 80, y: 60),
+            edges: [.right, .top],
+            minimumSize: minimum,
+            visibleFrame: visible
+        )
+
+        #expect(resized.minX == initial.minX)
+        #expect(resized.minY == initial.minY)
+        #expect(resized.width == 640)
+        #expect(resized.height == 500)
+    }
+
+    @Test
+    func draggingLeftAndBottomPreservesOppositeCorner() {
+        let resized = WindowResizeGeometry.resizedFrame(
+            initialFrame: initial,
+            screenDelta: NSPoint(x: -50, y: -25),
+            edges: [.left, .bottom],
+            minimumSize: minimum,
+            visibleFrame: visible
+        )
+
+        #expect(resized.maxX == initial.maxX)
+        #expect(resized.maxY == initial.maxY)
+        #expect(resized.width == 610)
+        #expect(resized.height == 465)
+    }
+
+    @Test
+    func shrinkingStopsAtMinimumSize() {
+        let resized = WindowResizeGeometry.resizedFrame(
+            initialFrame: initial,
+            screenDelta: NSPoint(x: -500, y: -500),
+            edges: [.right, .top],
+            minimumSize: minimum,
+            visibleFrame: visible
+        )
+
+        #expect(resized.size == minimum)
+        #expect(resized.origin == initial.origin)
+    }
+
+    @Test
+    func expansionStopsAtVisibleScreenEdges() {
+        let resized = WindowResizeGeometry.resizedFrame(
+            initialFrame: initial,
+            screenDelta: NSPoint(x: -500, y: 800),
+            edges: [.left, .top],
+            minimumSize: minimum,
+            visibleFrame: visible
+        )
+
+        #expect(resized.minX == visible.minX)
+        #expect(resized.maxY == visible.maxY)
+    }
+}
+
+struct PetWindowScaleGeometryTests {
+    private let initial = NSRect(x: 500, y: 120, width: 336, height: 346)
+    private let visible = NSRect(x: 0, y: 40, width: 1_440, height: 860)
+
+    @Test
+    func horizontalDragScalesPetUniformlyFromBottomEdge() {
+        let resized = PetWindowScaleGeometry.uniformlyResizedFrame(
+            initialFrame: initial,
+            proposedFrame: NSRect(x: 500, y: 120, width: 420, height: 346),
+            edges: [.right],
+            minimumSize: PetWindowSizing.minimumSize,
+            visibleFrame: visible
+        )
+
+        #expect(resized.minX == initial.minX)
+        #expect(resized.minY == initial.minY)
+        #expect(resized.width == 420)
+        #expect(resized.height == 432.5)
+    }
+
+    @Test
+    func leftBottomCornerPreservesOppositeCorner() {
+        let resized = PetWindowScaleGeometry.uniformlyResizedFrame(
+            initialFrame: initial,
+            proposedFrame: NSRect(x: 416, y: 40, width: 420, height: 426),
+            edges: [.left, .bottom],
+            minimumSize: PetWindowSizing.minimumSize,
+            visibleFrame: visible
+        )
+
+        #expect(resized.maxX == initial.maxX)
+        #expect(resized.maxY == initial.maxY)
+        #expect(resized.width / initial.width == resized.height / initial.height)
+    }
+
+    @Test
+    func shrinkingStopsBeforeEitherDimensionDropsBelowMinimum() {
+        let resized = PetWindowScaleGeometry.uniformlyResizedFrame(
+            initialFrame: initial,
+            proposedFrame: NSRect(x: 500, y: 120, width: 100, height: 346),
+            edges: [.right],
+            minimumSize: PetWindowSizing.minimumSize,
+            visibleFrame: visible
+        )
+
+        #expect(resized.width == 180)
+        #expect(resized.height >= 180)
+    }
+
+    @Test
+    func resizingHonorsConfiguredScaleLimit() {
+        let resized = PetWindowScaleGeometry.uniformlyResizedFrame(
+            initialFrame: initial,
+            proposedFrame: NSRect(x: 500, y: 120, width: 1_000, height: 346),
+            edges: [.right],
+            minimumSize: PetWindowSizing.minimumSize,
+            visibleFrame: visible,
+            maximumScaleFactor: 1.5
+        )
+
+        #expect(resized.width == initial.width * 1.5)
+        #expect(resized.height == initial.height * 1.5)
+    }
+}
+
+struct PetWindowRuntimeSizingTests {
+    @Test @MainActor
+    func hostingFixedPetContentStillAcceptsOneHundredEightyPointWindow() {
+        let rootView = Color.clear
+            .frame(width: 336, height: 346)
+            .fixedSize()
+        let hostingView = NSHostingView(rootView: rootView)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 336, height: 346),
+            styleMask: [.borderless, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.contentMinSize = PetWindowSizing.minimumSize
+
+        window.setFrame(
+            NSRect(x: 0, y: 0, width: 180, height: 186),
+            display: false,
+            animate: false
+        )
+        hostingView.layoutSubtreeIfNeeded()
+
+        #expect(window.contentMinSize == PetWindowSizing.minimumSize)
+        #expect(window.frame.width == 180)
+    }
+}
+
+struct OptionWindowResizeModeTests {
+    @Test @MainActor
+    func dialogWindowForwardsOptionModifierToNativeOverlay() {
+        let window = DialogWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 440),
+            styleMask: [.borderless, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        let overlay = OptionWindowResizeNSView(frame: window.contentView?.bounds ?? .zero)
+        window.resizeOverlay = overlay
+
+        window.updateResizeMode(for: [.option])
+        #expect(overlay.isResizeModeActive)
+
+        window.updateResizeMode(for: [])
+        #expect(!overlay.isResizeModeActive)
+    }
+
+    @Test @MainActor
+    func nativeOverlayTracksContainerSize() {
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 440))
+        let overlay = OptionWindowResizeNSView(frame: container.bounds)
+        overlay.autoresizingMask = [.width, .height]
+        container.addSubview(overlay)
+
+        container.setFrameSize(NSSize(width: 720, height: 520))
+        container.layoutSubtreeIfNeeded()
+
+        #expect(overlay.frame.size == container.bounds.size)
+    }
+
+    @Test @MainActor
+    func activeOverlayRendersOrangeBorder() throws {
+        let overlay = OptionWindowResizeNSView(frame: NSRect(x: 0, y: 0, width: 160, height: 120))
+        overlay.cornerRadius = 24
+        overlay.setResizeModeActive(true)
+
+        let bitmap = try #require(overlay.bitmapImageRepForCachingDisplay(in: overlay.bounds))
+        overlay.cacheDisplay(in: overlay.bounds, to: bitmap)
+
+        var foundAccentPixel = false
+        for x in 0..<bitmap.pixelsWide where !foundAccentPixel {
+            for y in 0..<bitmap.pixelsHigh {
+                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                if color.alphaComponent > 0.45,
+                   color.redComponent > 0.7,
+                   color.greenComponent > 0.3,
+                   color.redComponent > color.greenComponent,
+                   color.greenComponent > color.blueComponent {
+                    foundAccentPixel = true
+                    break
+                }
+            }
+        }
+
+        #expect(foundAccentPixel)
     }
 }

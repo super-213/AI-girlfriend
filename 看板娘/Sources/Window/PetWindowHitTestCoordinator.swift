@@ -19,6 +19,7 @@ final class PetWindowHitTestCoordinator {
     private var localMonitor: Any?
     private var globalMonitor: Any?
     private var interactionLockCount = 0
+    private var isResizeModeActive = false
 
     private init() {
         localMonitor = NSEvent.addLocalMonitorForEvents(
@@ -62,9 +63,15 @@ final class PetWindowHitTestCoordinator {
         refreshMousePolicy()
     }
 
+    func setResizeModeActive(_ active: Bool) {
+        guard isResizeModeActive != active else { return }
+        isResizeModeActive = active
+        refreshMousePolicy()
+    }
+
     func refreshMousePolicy() {
         guard let window else { return }
-        if interactionLockCount > 0 {
+        if interactionLockCount > 0 || isResizeModeActive {
             window.ignoresMouseEvents = false
             return
         }

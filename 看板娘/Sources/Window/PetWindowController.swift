@@ -12,6 +12,12 @@ private struct PetWindowPlacement: Codable {
     let relativeBottomY: Double
 }
 
+enum PetWindowSizing {
+    static let minimumSize = NSSize(width: 180, height: 180)
+    static let minimumContentScale: CGFloat = 0.5
+    static let maximumContentScale: CGFloat = 2
+}
+
 /// 纯几何计算，内容变化时绝不改写宠物中心 X 与底部 Y。
 struct PetWindowGeometry {
     static func anchoredFrame(
@@ -20,8 +26,8 @@ struct PetWindowGeometry {
         visibleFrame: NSRect
     ) -> NSRect {
         let size = NSSize(
-            width: min(max(ceil(proposedContentSize.width), 220), visibleFrame.width),
-            height: min(max(ceil(proposedContentSize.height), 220), visibleFrame.height)
+            width: min(max(ceil(proposedContentSize.width), PetWindowSizing.minimumSize.width), visibleFrame.width),
+            height: min(max(ceil(proposedContentSize.height), PetWindowSizing.minimumSize.height), visibleFrame.height)
         )
         let origin = NSPoint(
             x: currentFrame.midX - size.width / 2,
@@ -31,18 +37,120 @@ struct PetWindowGeometry {
     }
 }
 
+struct PetWindowScaleGeometry {
+    static func uniformlyResizedFrame(
+        initialFrame: NSRect,
+        proposedFrame: NSRect,
+        edges: WindowResizeEdges,
+        minimumSize: NSSize,
+        visibleFrame: NSRect,
+        minimumScaleFactor: CGFloat = 0,
+        maximumScaleFactor: CGFloat = .greatestFiniteMagnitude
+    ) -> NSRect {
+        guard initialFrame.width > 0, initialFrame.height > 0 else { return proposedFrame }
+
+        let widthScale = proposedFrame.width / initialFrame.width
+        let heightScale = proposedFrame.height / initialFrame.height
+        let hasHorizontalEdge = edges.contains(.left) || edges.contains(.right)
+        let hasVerticalEdge = edges.contains(.top) || edges.contains(.bottom)
+
+        let proposedScale: CGFloat
+        if hasHorizontalEdge && hasVerticalEdge {
+            proposedScale = abs(widthScale - 1) >= abs(heightScale - 1) ? widthScale : heightScale
+        } else if hasHorizontalEdge {
+            proposedScale = widthScale
+        } else {
+            proposedScale = heightScale
+        }
+
+        let minimumScale = max(
+            max(
+                minimumSize.width / initialFrame.width,
+                minimumSize.height / initialFrame.height
+            ),
+            minimumScaleFactor
+        )
+
+        let availableWidth: CGFloat
+        if edges.contains(.left) {
+            availableWidth = initialFrame.maxX - visibleFrame.minX
+        } else if edges.contains(.right) {
+            availableWidth = visibleFrame.maxX - initialFrame.minX
+        } else {
+            availableWidth = 2 * min(
+                initialFrame.midX - visibleFrame.minX,
+                visibleFrame.maxX - initialFrame.midX
+            )
+        }
+
+        let availableHeight: CGFloat
+        if edges.contains(.bottom) {
+            availableHeight = initialFrame.maxY - visibleFrame.minY
+        } else {
+            availableHeight = visibleFrame.maxY - initialFrame.minY
+        }
+
+        let maximumScale = max(
+            min(
+                min(availableWidth / initialFrame.width, availableHeight / initialFrame.height),
+                maximumScaleFactor
+            ),
+            minimumScale
+        )
+        let scale = min(max(proposedScale, minimumScale), maximumScale)
+        let size = NSSize(
+            width: initialFrame.width * scale,
+            height: initialFrame.height * scale
+        )
+
+        let originX: CGFloat
+        if edges.contains(.left) {
+            originX = initialFrame.maxX - size.width
+        } else if edges.contains(.right) {
+            originX = initialFrame.minX
+        } else {
+            originX = initialFrame.midX - size.width / 2
+        }
+
+        let originY = edges.contains(.bottom)
+            ? initialFrame.maxY - size.height
+            : initialFrame.minY
+
+        return NSRect(origin: NSPoint(x: originX, y: originY), size: size)
+    }
+}
+
 @MainActor
-final class PetWindowController {
+final class PetWindowController: ObservableObject {
     static let shared = PetWindowController()
 
+    @Published private(set) var contentScale: CGFloat
+
     private weak var window: NSWindow?
+    private weak var resizeOverlay: OptionWindowResizeNSView?
     private var attachedWindowNumber: Int?
     private var resizeWorkItem: DispatchWorkItem?
     private var screenObserver: NSObjectProtocol?
+    private var modifierPollTimer: Timer?
     private var hasRestoredPlacement = false
+    private var isResizeModeActive = false
+    private var isUserResizing = false
+    private var resizeStartFrame: NSRect?
+    private var resizeStartScale: CGFloat = 1
+    private var lastReportedContentSize: CGSize = .zero
     private let placementKey = "petWindowPlacement.v2"
+    private let contentScaleKey = "petWindowContentScale.v1"
+    private let minimumContentScale = PetWindowSizing.minimumContentScale
+    private let maximumContentScale = PetWindowSizing.maximumContentScale
 
     private init() {
+        let savedScale = CGFloat(UserDefaults.standard.double(forKey: contentScaleKey))
+        _contentScale = Published(
+            initialValue: savedScale > 0
+                ? min(max(savedScale, minimumContentScale), maximumContentScale)
+                : 1
+        )
+
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -52,29 +160,48 @@ final class PetWindowController {
                 self?.clampToVisibleScreen()
             }
         }
+
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.pollOptionResizeMode()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        modifierPollTimer = timer
     }
 
     deinit {
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
+        modifierPollTimer?.invalidate()
     }
 
     func attach(window: NSWindow) {
         self.window = window
+        window.styleMask.remove(.resizable)
+        window.contentMinSize = PetWindowSizing.minimumSize
         PetWindowHitTestCoordinator.shared.attach(window: window)
+        installResizeOverlayIfNeeded(on: window)
+        pollOptionResizeMode()
 
         guard attachedWindowNumber != window.windowNumber else { return }
         attachedWindowNumber = window.windowNumber
-        window.contentMinSize = NSSize(width: 220, height: 220)
         window.acceptsMouseMovedEvents = true
         restorePlacementIfNeeded()
     }
 
     func reportContentSize(_ proposedSize: CGSize) {
         guard proposedSize.width > 0, proposedSize.height > 0 else { return }
+        lastReportedContentSize = proposedSize
+        guard !isUserResizing else { return }
+
+        let scaledSize = CGSize(
+            width: proposedSize.width * contentScale,
+            height: proposedSize.height * contentScale
+        )
         resizeWorkItem?.cancel()
         let item = DispatchWorkItem { [weak self] in
             Task { @MainActor in
-                self?.resizeWindow(to: proposedSize)
+                self?.resizeWindow(to: scaledSize)
             }
         }
         resizeWorkItem = item
@@ -101,6 +228,86 @@ final class PetWindowController {
     func endDragging() {
         savePlacement()
         setInteractionLocked(false)
+    }
+
+    private func installResizeOverlayIfNeeded(on window: NSWindow) {
+        guard let contentView = window.contentView else { return }
+        if let resizeOverlay, resizeOverlay.superview === contentView { return }
+
+        self.resizeOverlay?.removeFromSuperview()
+        let overlay = OptionWindowResizeNSView(frame: contentView.bounds)
+        overlay.minimumSize = PetWindowSizing.minimumSize
+        overlay.cornerRadius = 16
+        overlay.autoresizingMask = [.width, .height]
+        overlay.frameConstraint = { [weak self] initialFrame, proposedFrame, edges, visibleFrame in
+            guard let self else { return proposedFrame }
+            return PetWindowScaleGeometry.uniformlyResizedFrame(
+                initialFrame: initialFrame,
+                proposedFrame: proposedFrame,
+                edges: edges,
+                minimumSize: PetWindowSizing.minimumSize,
+                visibleFrame: visibleFrame,
+                minimumScaleFactor: self.minimumContentScale / self.resizeStartScale,
+                maximumScaleFactor: self.maximumContentScale / self.resizeStartScale
+            )
+        }
+        overlay.onResizeBegan = { [weak self] frame in
+            self?.beginUserResize(from: frame)
+        }
+        overlay.onResizeChanged = { [weak self] frame in
+            self?.updateUserResize(to: frame)
+        }
+        overlay.onResizeEnded = { [weak self] frame in
+            self?.endUserResize(at: frame)
+        }
+        contentView.addSubview(overlay, positioned: .above, relativeTo: nil)
+        resizeOverlay = overlay
+        overlay.setResizeModeActive(isResizeModeActive)
+    }
+
+    private func pollOptionResizeMode() {
+        let flags = CGEventSource.flagsState(.combinedSessionState)
+        setResizeModeActive(flags.contains(.maskAlternate))
+    }
+
+    private func setResizeModeActive(_ active: Bool) {
+        guard isResizeModeActive != active else { return }
+        isResizeModeActive = active
+        resizeOverlay?.setResizeModeActive(active)
+        PetWindowHitTestCoordinator.shared.setResizeModeActive(active)
+    }
+
+    private func beginUserResize(from frame: NSRect) {
+        resizeWorkItem?.cancel()
+        resizeStartFrame = frame
+        resizeStartScale = contentScale
+        isUserResizing = true
+        setInteractionLocked(true)
+    }
+
+    private func updateUserResize(to frame: NSRect) {
+        guard let resizeStartFrame, resizeStartFrame.width > 0 else { return }
+        let scaleRatio = frame.width / resizeStartFrame.width
+        contentScale = min(
+            max(resizeStartScale * scaleRatio, minimumContentScale),
+            maximumContentScale
+        )
+    }
+
+    private func endUserResize(at frame: NSRect) {
+        updateUserResize(to: frame)
+        resizeStartFrame = nil
+        isUserResizing = false
+        UserDefaults.standard.set(Double(contentScale), forKey: contentScaleKey)
+        savePlacement()
+        setInteractionLocked(false)
+
+        if lastReportedContentSize.width > 0, lastReportedContentSize.height > 0 {
+            resizeWindow(to: CGSize(
+                width: lastReportedContentSize.width * contentScale,
+                height: lastReportedContentSize.height * contentScale
+            ))
+        }
     }
 
     func savePlacement() {
