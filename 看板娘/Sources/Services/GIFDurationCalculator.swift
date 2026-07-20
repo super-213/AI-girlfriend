@@ -1,6 +1,6 @@
 //
 //  GIFDurationCalculator.swift
-//  桌面宠物应用
+//  看板娘
 //
 //  GIF动画时长计算服务
 //

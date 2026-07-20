@@ -55,6 +55,7 @@ final class DialogChatViewModel: ObservableObject {
     }
 
     func startNewConversation() {
+        apiManager.cancelStreamRequest()
         activeStreamToken = UUID()
         isRequesting = false
         isExecutingCommand = false
@@ -64,6 +65,17 @@ final class DialogChatViewModel: ObservableObject {
         commandIterationCount = 0
         messages.removeAll()
         inputText = ""
+    }
+
+    func stopGenerating() {
+        guard isRequesting, !isExecutingCommand else { return }
+        activeStreamToken = UUID()
+        apiManager.cancelStreamRequest()
+        isRequesting = false
+        if let last = messages.last, last.role == .assistant, last.content.isEmpty {
+            messages.removeLast()
+        }
+        appendAssistantStatus("已停止生成。")
     }
 
     func confirmAndRunCommand() {
@@ -131,6 +143,12 @@ final class DialogChatViewModel: ObservableObject {
         } onComplete: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.finishAssistantReply(for: assistantID, streamToken: streamToken)
+            }
+        } onError: { [weak self] error in
+            Task { @MainActor [weak self] in
+                guard let self, self.activeStreamToken == streamToken else { return }
+                self.isRequesting = false
+                self.appendAssistantStatus("请求失败：\(error.localizedDescription)")
             }
         }
     }

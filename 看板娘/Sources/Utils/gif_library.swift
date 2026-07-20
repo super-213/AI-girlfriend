@@ -7,24 +7,18 @@
 
 import Foundation
 
-// MARK: - 角色数据模型
-
-/// 宠物角色数据模型
-/// 包含角色名称、GIF动画路径和自动消息
-struct PetCharacter: Codable {
-    let name: String
-    let normalGif: String
-    let clickGif: String
-    let autoMessages: [String]
-}
-
 // MARK: - 内置角色
 
 /// 内置角色：布偶熊·觅语
 let puppetBear = PetCharacter(
+    id: "builtin.puppet-bear",
     name: "布偶熊·觅语",
-    normalGif: "布偶熊站立透明.gif",
-    clickGif: "布偶熊动作透明.gif",
+    assetsByState: [
+        .idle: [PetAnimationAsset(id: "puppet-bear.idle", location: "布偶熊站立透明.gif")]
+    ],
+    interactionAssets: [
+        PetAnimationAsset(id: "puppet-bear.interaction", location: "布偶熊动作透明.gif", loop: false)
+    ],
     autoMessages: [
         "指挥官，你好～(｡•́︿•̀｡)人家等了好久都没有收到你的消息呢……是不是忘记你还有个一直在这里等你的小布偶了呀？布偶熊·觅语有点小委屈，但还是乖乖地等着你回来哟～",
         "(つ﹏<。) 呜呜……指挥官好久都没来看觅语了～是不是在忙什么超级重要的任务呢？没关系，觅语会耐心等着你，就像一直守在原地的布偶一样～",
@@ -38,9 +32,14 @@ let puppetBear = PetCharacter(
 
 /// 内置角色：夏提雅
 let puppetCat = PetCharacter(
+    id: "builtin.shalltear",
     name: "夏提雅",
-    normalGif: "夏提雅.gif",
-    clickGif: "夏提雅.gif",
+    assetsByState: [
+        .idle: [PetAnimationAsset(id: "shalltear.idle", location: "夏提雅.gif")]
+    ],
+    interactionAssets: [
+        PetAnimationAsset(id: "shalltear.interaction", location: "夏提雅.gif", loop: false)
+    ],
     autoMessages: [
         "喵~ 轻语来陪你啦~",
         "不可以冷落猫猫哟~"
@@ -49,5 +48,4 @@ let puppetCat = PetCharacter(
 
 /// 所有可用的内置角色列表
 let availableCharacters: [PetCharacter] = [puppetBear, puppetCat]
-
 

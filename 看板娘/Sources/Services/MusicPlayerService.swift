@@ -1,6 +1,6 @@
 //
 //  MusicPlayerService.swift
-//  桌面宠物应用
+//  看板娘
 //
 //  音乐播放服务
 //

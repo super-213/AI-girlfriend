@@ -13,9 +13,19 @@ import AppKit
 
 /// 自定义 NSView，通过渲染窗口 contentView 的 layer 来采样位置的 alpha 值，
 /// 判断是否命中非透明区域（用于点击和悬停检测）
-class AlphaHitTestNSView: NSView {
+class AlphaHitTestNSView: NSView, PetInteractiveRegion {
     /// 点击命中非透明区域时的回调
     var onTap: (() -> Void)?
+
+    var onDoubleTap: (() -> Void)?
+
+    var onRightClick: (() -> Void)?
+
+    var onDragBegan: (() -> Void)?
+
+    var onDragChanged: ((NSPoint, NSPoint) -> Void)?
+
+    var onDragEnded: (() -> Void)?
     
     /// 鼠标悬停状态变化回调（仅在非透明区域触发）
     var onHover: ((Bool) -> Void)?
@@ -25,6 +35,29 @@ class AlphaHitTestNSView: NSView {
     
     /// 鼠标追踪区域
     private var trackingArea: NSTrackingArea?
+
+    private var initialMouseLocation: NSPoint?
+    private var initialWindowOrigin: NSPoint?
+    private var didDrag = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return }
+        Task { @MainActor in
+            PetWindowHitTestCoordinator.shared.register(self)
+        }
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if window != nil, newWindow == nil {
+            Task { @MainActor in
+                PetWindowHitTestCoordinator.shared.unregister(self)
+            }
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -46,10 +79,9 @@ class AlphaHitTestNSView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        let localPoint = convert(point, from: superview)
-        guard bounds.contains(localPoint) else { return nil }
+        guard bounds.contains(point) else { return nil }
 
-        if isPointOpaque(localPoint) {
+        if isPointOpaque(point) {
             return self
         }
         // 透明像素，穿透点击
@@ -78,8 +110,43 @@ class AlphaHitTestNSView: NSView {
     // MARK: - 点击事件
 
     override func mouseDown(with event: NSEvent) {
-        // 点击命中时触发回调
-        onTap?()
+        initialMouseLocation = NSEvent.mouseLocation
+        initialWindowOrigin = window?.frame.origin
+        didDrag = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let initialMouseLocation, let initialWindowOrigin else { return }
+        let current = NSEvent.mouseLocation
+        let delta = NSPoint(x: current.x - initialMouseLocation.x, y: current.y - initialMouseLocation.y)
+
+        if !didDrag, hypot(delta.x, delta.y) >= 4 {
+            didDrag = true
+            onDragBegan?()
+        }
+        if didDrag {
+            onDragChanged?(initialWindowOrigin, delta)
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        defer {
+            initialMouseLocation = nil
+            initialWindowOrigin = nil
+            didDrag = false
+        }
+
+        if didDrag {
+            onDragEnded?()
+        } else if event.clickCount >= 2 {
+            onDoubleTap?()
+        } else {
+            onTap?()
+        }
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        onRightClick?()
     }
     
     // MARK: - Alpha 检测核心逻辑
@@ -125,6 +192,13 @@ class AlphaHitTestNSView: NSView {
         return pixel[3] > 30
     }
 
+    func containsPetInteraction(at screenPoint: NSPoint) -> Bool {
+        guard let window, !isHidden, alphaValue > 0.01 else { return false }
+        let pointInWindow = window.convertPoint(fromScreen: screenPoint)
+        let localPoint = convert(pointInWindow, from: nil)
+        return bounds.contains(localPoint) && isPointOpaque(localPoint)
+    }
+
     /// 兜底命中测试：如果 layer 渲染失败，使用中心 60% 区域
     private func fallbackHitTest(_ localPoint: NSPoint) -> Bool {
         let insetX = bounds.width * 0.2
@@ -157,15 +231,35 @@ struct AlphaHitTestOverlay: NSViewRepresentable {
     /// 鼠标悬停非透明区域状态变化回调
     var onHover: ((Bool) -> Void)?
 
+    var onDoubleTap: (() -> Void)?
+
+    var onRightClick: (() -> Void)?
+
+    var onDragBegan: (() -> Void)?
+
+    var onDragChanged: ((NSPoint, NSPoint) -> Void)?
+
+    var onDragEnded: (() -> Void)?
+
     func makeNSView(context: Context) -> AlphaHitTestNSView {
         let view = AlphaHitTestNSView()
         view.onTap = onTap
         view.onHover = onHover
+        view.onDoubleTap = onDoubleTap
+        view.onRightClick = onRightClick
+        view.onDragBegan = onDragBegan
+        view.onDragChanged = onDragChanged
+        view.onDragEnded = onDragEnded
         return view
     }
 
     func updateNSView(_ nsView: AlphaHitTestNSView, context: Context) {
         nsView.onTap = onTap
         nsView.onHover = onHover
+        nsView.onDoubleTap = onDoubleTap
+        nsView.onRightClick = onRightClick
+        nsView.onDragBegan = onDragBegan
+        nsView.onDragChanged = onDragChanged
+        nsView.onDragEnded = onDragEnded
     }
 }

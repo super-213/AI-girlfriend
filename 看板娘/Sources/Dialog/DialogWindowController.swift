@@ -39,6 +39,11 @@ final class DialogWindowController {
         window?.orderOut(nil)
     }
 
+    func startNewConversation() {
+        chatViewModel.startNewConversation()
+        showDialog()
+    }
+
     private func makeWindow() -> DialogWindow {
         let frame = NSRect(x: 0, y: 0, width: 560, height: 440)
         let window = DialogWindow(

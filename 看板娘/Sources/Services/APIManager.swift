@@ -1,12 +1,26 @@
 //
 //  APIManager.swift
-//  桌面宠物应用
+//  看板娘
 //
 //  AI API通信管理器，支持流式响应
 //
 
 import Foundation
 import SwiftUI
+
+enum APIStreamError: LocalizedError {
+    case invalidConfiguration
+    case transport(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidConfiguration:
+            return "模型请求配置无效，请检查服务商、地址和模型设置"
+        case .transport(let message):
+            return message
+        }
+    }
+}
 
 // MARK: - API管理器
 
@@ -44,6 +58,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     
     /// 当前正在执行的数据任务
     private var task: URLSessionDataTask?
+    private var activeTaskIdentifier: Int?
     
     // MARK: - 回调
     
@@ -52,6 +67,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     
     /// 请求完成时的回调闭包
     private var onComplete: (() -> Void)?
+    private var onError: ((Error) -> Void)?
 
     // MARK: - 外部接口
     
@@ -63,13 +79,19 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     func sendStreamRequest(
         userInput: String,
         onReceive: @escaping (String) -> Void,
-        onComplete: @escaping () -> Void
+        onComplete: @escaping () -> Void,
+        onError: ((Error) -> Void)? = nil
     ) {
         let messages: [[String: String]] = [
             systemMessage(),
             ["role": "user", "content": userInput]
         ]
-        sendStreamRequest(messages: messages, onReceive: onReceive, onComplete: onComplete)
+        sendStreamRequest(
+            messages: messages,
+            onReceive: onReceive,
+            onComplete: onComplete,
+            onError: onError
+        )
     }
 
     /// 发送包含历史消息的流式请求
@@ -80,28 +102,26 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     func sendStreamRequest(
         messages: [[String: String]],
         onReceive: @escaping (String) -> Void,
-        onComplete: @escaping () -> Void
+        onComplete: @escaping () -> Void,
+        onError: ((Error) -> Void)? = nil
     ) {
         cancelPreviousTask()
+
+        self.onReceive = onReceive
+        self.onComplete = onComplete
+        self.onError = onError
 
         guard let request = buildRequest(with: messages, stream: true) else {
             #if DEBUG
             print(" 请求构建失败")
             #endif
-            onComplete()
+            finishStream(with: APIStreamError.invalidConfiguration)
             return
-        }
-        
-        // 设置回调
-        self.onReceive = onReceive
-        self.onComplete = {
-            onComplete()
-            self.onReceive = nil
-            self.onComplete = nil
         }
 
         // 启动请求
         task = session.dataTask(with: request)
+        activeTaskIdentifier = task?.taskIdentifier
         task?.resume()
     }
 
@@ -305,9 +325,36 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     
     /// 取消之前的请求任务
     private func cancelPreviousTask() {
+        onReceive = nil
+        onComplete = nil
+        onError = nil
+        activeTaskIdentifier = nil
         task?.cancel()
         task = nil
-        
+    }
+
+    func cancelStreamRequest() {
+        cancelPreviousTask()
+    }
+
+    private func finishStream(with error: Error? = nil) {
+        let completion = onComplete
+        let errorHandler = onError
+        onReceive = nil
+        onComplete = nil
+        onError = nil
+        activeTaskIdentifier = nil
+        task = nil
+
+        if let error {
+            if let errorHandler {
+                errorHandler(error)
+            } else {
+                completion?()
+            }
+        } else {
+            completion?()
+        }
     }
 
     // MARK: - URL 会话数据委托
@@ -322,6 +369,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         dataTask: URLSessionDataTask,
         didReceive data: Data
     ) {
+        guard activeTaskIdentifier == dataTask.taskIdentifier else { return }
         guard let rawText = String(data: data, encoding: .utf8) else { return }
 
         #if DEBUG
@@ -417,7 +465,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             // 跳过 [DONE] 标记
             guard jsonString != "[DONE]" else {
                 DispatchQueue.main.async { [weak self] in
-                    self?.onComplete?()
+                    self?.finishStream()
                 }
                 continue
             }
@@ -437,7 +485,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             if let finish = first["finish_reason"] as? String,
                finish == "stop" {
                 DispatchQueue.main.async { [weak self] in
-                    self?.onComplete?()
+                    self?.finishStream()
                 }
                 return
             }
@@ -461,12 +509,15 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     ///   - error: 错误信息（如果有）
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         DispatchQueue.main.async { [weak self] in
+            guard self?.activeTaskIdentifier == task.taskIdentifier else { return }
             if let error = error {
                 #if DEBUG
                 print("任务出错：\(error.localizedDescription)")
                 #endif
+                self?.finishStream(with: APIStreamError.transport(error.localizedDescription))
+            } else {
+                self?.finishStream()
             }
-            self?.onComplete?()
         }
     }
 }

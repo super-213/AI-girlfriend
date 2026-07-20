@@ -13,7 +13,8 @@ import Combine
 
 /// 偏好设置视图的后端逻辑控制器
 /// 负责管理设置验证、角色绑定和数据持久化
-class PreferencesViewBackend: ObservableObject {
+@MainActor
+final class PreferencesViewBackend: ObservableObject {
     private static let currentAgentTemplateVersion = 2
     // MARK: - 属性
     
@@ -45,6 +46,9 @@ class PreferencesViewBackend: ObservableObject {
     
     /// 导入错误消息
     @Published var importErrorMessage: String = ""
+
+    /// D-011 选择不兼容旧结构：保留磁盘素材，但清除旧索引并提示重新导入。
+    @Published var legacyCharactersNeedReimport: Bool = false
 
     // MARK: - Agent/Skill 文件管理
     
@@ -107,9 +111,13 @@ class PreferencesViewBackend: ObservableObject {
     
     /// 加载自定义角色
     private func loadCustomCharacters() {
-        if let data = UserDefaults.standard.data(forKey: "customCharacters"),
-           let characters = try? JSONDecoder().decode([PetCharacter].self, from: data) {
+        guard let data = UserDefaults.standard.data(forKey: "customCharacters") else { return }
+        if let characters = try? JSONDecoder().decode([PetCharacter].self, from: data) {
             customCharacters = characters
+        } else {
+            customCharacters = []
+            legacyCharactersNeedReimport = true
+            UserDefaults.standard.removeObject(forKey: "customCharacters")
         }
     }
     
@@ -121,7 +129,7 @@ class PreferencesViewBackend: ObservableObject {
         }
     }
     
-    /// 导入GIF文件创建自定义角色
+    /// 导入 GIF/PNG/JPEG 创建新结构角色。
     /// - Parameters:
     ///   - normalGif: 站立状态的GIF文件URL
     ///   - clickGif: 点击动作的GIF文件URL（可选）
@@ -140,57 +148,25 @@ class PreferencesViewBackend: ObservableObject {
             return false
         }
         
-        guard let normalGif = normalGif else {
-            importErrorMessage = "必须选择站立GIF"
+        guard let normalGif, PetAssetType.infer(from: normalGif.path) != nil else {
+            importErrorMessage = "必须选择 GIF、PNG 或 JPEG 待命素材"
             showImportError = true
             return false
         }
-        
-        // 使用Application Support目录存储自定义GIF
-        let fileManager = FileManager.default
-        guard let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            importErrorMessage = "无法访问应用支持目录"
-            showImportError = true
-            return false
-        }
-        
-        // 创建应用专属目录
-        let appDirectory = appSupportURL.appendingPathComponent(Bundle.main.bundleIdentifier ?? "PetApp")
-        let animationsURL = appDirectory.appendingPathComponent("CustomAnimations")
         
         do {
-            // 确保目录存在
-            if !fileManager.fileExists(atPath: animationsURL.path) {
-                try fileManager.createDirectory(at: animationsURL, withIntermediateDirectories: true)
+            let idleAsset = try copyCharacterAsset(from: normalGif, nameHint: "\(name)-idle")
+            let interactionAsset: PetAnimationAsset
+            if let clickGif, PetAssetType.infer(from: clickGif.path) != nil {
+                interactionAsset = try copyCharacterAsset(from: clickGif, nameHint: "\(name)-interaction", loop: false)
+            } else {
+                interactionAsset = idleAsset
             }
-            
-            let normalFileName = "\(name)_站立.gif"
-            let normalDestURL = animationsURL.appendingPathComponent(normalFileName)
-            
-            // 如果文件已存在，先删除
-            if fileManager.fileExists(atPath: normalDestURL.path) {
-                try fileManager.removeItem(at: normalDestURL)
-            }
-            
-            try fileManager.copyItem(at: normalGif, to: normalDestURL)
-            
-            var clickFileName = normalFileName
-            if let clickGif = clickGif {
-                clickFileName = "\(name)_动作.gif"
-                let clickDestURL = animationsURL.appendingPathComponent(clickFileName)
-                
-                if fileManager.fileExists(atPath: clickDestURL.path) {
-                    try fileManager.removeItem(at: clickDestURL)
-                }
-                
-                try fileManager.copyItem(at: clickGif, to: clickDestURL)
-            }
-            
-            // 创建新角色（保存完整路径）
             let newCharacter = PetCharacter(
+                id: UUID().uuidString,
                 name: name,
-                normalGif: normalDestURL.path,
-                clickGif: clickFileName == normalFileName ? normalDestURL.path : animationsURL.appendingPathComponent(clickFileName).path,
+                assetsByState: [.idle: [idleAsset]],
+                interactionAssets: [interactionAsset],
                 autoMessages: ["你好，我是\(name)～"]
             )
             
@@ -213,17 +189,70 @@ class PreferencesViewBackend: ObservableObject {
         let character = customCharacters[index]
         let fileManager = FileManager.default
         
-        // 删除GIF文件
-        let normalURL = URL(fileURLWithPath: character.normalGif)
-        let clickURL = URL(fileURLWithPath: character.clickGif)
-        
-        try? fileManager.removeItem(at: normalURL)
-        if character.normalGif != character.clickGif {
-            try? fileManager.removeItem(at: clickURL)
+        let locations = Set(
+            character.assetsByState.values.flatMap { $0 }.map(\.location)
+            + character.interactionAssets.map(\.location)
+        )
+        for location in locations where location.hasPrefix("/") {
+            try? fileManager.removeItem(at: URL(fileURLWithPath: location))
         }
         
         customCharacters.remove(at: index)
         saveCustomCharacters()
+    }
+
+    func addStateAsset(toCharacterAt index: Int, state: PetActivityState, sourceURL: URL) -> Bool {
+        guard customCharacters.indices.contains(index) else { return false }
+        do {
+            let asset = try copyCharacterAsset(
+                from: sourceURL,
+                nameHint: "\(customCharacters[index].name)-\(state.rawValue)"
+            )
+            customCharacters[index].assetsByState[state, default: []].append(asset)
+            saveCustomCharacters()
+            if petViewBackend.currentCharacter.id == customCharacters[index].id {
+                petViewBackend.switchToCharacter(customCharacters[index])
+            }
+            return true
+        } catch {
+            importErrorMessage = "状态素材导入失败：\(error.localizedDescription)"
+            showImportError = true
+            return false
+        }
+    }
+
+    func removeStateAsset(fromCharacterAt index: Int, state: PetActivityState, assetID: String) {
+        guard customCharacters.indices.contains(index),
+              var assets = customCharacters[index].assetsByState[state],
+              let assetIndex = assets.firstIndex(where: { $0.id == assetID }) else { return }
+        let removed = assets.remove(at: assetIndex)
+        if state == .idle && assets.isEmpty { return }
+        customCharacters[index].assetsByState[state] = assets
+        if removed.location.hasPrefix("/") { try? FileManager.default.removeItem(atPath: removed.location) }
+        saveCustomCharacters()
+        if petViewBackend.currentCharacter.id == customCharacters[index].id {
+            petViewBackend.switchToCharacter(customCharacters[index])
+        }
+    }
+
+    private func copyCharacterAsset(from sourceURL: URL, nameHint: String, loop: Bool = true) throws -> PetAnimationAsset {
+        guard let type = PetAssetType.infer(from: sourceURL.path) else {
+            throw NSError(domain: "PetCharacter", code: 1, userInfo: [NSLocalizedDescriptionKey: "仅支持 GIF、PNG 和 JPEG"])
+        }
+        let fileManager = FileManager.default
+        guard let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            throw NSError(domain: "PetCharacter", code: 2, userInfo: [NSLocalizedDescriptionKey: "无法访问应用支持目录"])
+        }
+        let directory = appSupportURL
+            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "PetApp")
+            .appendingPathComponent("CustomAnimations")
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let safeHint = nameHint.replacingOccurrences(of: "/", with: "-")
+        let fileName = "\(safeHint)-\(UUID().uuidString).\(sourceURL.pathExtension.lowercased())"
+        let destination = directory.appendingPathComponent(fileName)
+        try fileManager.copyItem(at: sourceURL, to: destination)
+        return PetAnimationAsset(location: destination.path, type: type, loop: loop)
     }
 }
 

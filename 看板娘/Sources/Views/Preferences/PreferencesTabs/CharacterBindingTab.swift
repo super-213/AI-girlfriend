@@ -19,6 +19,7 @@ struct CharacterBindingTab: View {
     let onCharacterChange: (Int) -> Void
     let onImport: () -> Void
     let onDelete: (Int) -> Void
+    let onConfigure: (Int) -> Void
     
     @Binding var showImportError: Bool
     @Binding var importErrorMessage: String
@@ -47,7 +48,8 @@ struct CharacterBindingTab: View {
                 CustomCharactersSection(
                     customCharacters: customCharacters,
                     onImport: onImport,
-                    onDelete: onDelete
+                    onDelete: onDelete,
+                    onConfigure: onConfigure
                 )
                 .padding(.horizontal, DesignSpacing.xl)
                 

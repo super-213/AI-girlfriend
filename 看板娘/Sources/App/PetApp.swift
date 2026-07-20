@@ -12,7 +12,6 @@ import AppKit
 struct PetApp: App {
     @StateObject private var backend = PetViewBackend()
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    private static var preferencesWindow: NSWindow?
 
     init() {
         // 初始化内存优化器
@@ -22,56 +21,111 @@ struct PetApp: App {
     var body: some Scene {
         Window("Pet", id: "main-pet-window") {
             PetView(petViewBackend: backend)
-                .frame(minWidth: 200, minHeight: 200)
         }
         .windowStyle(.hiddenTitleBar)
+        // 与桌宠 + 固定输入槽的基础尺寸一致，避免首次悬浮才触发窗口扩容。
+        .defaultSize(width: 336, height: 346)
         .defaultPosition(.center)
         .commands {
             CommandGroup(replacing: .appSettings) {
                 Button("偏好设置...") {
-                    showPreferencesWindow()
+                    AppWindowRouter.shared.showPreferences()
                 }
                 .keyboardShortcut(",", modifiers: .command)
             }
             CommandGroup(replacing: .appInfo) {}
         }
+
+        MenuBarExtra("看板娘", systemImage: "pawprint.fill") {
+            Button("打开完整对话") {
+                AppWindowRouter.shared.showDialog()
+            }
+            Button("新建对话") {
+                AppWindowRouter.shared.startNewDialog()
+            }
+            Divider()
+            Button("偏好设置") {
+                AppWindowRouter.shared.showPreferences()
+            }
+            Button("切换角色") {
+                backend.cycleCharacter()
+            }
+            Button("自动化") {
+                AppWindowRouter.shared.showPreferences(section: .automation)
+            }
+            Button("触发器") {
+                AppWindowRouter.shared.showPreferences(section: .triggers)
+            }
+            Divider()
+            Toggle("静音", isOn: Binding(
+                get: { UserDefaults.standard.bool(forKey: "petMuted") },
+                set: { UserDefaults.standard.set($0, forKey: "petMuted") }
+            ))
+            Divider()
+            Button("退出看板娘") { NSApp.terminate(nil) }
+        }
+        .menuBarExtraStyle(.menu)
+    }
+}
+
+extension Notification.Name {
+    static let openPetPreferenceSection = Notification.Name("openPetPreferenceSection")
+}
+
+@MainActor
+final class AppWindowRouter {
+    static let shared = AppWindowRouter()
+
+    private weak var petViewBackend: PetViewBackend?
+    private var preferencesWindow: NSWindow?
+    private(set) var pendingPreferenceSection: PreferencesViewBackend.PreferenceSection = .style
+
+    private init() {}
+
+    func register(petViewBackend: PetViewBackend) {
+        self.petViewBackend = petViewBackend
     }
 
+    func showDialog() {
+        DialogWindowController.shared.showDialog()
+    }
 
+    func startNewDialog() {
+        DialogWindowController.shared.startNewConversation()
+    }
 
-    private func showPreferencesWindow() {
-        if let window = Self.preferencesWindow {
-            if window.isMiniaturized {
-                window.deminiaturize(nil)
-            }
+    func showPreferences(section: PreferencesViewBackend.PreferenceSection = .style) {
+        pendingPreferenceSection = section
+        guard let backend = petViewBackend else { return }
 
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
-            return
+        if preferencesWindow == nil {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 680, height: 500),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.center()
+            window.title = "偏好设置"
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: PreferencesView(petViewBackend: backend))
+            preferencesWindow = window
         }
 
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
-            backing: .buffered, defer: false)
-
-        window.center()
-        window.title = "偏好设置"
-        window.isReleasedWhenClosed = false
-
-        // 传入同一个 backend 实例
-        window.contentView = NSHostingView(rootView: PreferencesView(petViewBackend: backend))
-        Self.preferencesWindow = window
+        guard let preferencesWindow else { return }
+        if preferencesWindow.isMiniaturized { preferencesWindow.deminiaturize(nil) }
         NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-        window.level = .normal
+        preferencesWindow.makeKeyAndOrderFront(nil)
+        preferencesWindow.level = .normal
+        NotificationCenter.default.post(name: .openPetPreferenceSection, object: section.rawValue)
     }
 }
 
 // MARK: - 应用委托
 
 /// 应用程序委托，负责窗口配置和生命周期管理
-class AppDelegate: NSObject, NSApplicationDelegate {
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
     private var localKeyMonitor: Any?
     private var globalKeyMonitor: Any?
     private let dialogWindowController = DialogWindowController.shared
@@ -119,6 +173,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.standardWindowButton(.closeButton)?.isHidden = true
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
+        PetWindowController.shared.attach(window: window)
     }
 
     private func registerDialogHotkey() {

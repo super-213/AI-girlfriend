@@ -1,6 +1,7 @@
 //
 //  PetControlService.swift
 //  看板娘
+//  Sources/Services
 //
 //  Stable machine-callable control surface for app actions.
 //
@@ -79,11 +80,18 @@ struct PetControlError: Error, Codable, LocalizedError {
 }
 
 struct PetRuntimeStateSnapshot: Codable, Equatable {
+    var currentCharacterID: String
     var currentCharacterName: String
     var currentGif: String
     var isThinking: Bool
     var isExecutingCommand: Bool
     var streamedResponse: String
+    var activityState: PetActivityState
+    var renderedState: PetActivityState
+    var stateSource: PetStateSource
+    var stateStartedAt: Date
+    var hasPendingConfirmation: Bool
+    var resolvedAssetSummary: String?
 }
 
 struct SendMessageRequest: Codable {
@@ -257,6 +265,7 @@ private struct PetControlAuditEvent: Codable {
     var createdAt: Date
 }
 
+@MainActor
 protocol PetControlling: AnyObject {
     func sendMessage(_ request: SendMessageRequest) throws -> SendMessageResult
     func switchCharacter(_ request: SwitchCharacterRequest) throws -> CharacterDTO
@@ -268,6 +277,7 @@ protocol PetControlling: AnyObject {
     func importSkill(_ request: ImportSkillRequest) throws -> SkillDTO
 }
 
+@MainActor
 final class PetControlService: PetControlling {
     static let shared = PetControlService()
 
@@ -341,7 +351,7 @@ final class PetControlService: PetControlling {
     func listCharacters(context: PetControlRequestContext = PetControlRequestContext()) -> [CharacterDTO] {
         allCharacters().enumerated().map { index, character in
             CharacterDTO(
-                id: character.name,
+                id: character.id,
                 index: index,
                 name: character.name,
                 normalGif: character.normalGif,
@@ -548,11 +558,18 @@ final class PetControlService: PetControlling {
 
     private func snapshot(from backend: PetViewBackend) -> PetRuntimeStateSnapshot {
         PetRuntimeStateSnapshot(
+            currentCharacterID: backend.currentCharacter.id,
             currentCharacterName: backend.currentCharacter.name,
             currentGif: backend.currentGif,
             isThinking: backend.isThinking,
             isExecutingCommand: backend.isExecutingCommand,
-            streamedResponse: backend.streamedResponse
+            streamedResponse: backend.streamedResponse,
+            activityState: backend.stateCoordinator.snapshot.activityState,
+            renderedState: backend.stateCoordinator.snapshot.renderedState,
+            stateSource: backend.stateCoordinator.snapshot.source,
+            stateStartedAt: backend.stateCoordinator.snapshot.startedAt,
+            hasPendingConfirmation: backend.stateCoordinator.snapshot.hasPendingConfirmation,
+            resolvedAssetSummary: backend.currentResolvedAsset?.summary
         )
     }
 

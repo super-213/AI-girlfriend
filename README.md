@@ -17,13 +17,15 @@
 
 ## 项目概述
 
-看板娘是一个悬浮在桌面的 AI 伴侣应用。主宠物窗口提供输入和实时回复，支持 GIF 动画互动；同时提供偏好设置窗口管理模型、角色、布局、技能文件与自动化流程。
+看板娘是一个悬浮在桌面的 AI 伴侣应用。主宠物窗口会按业务状态切换角色素材和状态提示，并在宠物附近按需显示输入、回复气泡、确认卡片与快捷菜单；完整对话和偏好设置继续使用独立窗口。
 
-应用使用 MVVM 分层。界面状态仍由 `PetViewBackend` / `PreferencesViewBackend` 管理，网络请求由 `APIManager` 统一处理；可被机器调用的动作统一收敛到 `PetControlService`，用于后续接入 AppIntents、Shortcuts、URL Scheme、localhost HTTP/WebSocket 或 MCP。
+应用使用 MVVM 分层。`PetStateCoordinator` 统一处理状态优先级、异步 run ID 和短暂效果，`PetViewBackend` 负责把对话、命令、自动化和触发器事件接入状态域；窗口尺寸、穿透、拖动和位置恢复由独立 AppKit 控制层处理。
 
 ### 主要特性
 
-- 🎭 **多角色支持**：内置角色 + 自定义角色（最多 3 个）
+- 🎭 **多状态角色**：内置角色 + 自定义角色（最多 3 个），支持 GIF/PNG/JPEG、状态回退和多素材轮换
+- 🧭 **状态驱动桌宠**：支持 idle、thinking、talking、working、waitingForConfirmation、success、error、sleeping 等 13 种状态
+- 🖱️ **桌面级交互**：透明区域整窗穿透、Alpha 命中拖拽、位置恢复、动态窗口尺寸和屏幕边界约束
 - 🤖 **AI 对话**：支持智谱清言、OpenAI-Compatible、Ollama（流式输出）
 - 🪟 **悬浮对话窗**：`Ctrl + T` 呼出独立无边框聊天窗口
 - 🧠 **技能注入**：支持导入 `agent.md` 与多个 `skill.md`
@@ -33,7 +35,7 @@
 - 📝 **审计日志**：控制服务记录动作来源、请求 ID、执行状态和错误信息，便于追踪外部 Agent 行为
 - 🎵 **音乐搜索**：识别关键词后打开 Apple Music 搜索
 - 💾 **数据持久化**：`@AppStorage + UserDefaults`
-- 🎬 **GIF 动画**：支持内置/自定义 GIF，并按帧时长计算动画时长
+- 🧰 **快捷入口**：右键快捷菜单、双击完整对话、Dock + 菜单栏入口
 - ⏰ **自动交互**：随机间隔（270-330 秒）自动播放动作和消息
 
 ---
@@ -41,17 +43,19 @@
 ## 核心功能
 
 ### 1. 宠物交互
-- 点击宠物触发动作 GIF
-- 输入文本进行 AI 对话，流式展示响应
-- 自动行为循环（随机触发动画与提示）
+- 左键短按播放互动素材，拖动超过 4pt 时移动窗口且不触发点击
+- 右键打开快捷菜单，双击打开完整对话
+- 悬停显示输入框，AI 回复在限高气泡中流式展示
+- 主气泡与完整对话窗口均可停止生成
+- 透明像素和窗口空白区域不阻挡后方应用
 
 ### 2. 偏好设置
 - **风格**：系统提示词、静态提示词
 - **模型设置**：Provider、Model、API URL、API Key
-- **布局**：输入区/对话区/宠物图像重叠比例
+- **布局**：休息阈值、气泡时长、命令确认方式和原布局参数
 - **技能**：导入或生成 `agent.md`，导入多个 `skill.md`
 - **自动化**：新增、编辑、启停和删除自动化流程，设置名称、提示词和运行频率
-- **角色绑定**：切换内置角色、导入/删除自定义角色
+- **角色绑定**：切换角色，导入 GIF/PNG/JPEG，并为每个业务状态配置多份素材与预览
 - **关于**：应用信息与当前角色显示
 
 ### 3. 自动化流程
@@ -67,7 +71,8 @@
 - 与主窗口共用 `APIManager` 配置（同一套模型参数）
 
 ### 5. 命令执行（受控）
-- 模型回复中出现命令标记后进入确认弹窗
+- 模型回复中出现命令标记后进入等待确认状态
+- 可在设置中选择宠物附近确认卡片或系统确认弹窗
 - 用户确认后本地执行，并将执行结果回注给模型
 - 内置白名单前缀：`ls`、`pwd`、`cat`、`zip`、`tar`、`cp`、`mv`、`mkdir`、`rmdir`
 - 拦截危险/交互式命令（如 `rm -rf`、`sudo` 等）
@@ -105,13 +110,15 @@
 ```
 PetApp (入口)
     │
-    ├─▶ PetView (主宠物视图)
-    │       └─▶ PetViewBackend
+    ├─▶ PetRootView (组件化主宠物视图)
+    │       └─▶ PetViewBackend ─▶ PetStateCoordinator
     │               ├─▶ PetControlService
     │               ├─▶ APIManager
-    │               ├─▶ MusicPlayerService
-    │               ├─▶ GIFDurationCalculator
+    │               ├─▶ PetAssetResolver
+    │               ├─▶ TriggerDispatcher / AutomationStore
     │               └─▶ MemoryOptimizer
+    │
+    ├─▶ PetWindowController / PetWindowHitTestCoordinator
     │
     ├─▶ PreferencesView (设置窗口)
     │       └─▶ PreferencesViewBackend
@@ -258,6 +265,8 @@ PetControlService
 │   │   │   ├── DialogChatView.swift
 │   │   │   └── DialogChatViewModel.swift
 │   │   ├── Models/
+│   │   │   ├── PetVisualState.swift
+│   │   │   ├── PetAnimationAsset.swift
 │   │   │   ├── PreferencesData.swift
 │   │   │   ├── PreferencesModels.swift
 │   │   │   ├── AutomationModels.swift
@@ -270,6 +279,7 @@ PetControlService
 │   │   │   └── PreferencesViewBackend.swift
 │   │   ├── Views/
 │   │   │   ├── PetView.swift
+│   │   │   ├── Pet/
 │   │   │   └── Preferences/
 │   │   │       ├── PreferencesView.swift
 │   │   │       ├── Components/
@@ -278,7 +288,11 @@ PetControlService
 │   │   │   ├── APIManager.swift
 │   │   │   ├── PetControlService.swift
 │   │   │   ├── MusicPlayerService.swift
-│   │   │   └── GIFDurationCalculator.swift
+│   │   │   ├── PetAssetResolver.swift
+│   │   │   └── TriggerDispatcher.swift
+│   │   ├── Window/
+│   │   │   ├── PetWindowController.swift
+│   │   │   └── PetWindowHitTestCoordinator.swift
 │   │   ├── Utils/
 │   │   │   ├── MemoryOptimizer.swift
 │   │   │   └── gif_library.swift
@@ -329,6 +343,12 @@ PetControlService
 ### 命令行构建
 ```bash
 xcodebuild -project 看板娘.xcodeproj -scheme 看板娘 -configuration Debug build
+```
+
+只运行单元测试并跳过 UI Tests Runner：
+
+```bash
+xcodebuild -project 看板娘.xcodeproj -scheme 看板娘 -destination 'platform=macOS,arch=arm64' -skip-testing:看板娘UITests -only-testing:看板娘Tests test
 ```
 
 ### 依赖说明
@@ -400,6 +420,11 @@ apiKey: "ollama" // 本地模式通常不会校验
 | `apiUrl` | String | API 地址 |
 | `provider` | String | 服务商标识 |
 | `overlapRatio` | Double | 布局重叠比例 |
+| `petSleepMinutes` | Double | 空闲多久进入休息，0 表示关闭 |
+| `commandConfirmationStyle` | String | `nearPet` 或 `systemAlert` |
+| `bubbleAutoHideDuration` | Double | 回复气泡自动收起秒数 |
+| `petWindowPlacement.v2` | Data | 显示器标识和相对窗口位置 |
+| `selectedPetCharacterID` | String | 当前角色稳定 ID |
 | `staticMessages` | Data | 静态提示词列表（JSON） |
 | `customCharacters` | Data | 自定义角色列表（JSON） |
 | `agentFile` | Data | 已导入 agent 文件信息（JSON） |
@@ -420,7 +445,9 @@ apiKey: "ollama" // 本地模式通常不会校验
 - **DialogChatViewModel.swift**：多轮上下文与流式输出状态管理
 
 ### ViewModel 层
-- **PetViewBackend.swift**：宠物状态、对话主流程、命令执行闭环、自动行为与自动化调度
+- **PetViewBackend.swift**：对话、命令、自动化和触发器到状态事件的业务接线
+- **PetVisualState.swift**：状态、事件、优先级、run ID 防乱序和短暂效果回落
+- **PetWindowController.swift**：动态尺寸、底部锚定、拖动位置和多显示器恢复
 - **PreferencesViewBackend.swift**：设置分区管理、角色导入、agent/skill 管理
 
 ### Service 层
@@ -428,22 +455,24 @@ apiKey: "ollama" // 本地模式通常不会校验
 - **PetControlService.swift**：机器可调用控制面，定义结构化请求/响应、错误码、动作路由和审计日志
 - **MusicPlayerService.swift**：歌曲关键词提取与 Apple Music 跳转
 - **GIFDurationCalculator.swift**：GIF 实际播放时长计算
+- **PetAssetResolver.swift**：状态素材轮换、交互素材和统一回退链
 
 ### Store 层
 - **AutomationStore.swift**：自动化流程的新增、更新、删除、启停、到期查询和 UserDefaults 持久化
 
 ### Utils 层
 - **MemoryOptimizer.swift**：SDWebImage 缓存与周期性清理
-- **gif_library.swift**：角色模型与内置角色库
+- **gif_library.swift**：内置角色库
 
 ---
 
 ## 开发建议
 
 ### 添加新角色
-1. 准备站立 GIF（可选动作 GIF）
-2. 在偏好设置 → 角色绑定导入
-3. 或在 `gif_library.swift` 中扩展内置角色
+1. 准备待命素材（GIF、PNG 或 JPEG）以及可选互动素材
+2. 在偏好设置 → 角色绑定导入，并确认拥有素材使用权
+3. 点击“状态素材”为不同状态添加一份或多份素材；缺失状态会按统一回退链使用待命素材
+4. 旧版 `normalGif/clickGif` 自定义角色按已确认策略不自动迁移，需要重新导入
 
 ### 添加新 AI 服务商
 1. 在 `APIManager.buildRequest()` 增加 provider 分支

@@ -1,11 +1,16 @@
 //
 //  TriggerDispatcher.swift
-//  桌面宠物应用
+//  看板娘
 //
 //  触发器意图检测与结构化调度
 //
 
 import Foundation
+
+extension Notification.Name {
+    static let petAudioDidStart = Notification.Name("petAudioDidStart")
+    static let petAudioDidFinish = Notification.Name("petAudioDidFinish")
+}
 
 enum TriggerHandlingResult: Equatable {
     case noEnabledTriggers
@@ -31,7 +36,11 @@ final class TriggerDispatcher {
         self.player = player
     }
 
-    func handleUserInput(_ input: String, completion: @escaping (TriggerHandlingResult) -> Void) {
+    func handleUserInput(
+        _ input: String,
+        onExecutionStarted: (() -> Void)? = nil,
+        completion: @escaping (TriggerHandlingResult) -> Void
+    ) {
         let enabledTriggers = store.enabledTriggersForRecognition()
         guard !enabledTriggers.isEmpty else {
             completion(.noEnabledTriggers)
@@ -49,6 +58,7 @@ final class TriggerDispatcher {
                 return
             }
 
+            onExecutionStarted?()
             let dispatchResult = self.dispatch(result)
             completion(dispatchResult)
         }
@@ -107,8 +117,10 @@ final class TriggerDispatcher {
                         return
                     }
                     self.store.updateRun(run.id, triggerId: finishedTriggerId, status: .succeeded)
+                    NotificationCenter.default.post(name: .petAudioDidFinish, object: run.id)
                 }
             }
+            NotificationCenter.default.post(name: .petAudioDidStart, object: run.id)
             return .executed("已触发：\(trigger.normalizedTitle)")
         } catch {
             let message = error.localizedDescription
@@ -123,6 +135,7 @@ final class TriggerDispatcher {
 
         if let previousRunId {
             store.updateRun(previousRunId, triggerId: trigger.id, status: .terminated)
+            NotificationCenter.default.post(name: .petAudioDidFinish, object: previousRunId)
         }
 
         let run = store.beginRun(triggerId: trigger.id, type: .stop)

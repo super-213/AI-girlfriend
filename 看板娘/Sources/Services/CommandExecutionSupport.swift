@@ -1,6 +1,6 @@
 //
 //  CommandExecutionSupport.swift
-//  桌面宠物应用
+//  看板娘
 //
 //  AI 输出命令的解析、校验与执行工具
 //

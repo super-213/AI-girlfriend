@@ -1,6 +1,6 @@
 //
 //  LocalMP3PlayerService.swift
-//  桌面宠物应用
+//  看板娘
 //
 //  本地 MP3 文件播放服务
 //
@@ -41,6 +41,8 @@ final class LocalMP3PlayerService: NSObject, AVAudioPlayerDelegate {
     private var scopedURL: URL?
     private var activeTriggerId: UUID?
     private var onFinish: ((UUID) -> Void)?
+
+    var isPlaying: Bool { player?.isPlaying == true }
 
     func play(
         bookmarkData: Data?,
@@ -87,6 +89,7 @@ final class LocalMP3PlayerService: NSObject, AVAudioPlayerDelegate {
         do {
             let player = try AVAudioPlayer(contentsOf: url)
             player.delegate = self
+            player.volume = UserDefaults.standard.bool(forKey: "petMuted") ? 0 : 1
             player.currentTime = 0
             player.prepareToPlay()
 

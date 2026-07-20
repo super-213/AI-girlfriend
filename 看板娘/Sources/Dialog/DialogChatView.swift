@@ -173,7 +173,16 @@ struct DialogChatView: View {
                     )
             )
 
-            if viewModel.isRequesting || viewModel.isExecutingCommand {
+            if viewModel.isRequesting && !viewModel.isExecutingCommand {
+                Button(action: viewModel.stopGenerating) {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 10, weight: .bold))
+                        .frame(width: 18, height: 18)
+                }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.circle)
+                .help("停止生成")
+            } else if viewModel.isExecutingCommand {
                 ProgressView()
                     .controlSize(.small)
                     .frame(width: 18, height: 18)

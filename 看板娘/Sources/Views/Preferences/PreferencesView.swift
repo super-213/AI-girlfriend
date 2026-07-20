@@ -22,9 +22,13 @@ struct PreferencesView: View {
     @AppStorage("apiUrl") private var apiUrl = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
     @AppStorage("provider") private var provider = "zhipu"
     @AppStorage("overlapRatio") private var overlapRatio: Double = 0.3
+    @AppStorage("petSleepMinutes") private var sleepMinutes: Double = 6
+    @AppStorage("commandConfirmationStyle") private var commandConfirmationStyle = "nearPet"
+    @AppStorage("bubbleAutoHideDuration") private var bubbleAutoHideDuration: Double = 15
     
     @Environment(\.presentationMode) var presentationMode
     @State private var selectedIndex: Int = 0
+    @State private var editingCharacterIndex: Int?
     @FocusState private var focusedField: FocusableField?
     
     /// 可聚焦字段枚举
@@ -55,6 +59,11 @@ struct PreferencesView: View {
             .navigationSplitViewStyle(.balanced)
             .frame(minWidth: 600, idealWidth: 650, maxWidth: 800, minHeight: 400, idealHeight: 450, maxHeight: 600)
             .onAppear(perform: handleAppear)
+            .onReceive(NotificationCenter.default.publisher(for: .openPetPreferenceSection)) { notification in
+                guard let rawValue = notification.object as? String,
+                      let section = PreferencesViewBackend.PreferenceSection(rawValue: rawValue) else { return }
+                backend.selectedSection = section
+            }
             .onChange(of: [systemPrompt, String(overlapRatio)]) { _, _ in
                 checkChanges()
             }
@@ -74,6 +83,26 @@ struct PreferencesView: View {
             Button("确定", role: .cancel) { }
         } message: {
             Text(backend.skillFileErrorMessage)
+        }
+        .alert("旧角色需要重新导入", isPresented: $backend.legacyCharactersNeedReimport) {
+            Button("知道了", role: .cancel) { }
+        } message: {
+            Text("旧版角色索引已按当前设置清除，原素材文件仍保留在应用支持目录。请使用新格式重新导入。")
+        }
+        .sheet(isPresented: Binding(
+            get: { editingCharacterIndex != nil },
+            set: { if !$0 { editingCharacterIndex = nil } }
+        )) {
+            if let index = editingCharacterIndex, backend.customCharacters.indices.contains(index) {
+                CharacterStateAssetsEditor(
+                    character: backend.customCharacters[index],
+                    onAdd: { state in showStateAssetPanel(characterIndex: index, state: state) },
+                    onRemove: { state, assetID in
+                        backend.removeStateAsset(fromCharacterAt: index, state: state, assetID: assetID)
+                    },
+                    onClose: { editingCharacterIndex = nil }
+                )
+            }
         }
     }
 }
@@ -164,6 +193,9 @@ extension PreferencesView {
         case .layout:
             LayoutSettingsTab(
                 overlapRatio: $overlapRatio,
+                sleepMinutes: $sleepMinutes,
+                commandConfirmationStyle: $commandConfirmationStyle,
+                bubbleAutoHideDuration: $bubbleAutoHideDuration,
                 onSave: saveSettings,
                 onCancel: cancelChanges,
                 hasUnsavedChanges: backend.hasUnsavedChanges
@@ -196,6 +228,7 @@ extension PreferencesView {
                 onCharacterChange: handleCharacterChange,
                 onImport: showImportDialog,
                 onDelete: backend.deleteCustomCharacter,
+                onConfigure: { editingCharacterIndex = $0 },
                 showImportError: $backend.showImportError,
                 importErrorMessage: $backend.importErrorMessage
             )
@@ -250,6 +283,7 @@ extension PreferencesView {
     }
     
     private func handleAppear() {
+        backend.selectedSection = AppWindowRouter.shared.pendingPreferenceSection
         backend.loadTemporaryValues(
             apiKey: apiKey,
             aiModel: aiModel,
@@ -294,12 +328,19 @@ extension PreferencesView {
 
 extension PreferencesView {
     private func showImportDialog() {
+        let copyrightAlert = NSAlert()
+        copyrightAlert.messageText = "确认素材使用权"
+        copyrightAlert.informativeText = "请确认你拥有所导入素材的使用权；素材版权责任由导入者承担。"
+        copyrightAlert.addButton(withTitle: "我已确认")
+        copyrightAlert.addButton(withTitle: "取消")
+        guard copyrightAlert.runModal() == .alertFirstButtonReturn else { return }
+
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        panel.allowedContentTypes = [.gif]
-        panel.message = "选择站立GIF文件"
+        panel.allowedContentTypes = [.gif, .png, .jpeg]
+        panel.message = "选择角色待命素材（GIF、PNG 或 JPEG）"
         
         panel.begin { response in
             guard response == .OK, let normalUrl = panel.url else { return }
@@ -327,8 +368,8 @@ extension PreferencesView {
     
     private func promptForClickGif(normalUrl: URL, characterName: String) {
         let clickAlert = NSAlert()
-        clickAlert.messageText = "选择动作GIF（可选）"
-        clickAlert.informativeText = "是否为角色添加点击动作GIF？"
+        clickAlert.messageText = "选择互动素材（可选）"
+        clickAlert.informativeText = "可为角色添加点击时播放的 GIF、PNG 或 JPEG。"
         clickAlert.addButton(withTitle: "选择")
         clickAlert.addButton(withTitle: "跳过")
         
@@ -346,12 +387,25 @@ extension PreferencesView {
         clickPanel.allowsMultipleSelection = false
         clickPanel.canChooseDirectories = false
         clickPanel.canChooseFiles = true
-        clickPanel.allowedContentTypes = [.gif]
-        clickPanel.message = "选择动作GIF文件"
+        clickPanel.allowedContentTypes = [.gif, .png, .jpeg]
+        clickPanel.message = "选择互动素材"
         
         clickPanel.begin { clickPanelResponse in
             let clickUrl = clickPanelResponse == .OK ? clickPanel.url : nil
             _ = backend.importGIF(normalGif: normalUrl, clickGif: clickUrl, name: characterName)
+        }
+    }
+
+    private func showStateAssetPanel(characterIndex: Int, state: PetActivityState) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.gif, .png, .jpeg]
+        panel.message = "为“\(state.displayName)”选择素材"
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            _ = backend.addStateAsset(toCharacterAt: characterIndex, state: state, sourceURL: url)
         }
     }
 }

@@ -52,6 +52,7 @@ struct CustomCharactersSection: View {
     let customCharacters: [PetCharacter]
     let onImport: () -> Void
     let onDelete: (Int) -> Void
+    let onConfigure: (Int) -> Void
     
     var body: some View {
         VStack(alignment: .leading, spacing: DesignSpacing.md) {
@@ -75,7 +76,8 @@ struct CustomCharactersSection: View {
                 ForEach(Array(customCharacters.enumerated()), id: \.offset) { index, character in
                     CustomCharacterRow(
                         character: character,
-                        onDelete: { onDelete(index) }
+                        onDelete: { onDelete(index) },
+                        onConfigure: { onConfigure(index) }
                     )
                 }
             }
@@ -87,6 +89,7 @@ struct CustomCharactersSection: View {
 struct CustomCharacterRow: View {
     let character: PetCharacter
     let onDelete: () -> Void
+    let onConfigure: () -> Void
     
     var body: some View {
         HStack {
@@ -101,6 +104,10 @@ struct CustomCharacterRow: View {
                     .foregroundColor(DesignColors.textSecondary)
             }
             Spacer()
+            Button(action: onConfigure) {
+                Label("状态素材", systemImage: "photo.on.rectangle.angled")
+            }
+            .buttonStyle(.borderless)
             Button(action: onDelete) {
                 Image(systemName: "trash")
                     .foregroundColor(.red)
@@ -108,7 +115,6 @@ struct CustomCharacterRow: View {
             .buttonStyle(PlainButtonStyle())
         }
         .padding()
-        .background(Color.gray.opacity(0.1))
-        .cornerRadius(8)
+        .background(Color.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
     }
 }

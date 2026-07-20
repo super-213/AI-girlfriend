@@ -1,528 +1,624 @@
 //
 //  PetViewBackend.swift
-//  桌面宠物应用
+//  看板娘
 //
-//  宠物视图的业务逻辑和状态管理
+//  业务服务适配层：业务流程发布 PetStateEvent，视图不再推断状态。
 //
 
-import Foundation
-import Combine
 import AppKit
+import Combine
+import Foundation
 
-// MARK: - 宠物视图后端
-
-/// 宠物视图的后端逻辑控制器
-/// 负责管理角色状态、用户交互、API通信和自动行为
-class PetViewBackend: ObservableObject {
-    // MARK: - 可绑定属性
-    
-    /// 当前选中的角色
+@MainActor
+final class PetViewBackend: ObservableObject {
     @Published var currentCharacter: PetCharacter = puppetBear {
         didSet {
-            currentGif = currentCharacter.normalGif
+            UserDefaults.standard.set(currentCharacter.id, forKey: "selectedPetCharacterID")
+            refreshCurrentAsset()
         }
     }
-    
-    /// 当前显示的GIF文件名
-    @Published var currentGif: String = puppetBear.normalGif
-    
-    /// 是否正在播放反应动画
-    @Published var isReacting = false
-    
-    /// 用户输入的文本
+    @Published private(set) var currentResolvedAsset: PetResolvedAsset?
+    @Published private(set) var currentGif: String = puppetBear.normalGif
     @Published var userInput = ""
-    
-    /// 是否正在等待AI响应
-    @Published var isThinking = false
-    
-    /// AI流式响应的累积文本
     @Published var streamedResponse = ""
-    
-    /// 是否显示命令确认弹窗
     @Published var showCommandConfirm = false
-    
-    /// 待执行的命令
-    @Published var pendingCommand: String = ""
-    
-    /// 是否正在执行命令
-    @Published var isExecutingCommand = false
-    
-    /// 是否显示输出框（定时/自动化任务触发时显示）
+    @Published var pendingCommand = ""
+    @Published private(set) var isExecutingCommand = false
+    @Published private(set) var isRecognizingTrigger = false
     @Published var showOutputBox = false
-    
-    /// 输出框自动隐藏定时器
+
+    let stateCoordinator: PetStateCoordinator
+
+    var isThinking: Bool {
+        if isRecognizingTrigger { return true }
+        switch stateCoordinator.snapshot.activityState {
+        case .thinking, .talking, .automation, .triggered:
+            return true
+        default:
+            return false
+        }
+    }
+
+    var isBusy: Bool {
+        isRecognizingTrigger || isExecutingCommand || stateCoordinator.isBusy
+    }
+
+    var isReacting: Bool {
+        stateCoordinator.transientEffect == .clicked
+    }
+
+    private enum RequestKind {
+        case conversation
+        case automation
+    }
+
+    private let apiManager: APIManager
+    private let automationStore: AutomationStore
+    private let triggerDispatcher: TriggerDispatcher
+    private let assetResolver = PetAssetResolver()
     private var outputBoxHideTimer: AnyCancellable?
-    
-    /// 最近一次用户输入
-    private var lastUserInput: String = ""
-    
-    /// 会话消息历史
-    private var messageHistory: [[String: String]] = []
-    
-    /// 连续命令执行上限
-    private let maxCommandIterations = 5
-    
-    /// 当前命令循环次数
-    private var commandIterationCount = 0
-    
-    // MARK: - 资源常量
-    
-    /// API管理器实例
-    private let apiManager = APIManager()
-
-    /// 自动化流程存储
-    private let automationStore = AutomationStore.shared
-
-    /// 触发器调度器
-    private let triggerDispatcher = TriggerDispatcher.shared
-    
-    // MARK: - 自动交互定时器
-    
-    /// 定期自动行为的定时器
     private var periodicAutoActionTimer: AnyCancellable?
-    
-    /// 定期内存清理定时器
     private var memoryCleanupTimer: AnyCancellable?
-
-    /// 自动化流程调度定时器
+    private var assetRotationTimer: AnyCancellable?
     private var automationTimer: Timer?
+    private var sleepTimer: Timer?
+    private var cancellables = Set<AnyCancellable>()
+    private var notificationObservers: [NSObjectProtocol] = []
 
-    /// 自动化数据变更监听
-    private var automationStoreCancellable: AnyCancellable?
-    
-    // MARK: - 初始化
-    
-    /// 初始化后端并注册通知观察者
-    init() {
-        PetControlService.shared.register(petViewBackend: self)
+    private var lastUserInput = ""
+    private var messageHistory: [[String: String]] = []
+    private let maxCommandIterations = 5
+    private var commandIterationCount = 0
+    private var activeRequestID: UUID?
+    private var pendingCommandRunID: UUID?
+    private var hasReceivedStreamContent = false
 
-        NotificationCenter.default.addObserver(self,
-                                               selector: #selector(onAppDidBecomeActive),
-                                               name: NSApplication.didBecomeActiveNotification,
-                                               object: nil)
-        
-        NotificationCenter.default.addObserver(self,
-                                               selector: #selector(onAppDidResignActive),
-                                               name: NSApplication.didResignActiveNotification,
-                                               object: nil)
-        
-        // 启动定期内存清理（每5分钟）
+    init(
+        apiManager: APIManager = APIManager(),
+        automationStore: AutomationStore = .shared,
+        triggerDispatcher: TriggerDispatcher = .shared,
+        stateCoordinator: PetStateCoordinator? = nil
+    ) {
+        self.apiManager = apiManager
+        self.automationStore = automationStore
+        self.triggerDispatcher = triggerDispatcher
+        self.stateCoordinator = stateCoordinator ?? PetStateCoordinator()
+
+        currentCharacter = Self.initialCharacter()
+        bindState()
+        registerNotifications()
         startPeriodicMemoryCleanup()
         observeAutomationChanges()
         scheduleNextAutomationAction()
+        startAssetRotation()
+        PetControlService.shared.register(petViewBackend: self)
+        AppWindowRouter.shared.register(petViewBackend: self)
     }
-    
-    /// 清理资源和观察者
+
     deinit {
-        NotificationCenter.default.removeObserver(self)
-        cancelAutoActionLoop()
+        notificationObservers.forEach(NotificationCenter.default.removeObserver)
         outputBoxHideTimer?.cancel()
-        outputBoxHideTimer = nil
-        automationTimer?.invalidate()
-        automationTimer = nil
-        automationStoreCancellable?.cancel()
+        periodicAutoActionTimer?.cancel()
         memoryCleanupTimer?.cancel()
+        assetRotationTimer?.cancel()
+        automationTimer?.invalidate()
+        sleepTimer?.invalidate()
     }
-    
-    // MARK: - 生命周期
-    
-    /// 视图出现时调用
+
     func onAppear() {
         startAutoActionLoop()
+        scheduleIdleSleepIfNeeded()
     }
-    
-    /// 视图消失时调用
+
     func onDisappear() {
         cancelAutoActionLoop()
-        streamedResponse = ""
     }
-    
-    /// 应用激活时调用
-    @objc private func onAppDidBecomeActive() {
-        startAutoActionLoop()
-    }
-    
-    /// 应用失去焦点时调用
-    @objc private func onAppDidResignActive() {
-        // 不取消定时器，保持后台也能持续运行自动互动
-    }
-    
-    // MARK: - 用户交互
-    
-    /// 提交用户输入
-    /// 处理音乐播放请求或发送到AI模型
+
     func submitInput() {
         let submittedInput = userInput
-        guard !submittedInput.isEmpty else { return }
+        guard !submittedInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         submitExternalInput(submittedInput)
         userInput = ""
     }
 
-    /// 供控制服务和机器入口调用的结构化消息提交入口
     func submitExternalInput(_ input: String) {
         let trimmedInput = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedInput.isEmpty else { return }
+        guard !isBusy else {
+            streamedResponse = "当前任务还在处理中，请先完成或停止它。"
+            revealOutputBox(autoHideAfter: 8)
+            return
+        }
 
+        noteUserActivity()
+        let runID = UUID()
+        activeRequestID = runID
         lastUserInput = trimmedInput
         commandIterationCount = 0
         messageHistory = [["role": "system", "content": apiManager.systemPromptContent()]]
-
-        isThinking = true
         streamedResponse = ""
         revealOutputBox(autoHideAfter: 30)
+        isRecognizingTrigger = true
 
-        triggerDispatcher.handleUserInput(trimmedInput) { [weak self] result in
-            guard let self else { return }
+        triggerDispatcher.handleUserInput(
+            trimmedInput,
+            onExecutionStarted: { [weak self] in
+                guard let self, self.activeRequestID == runID else { return }
+                self.isRecognizingTrigger = false
+                self.stateCoordinator.send(.triggerMatched(runID))
+                self.stateCoordinator.send(.triggerStarted(runID))
+            },
+            completion: { [weak self] result in
+                guard let self, self.activeRequestID == runID else { return }
+                self.isRecognizingTrigger = false
 
-            switch result {
-            case .executed(let message):
-                self.isThinking = false
-                self.streamedResponse = message
-                self.revealOutputBox(autoHideAfter: 10)
-
-            case .failed(let message):
-                self.isThinking = false
-                self.streamedResponse = "触发器执行失败：\(message)"
-                self.revealOutputBox(autoHideAfter: 15)
-
-            case .noEnabledTriggers, .notMatched:
-                if !self.tryLegacyAppleMusicFallback(trimmedInput) {
-                    self.continueChatProcessing(trimmedInput)
+                switch result {
+                case .executed(let message):
+                    self.streamedResponse = message
+                    self.revealOutputBox(autoHideAfter: 10)
+                    if !LocalMP3PlayerService.shared.isPlaying {
+                        self.stateCoordinator.send(.triggerCompleted(runID))
+                        self.activeRequestID = nil
+                    }
+                case .failed(let message):
+                    self.streamedResponse = "触发器执行失败：\(message)"
+                    self.revealOutputBox(autoHideAfter: 15)
+                    self.stateCoordinator.send(.triggerFailed(runID, message))
+                    self.activeRequestID = nil
+                case .noEnabledTriggers, .notMatched:
+                    if !self.tryLegacyAppleMusicFallback(trimmedInput, runID: runID) {
+                        self.continueChatProcessing(trimmedInput, runID: runID)
+                    }
                 }
             }
-        }
-    }
-
-    private func tryLegacyAppleMusicFallback(_ trimmedInput: String) -> Bool {
-        guard trimmedInput.contains("我想听")
-                || trimmedInput.contains("播放")
-                || trimmedInput.contains("来一首") else {
-            return false
-        }
-
-        let songName = MusicPlayerService.extractSongName(from: trimmedInput)
-        streamedResponse = MusicPlayerService.playSong(named: songName)
-        isThinking = false
-        revealOutputBox(autoHideAfter: 10)
-        return true
-    }
-
-    private func continueChatProcessing(_ trimmedInput: String) {
-        messageHistory.append(["role": "user", "content": trimmedInput])
-        revealOutputBox(autoHideAfter: 30)
-        sendRequest()
-    }
-
-    /// 提交自动化提示词，输出沿用主宠物对话输出框
-    private func submitAutomationPrompt(_ prompt: String) {
-        let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPrompt.isEmpty else { return }
-
-        // 自动化任务触发时显示输出框
-        revealOutputBox(autoHideAfter: 20)
-        submitExternalInput(trimmedPrompt)
+        )
     }
 
     func submitAutomation(_ automation: AutomationFlow) {
-        if let triggerId = automation.triggerId {
-            submitAutomationTrigger(triggerId)
-        } else {
-            submitAutomationPrompt(automation.prompt)
+        guard !isBusy else {
+            automationStore.markDeferred(automation)
+            return
         }
-    }
 
-    private func submitAutomationTrigger(_ triggerId: UUID) {
-        isThinking = true
+        let runID = UUID()
+        activeRequestID = runID
+        stateCoordinator.send(.automationStarted(runID))
         streamedResponse = ""
         revealOutputBox(autoHideAfter: 20)
 
-        let result = triggerDispatcher.runEnabledTrigger(id: triggerId)
-        switch result {
-        case .executed(let message):
-            isThinking = false
-            streamedResponse = message
-            revealOutputBox(autoHideAfter: 10)
-        case .failed(let message):
-            isThinking = false
-            streamedResponse = "自动化触发器执行失败：\(message)"
-            revealOutputBox(autoHideAfter: 15)
-        case .noEnabledTriggers, .notMatched:
-            isThinking = false
-            streamedResponse = "自动化触发器未执行"
-            revealOutputBox(autoHideAfter: 10)
-        }
-    }
-    
-    /// 处理宠物点击事件
-    func handleTap() {
-        guard !isReacting else { return }
-        playNextGif()
-    }
-    
-    /// 切换到指定角色
-    /// - Parameter character: 要切换到的角色
-    func switchToCharacter(_ character: PetCharacter) {
-        isReacting = false
-        currentCharacter = character
-        currentGif = character.normalGif
-    }
-    
-    /// 播放角色的点击动画
-    private func playNextGif() {
-        currentGif = currentCharacter.clickGif
-        isReacting = true
-        
-        // 使用GIF时长计算服务
-        let calculatedDuration = GIFDurationCalculator.getDuration(for: currentCharacter.clickGif)
-        
-        // 减少10%的时长，让切换更及时（避免GIF已播完但还在等待的情况）
-        let duration = calculatedDuration * 0.9
-        
-        #if DEBUG
-        print("GIF: \(currentCharacter.clickGif), 计算时长: \(calculatedDuration)秒, 实际使用: \(duration)秒")
-        #endif
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
-            guard let self = self else { return }
-            self.currentGif = self.currentCharacter.normalGif
-            self.isReacting = false
-            #if DEBUG
-            print("切换回静止状态")
-            #endif
-        }
-    }
-    
-    // MARK: - 模型响应
-    
-    /// 发送用户输入到AI模型
-    /// - Parameter userInput: 用户输入的文本
-    private func sendRequest() {
-        isThinking = true
-        streamedResponse = ""
-        
-        apiManager.sendStreamRequest(messages: messageHistory) { newContent in
-            DispatchQueue.main.async {
-                self.streamedResponse += newContent
-                
-                // 限制响应文本长度，避免内存无限增长
-                if self.streamedResponse.count > 5000 {
-                    self.streamedResponse = String(self.streamedResponse.suffix(5000))
+        if let triggerID = automation.triggerId {
+            stateCoordinator.send(.triggerStarted(runID))
+            let result = triggerDispatcher.runEnabledTrigger(id: triggerID)
+            switch result {
+            case .executed(let message):
+                streamedResponse = message
+                revealOutputBox(autoHideAfter: 10)
+                if !LocalMP3PlayerService.shared.isPlaying {
+                    stateCoordinator.send(.automationCompleted(runID))
+                    activeRequestID = nil
                 }
+            case .failed(let message):
+                streamedResponse = "自动化触发器执行失败：\(message)"
+                stateCoordinator.send(.automationFailed(runID, message))
+                activeRequestID = nil
+            case .noEnabledTriggers, .notMatched:
+                streamedResponse = "自动化触发器未执行"
+                stateCoordinator.send(.automationFailed(runID, "触发器未执行"))
+                activeRequestID = nil
             }
-        } onComplete: {
-            DispatchQueue.main.async {
-                self.isThinking = false
-                self.handleAssistantReply()
+        } else {
+            let prompt = automation.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !prompt.isEmpty else {
+                stateCoordinator.send(.automationFailed(runID, "自动化提示词为空"))
+                activeRequestID = nil
+                return
             }
+            lastUserInput = prompt
+            commandIterationCount = 0
+            messageHistory = [
+                ["role": "system", "content": apiManager.systemPromptContent()],
+                ["role": "user", "content": prompt]
+            ]
+            sendRequest(runID: runID, kind: .automation)
         }
     }
-    
-    // MARK: - 命令执行管道
-    
-    private func handleAssistantReply() {
-        let assistantReply = streamedResponse.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !assistantReply.isEmpty {
-            messageHistory.append(["role": "assistant", "content": assistantReply])
-        }
-        
-        if CommandExecutionSupport.isCompletionReply(assistantReply) {
-            return
-        }
-        
-        guard !isExecutingCommand else { return }
-        guard let command = CommandExecutionSupport.extractCommand(from: streamedResponse) else { return }
-        let normalized = CommandExecutionSupport.normalizeCommand(command, basedOn: lastUserInput)
-        pendingCommand = normalized
-        
-        if normalized != command {
-            if let range = streamedResponse.range(of: command) {
-                streamedResponse.replaceSubrange(range, with: normalized)
-            }
-        }
-        
-        if !CommandExecutionSupport.hasCommandTag(in: streamedResponse) {
-            streamedResponse += "\n[命令] \(normalized)"
-        }
-        
-        showCommandConfirm = true
+
+    func cancelActiveRequest() {
+        guard activeRequestID != nil || isRecognizingTrigger || isExecutingCommand else { return }
+        apiManager.cancelStreamRequest()
+        activeRequestID = nil
+        isRecognizingTrigger = false
+        isExecutingCommand = false
+        stateCoordinator.send(.resetToIdle)
+        streamedResponse = "已停止当前任务。"
+        revealOutputBox(autoHideAfter: 6)
     }
-    
+
+    func handleTap() {
+        noteUserActivity()
+        guard !isReacting, !stateCoordinator.isBusy else { return }
+        stateCoordinator.send(.interaction(.clicked, interactionDuration))
+    }
+
+    func handleInputFocusChanged(_ focused: Bool) {
+        PetWindowController.shared.setInteractionLocked(focused)
+        stateCoordinator.send(.listeningChanged(focused))
+        if focused { noteUserActivity() }
+    }
+
+    func switchToCharacter(_ character: PetCharacter) {
+        currentCharacter = character
+        stateCoordinator.send(.interaction(.greet, interactionDuration))
+    }
+
+    func cycleCharacter() {
+        let characters = Self.allPersistedCharacters()
+        guard !characters.isEmpty else { return }
+        let currentIndex = characters.firstIndex(where: { $0.id == currentCharacter.id }) ?? 0
+        switchToCharacter(characters[(currentIndex + 1) % characters.count])
+    }
+
     func confirmAndRunCommand() {
         let command = pendingCommand
+        let runID = pendingCommandRunID ?? activeRequestID ?? UUID()
         showCommandConfirm = false
         pendingCommand = ""
-        
-        guard !command.isEmpty else { return }
-        
-        guard CommandExecutionSupport.isCommandSafe(command) else {
-            streamedResponse = "[完成] 已阻止危险或交互式命令: \(command)"
+        pendingCommandRunID = nil
+
+        guard !command.isEmpty else {
+            stateCoordinator.send(.resetToIdle)
             return
         }
-        
+
+        guard CommandExecutionSupport.isCommandSafe(command) else {
+            let message = "已阻止危险或交互式命令：\(command)"
+            streamedResponse = "[完成] \(message)"
+            stateCoordinator.send(.commandFailed(runID, message))
+            activeRequestID = nil
+            return
+        }
+
+        activeRequestID = runID
         isExecutingCommand = true
-        isThinking = true
         streamedResponse = ""
-        
-        DispatchQueue.global(qos: .userInitiated).async {
-            let (exitCode, output) = CommandExecutionSupport.runShell(command)
-            let trimmedOutput = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            
+        revealOutputBox(autoHideAfter: 30)
+        stateCoordinator.send(.commandStarted(runID))
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = CommandExecutionSupport.runShell(command)
+            let trimmedOutput = result.1.trimmingCharacters(in: .whitespacesAndNewlines)
             DispatchQueue.main.async {
+                guard let self, self.activeRequestID == runID else { return }
                 self.isExecutingCommand = false
                 self.commandIterationCount += 1
-                if self.commandIterationCount > self.maxCommandIterations {
-                    self.streamedResponse = "[完成] 命令执行次数过多，已停止自动执行"
+
+                guard self.commandIterationCount <= self.maxCommandIterations else {
+                    let message = "命令执行次数过多，已停止自动执行"
+                    self.streamedResponse = "[完成] \(message)"
+                    self.stateCoordinator.send(.commandFailed(runID, message))
+                    self.activeRequestID = nil
                     return
                 }
+
                 let resultText = """
                 执行完毕
                 命令: \(command)
-                退出码: \(exitCode)
+                退出码: \(result.0)
                 输出:
                 \(trimmedOutput.isEmpty ? "(无输出)" : trimmedOutput)
                 """
                 self.messageHistory.append(["role": "user", "content": resultText])
-                self.sendRequest()
+                self.sendRequest(runID: runID, kind: .conversation)
             }
         }
     }
-    
+
     func cancelPendingCommand() {
         showCommandConfirm = false
         pendingCommand = ""
+        pendingCommandRunID = nil
+        activeRequestID = nil
         streamedResponse = "[完成] 已取消执行命令"
+        revealOutputBox(autoHideAfter: 8)
+        stateCoordinator.send(.resetToIdle)
     }
-    
-    // MARK: - 输出框显示控制
-    
-    /// 显示输出框并在指定时间后自动隐藏
-    /// - Parameter duration: 显示持续时间（秒），默认15秒后自动隐藏
+
     func revealOutputBox(autoHideAfter duration: TimeInterval = 15) {
         outputBoxHideTimer?.cancel()
         showOutputBox = true
-        
         outputBoxHideTimer = Just(())
             .delay(for: .seconds(duration), scheduler: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.dismissOutputBox()
-            }
+            .sink { [weak self] _ in self?.dismissOutputBox() }
     }
-    
-    /// 隐藏输出框
+
     func dismissOutputBox() {
         outputBoxHideTimer?.cancel()
         outputBoxHideTimer = nil
         showOutputBox = false
     }
-    
-}
 
-extension PetViewBackend {
-    // MARK: - 自动定时交互
-    
-    /// 启动自动行为循环
+    private func continueChatProcessing(_ input: String, runID: UUID) {
+        messageHistory.append(["role": "user", "content": input])
+        sendRequest(runID: runID, kind: .conversation)
+    }
+
+    private func sendRequest(runID: UUID, kind: RequestKind) {
+        activeRequestID = runID
+        hasReceivedStreamContent = false
+        streamedResponse = ""
+        revealOutputBox(autoHideAfter: 30)
+
+        if kind == .conversation {
+            stateCoordinator.send(.conversationStarted(runID))
+        }
+
+        apiManager.sendStreamRequest(
+            messages: messageHistory,
+            onReceive: { [weak self] chunk in
+                guard let self, self.activeRequestID == runID, !chunk.isEmpty else { return }
+                if !self.hasReceivedStreamContent {
+                    self.hasReceivedStreamContent = true
+                    switch kind {
+                    case .conversation: self.stateCoordinator.send(.conversationStreamStarted(runID))
+                    case .automation: self.stateCoordinator.send(.automationStreamStarted(runID))
+                    }
+                }
+                self.streamedResponse += chunk
+                if self.streamedResponse.count > 5_000 {
+                    self.streamedResponse = String(self.streamedResponse.suffix(5_000))
+                }
+            },
+            onComplete: { [weak self] in
+                guard let self, self.activeRequestID == runID else { return }
+                let outcome = self.handleAssistantReply(runID: runID)
+                switch outcome {
+                case .command, .needsInput:
+                    break
+                case .normal:
+                    switch kind {
+                    case .conversation: self.stateCoordinator.send(.conversationCompleted(runID))
+                    case .automation: self.stateCoordinator.send(.automationCompleted(runID))
+                    }
+                    self.revealOutputBox(autoHideAfter: self.configuredBubbleDuration)
+                    self.activeRequestID = nil
+                }
+            },
+            onError: { [weak self] error in
+                guard let self, self.activeRequestID == runID else { return }
+                let message = error.localizedDescription
+                self.streamedResponse = "请求失败：\(message)"
+                self.revealOutputBox(autoHideAfter: 15)
+                switch kind {
+                case .conversation: self.stateCoordinator.send(.conversationFailed(runID, message))
+                case .automation: self.stateCoordinator.send(.automationFailed(runID, message))
+                }
+                self.activeRequestID = nil
+            }
+        )
+    }
+
+    private enum AssistantOutcome { case normal, command, needsInput }
+
+    private func handleAssistantReply(runID: UUID) -> AssistantOutcome {
+        let reply = streamedResponse.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reply.isEmpty else {
+            streamedResponse = "模型没有返回内容，需要你补充说明或重试。"
+            stateCoordinator.send(.conversationNeedsInput(runID))
+            return .needsInput
+        }
+        messageHistory.append(["role": "assistant", "content": reply])
+
+        if reply.localizedCaseInsensitiveContains("[需要输入]") {
+            stateCoordinator.send(.conversationNeedsInput(runID))
+            return .needsInput
+        }
+        if CommandExecutionSupport.isCompletionReply(reply) || isExecutingCommand {
+            return .normal
+        }
+        guard let command = CommandExecutionSupport.extractCommand(from: streamedResponse) else {
+            return .normal
+        }
+
+        let normalized = CommandExecutionSupport.normalizeCommand(command, basedOn: lastUserInput)
+        pendingCommand = normalized
+        pendingCommandRunID = runID
+        if normalized != command, let range = streamedResponse.range(of: command) {
+            streamedResponse.replaceSubrange(range, with: normalized)
+        }
+        if !CommandExecutionSupport.hasCommandTag(in: streamedResponse) {
+            streamedResponse += "\n[命令] \(normalized)"
+        }
+        showCommandConfirm = true
+        stateCoordinator.send(.commandConfirmationRequested(runID))
+        return .command
+    }
+
+    private func tryLegacyAppleMusicFallback(_ input: String, runID: UUID) -> Bool {
+        guard input.contains("我想听") || input.contains("播放") || input.contains("来一首") else {
+            return false
+        }
+        stateCoordinator.send(.audioStarted(runID))
+        streamedResponse = MusicPlayerService.playSong(named: MusicPlayerService.extractSongName(from: input))
+        revealOutputBox(autoHideAfter: 10)
+        stateCoordinator.send(.audioCompleted(runID))
+        activeRequestID = nil
+        return true
+    }
+
+    private func bindState() {
+        stateCoordinator.$snapshot
+            .combineLatest(stateCoordinator.$transientEffect)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _, _ in
+                self?.refreshCurrentAsset()
+                self?.scheduleIdleSleepIfNeeded()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func refreshCurrentAsset() {
+        currentResolvedAsset = assetResolver.resolve(
+            character: currentCharacter,
+            state: stateCoordinator.snapshot.renderedState,
+            transientEffect: stateCoordinator.transientEffect
+        )
+        currentGif = currentResolvedAsset?.asset.location ?? ""
+    }
+
+    private func startAssetRotation() {
+        assetRotationTimer = Timer.publish(every: PetAssetResolver.rotationInterval, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in self?.refreshCurrentAsset() }
+    }
+
+    private func noteUserActivity() {
+        sleepTimer?.invalidate()
+        if stateCoordinator.snapshot.activityState == .sleeping {
+            stateCoordinator.send(.resetToIdle)
+        }
+        scheduleIdleSleepIfNeeded()
+    }
+
+    private func scheduleIdleSleepIfNeeded() {
+        sleepTimer?.invalidate()
+        sleepTimer = nil
+        guard stateCoordinator.snapshot.activityState == .idle else { return }
+        let defaults = UserDefaults.standard
+        let minutes = defaults.object(forKey: "petSleepMinutes") == nil ? 6 : defaults.double(forKey: "petSleepMinutes")
+        guard minutes > 0 else { return }
+        let timer = Timer(timeInterval: minutes * 60, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.stateCoordinator.send(.idleTimeoutReached) }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        sleepTimer = timer
+    }
+
     private func startAutoActionLoop() {
+        guard periodicAutoActionTimer == nil else { return }
         scheduleNextAutoAction()
     }
-    
-    /// 调度下一次自动行为
+
     private func scheduleNextAutoAction() {
         let delay = Double.random(in: 270...330)
         periodicAutoActionTimer = Just(())
             .delay(for: .seconds(delay), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
+                self?.periodicAutoActionTimer = nil
                 self?.performAutoAction()
                 self?.scheduleNextAutoAction()
             }
     }
-    
-    /// 执行自动行为（播放动画和显示消息）
+
     private func performAutoAction() {
-        guard !isReacting else { return }
-        playNextGif()
-        
-        // 清理旧的响应文本，避免内存累积
-        streamedResponse = ""
-        
-        // 优先使用静态提示词，如果没有则使用角色的 autoMessages
+        let state = stateCoordinator.snapshot.activityState
+        guard state == .idle || state == .sleeping else { return }
+        stateCoordinator.send(.resetToIdle)
+        stateCoordinator.send(.interaction(.greet, interactionDuration))
         if let data = UserDefaults.standard.data(forKey: "staticMessages"),
-           let staticMessages = try? JSONDecoder().decode([String].self, from: data),
-           !staticMessages.isEmpty {
-            streamedResponse = staticMessages.randomElement() ?? ""
+           let messages = try? JSONDecoder().decode([String].self, from: data),
+           !messages.isEmpty {
+            streamedResponse = messages.randomElement() ?? ""
         } else {
             streamedResponse = currentCharacter.autoMessages.randomElement() ?? ""
         }
-        
-        // 自动行为触发时显示输出框
         revealOutputBox(autoHideAfter: 10)
     }
-    
-    /// 取消自动行为循环
+
     private func cancelAutoActionLoop() {
         periodicAutoActionTimer?.cancel()
         periodicAutoActionTimer = nil
     }
 
-    // MARK: - 自动化流程调度
-
     private func observeAutomationChanges() {
-        automationStoreCancellable = automationStore.$automations
+        automationStore.$automations
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.scheduleNextAutomationAction()
-            }
+            .sink { [weak self] _ in self?.scheduleNextAutomationAction() }
+            .store(in: &cancellables)
     }
 
     private func scheduleNextAutomationAction() {
         automationTimer?.invalidate()
         automationTimer = nil
-
         guard let nextDate = automationStore.nextEnabledAutomationDate() else { return }
-
         let interval = max(nextDate.timeIntervalSinceNow, 1)
         let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
-            self?.handleAutomationTimer()
+            Task { @MainActor in
+                self?.runDueAutomationIfPossible()
+                self?.scheduleNextAutomationAction()
+            }
         }
         timer.tolerance = min(max(interval * 0.1, 1), 60)
         RunLoop.main.add(timer, forMode: .common)
         automationTimer = timer
     }
 
-    private func handleAutomationTimer() {
-        automationTimer?.invalidate()
-        automationTimer = nil
-        runDueAutomationIfPossible()
-        scheduleNextAutomationAction()
-    }
-
     private func runDueAutomationIfPossible() {
         guard let automation = automationStore.dueAutomations().sorted(by: {
             ($0.nextRunAt ?? .distantFuture) < ($1.nextRunAt ?? .distantFuture)
-        }).first else {
-            return
-        }
-
-        guard !isThinking, !isExecutingCommand else {
+        }).first else { return }
+        guard !isBusy else {
             automationStore.markDeferred(automation)
             return
         }
-
         automationStore.markCompleted(automation)
         submitAutomation(automation)
     }
-    
-    // MARK: - 内存管理
-    
-    /// 启动定期内存清理（每5分钟）
+
     private func startPeriodicMemoryCleanup() {
         memoryCleanupTimer = Timer.publish(every: 300, on: .main, in: .common)
             .autoconnect()
-            .sink { [weak self] _ in
-                _ = self // 知道 self 被捕获了
-                MemoryOptimizer.shared.periodicCleanup()
-                #if DEBUG
-                print("执行定期内存清理")
-                #endif
+            .sink { _ in MemoryOptimizer.shared.periodicCleanup() }
+    }
+
+    private var configuredBubbleDuration: TimeInterval {
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: "bubbleAutoHideDuration") == nil
+            ? 15
+            : max(defaults.double(forKey: "bubbleAutoHideDuration"), 5)
+    }
+
+    private var interactionDuration: TimeInterval? {
+        guard let asset = currentCharacter.interactionAssets.first else { return nil }
+        if let preferredDuration = asset.preferredDuration { return preferredDuration }
+        guard asset.type == .gif, !asset.loop else { return nil }
+        return max(GIFDurationCalculator.getDuration(for: asset.location) * 0.9, 0.5)
+    }
+
+    private func registerNotifications() {
+        let center = NotificationCenter.default
+        notificationObservers.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.startAutoActionLoop() }
+        })
+        notificationObservers.append(center.addObserver(forName: .petAudioDidStart, object: nil, queue: .main) { [weak self] notification in
+            guard let runID = notification.object as? UUID else { return }
+            Task { @MainActor in
+                self?.stateCoordinator.send(.audioStarted(runID))
             }
+        })
+        notificationObservers.append(center.addObserver(forName: .petAudioDidFinish, object: nil, queue: .main) { [weak self] notification in
+            guard let runID = notification.object as? UUID else { return }
+            Task { @MainActor in
+                self?.stateCoordinator.send(.audioCompleted(runID))
+                self?.activeRequestID = nil
+            }
+        })
+        notificationObservers.append(center.addObserver(forName: Notification.Name("SettingsChanged"), object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.scheduleIdleSleepIfNeeded() }
+        })
+    }
+
+    private static func initialCharacter() -> PetCharacter {
+        let characters = allPersistedCharacters()
+        let selectedID = UserDefaults.standard.string(forKey: "selectedPetCharacterID")
+        return characters.first(where: { $0.id == selectedID }) ?? characters.first ?? puppetBear
+    }
+
+    private static func allPersistedCharacters() -> [PetCharacter] {
+        var characters = availableCharacters
+        if let data = UserDefaults.standard.data(forKey: "customCharacters"),
+           let custom = try? JSONDecoder().decode([PetCharacter].self, from: data) {
+            characters.append(contentsOf: custom)
+        }
+        return characters
     }
 }
