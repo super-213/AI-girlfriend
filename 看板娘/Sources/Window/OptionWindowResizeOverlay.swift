@@ -16,6 +16,23 @@ struct WindowResizeEdges: OptionSet, Equatable {
     static let top = WindowResizeEdges(rawValue: 1 << 3)
 }
 
+struct WindowResizeHitTesting {
+    static func edges(
+        at point: NSPoint,
+        in bounds: NSRect,
+        hitInset: CGFloat
+    ) -> WindowResizeEdges {
+        guard bounds.contains(point) else { return [] }
+
+        var edges: WindowResizeEdges = []
+        if point.x <= bounds.minX + hitInset { edges.insert(.left) }
+        if point.x >= bounds.maxX - hitInset { edges.insert(.right) }
+        if point.y <= bounds.minY + hitInset { edges.insert(.bottom) }
+        if point.y >= bounds.maxY - hitInset { edges.insert(.top) }
+        return edges
+    }
+}
+
 struct WindowResizeGeometry {
     static func resizedFrame(
         initialFrame: NSRect,
@@ -64,6 +81,13 @@ struct WindowResizeGeometry {
         guard lowerBound <= upperBound else { return lowerBound }
         return min(max(value, lowerBound), upperBound)
     }
+}
+
+/// 普通 AppKit 内容容器，让 resize 层与 NSHostingView 成为兄弟视图。
+/// NSHostingView 会自行处理 SwiftUI 命中，不能把交互层直接塞进它内部。
+@MainActor
+final class WindowResizeContainerNSView: NSView {
+    override var isOpaque: Bool { false }
 }
 
 @MainActor
@@ -207,14 +231,7 @@ final class OptionWindowResizeNSView: NSView {
     }
 
     private func resizeEdges(at point: NSPoint) -> WindowResizeEdges {
-        guard bounds.contains(point) else { return [] }
-
-        var edges: WindowResizeEdges = []
-        if point.x <= bounds.minX + hitInset { edges.insert(.left) }
-        if point.x >= bounds.maxX - hitInset { edges.insert(.right) }
-        if point.y <= bounds.minY + hitInset { edges.insert(.bottom) }
-        if point.y >= bounds.maxY - hitInset { edges.insert(.top) }
-        return edges
+        WindowResizeHitTesting.edges(at: point, in: bounds, hitInset: hitInset)
     }
 
     private func finishResizeDrag() {

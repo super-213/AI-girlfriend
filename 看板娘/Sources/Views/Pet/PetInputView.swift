@@ -16,7 +16,7 @@ struct PetInputView: View {
         HStack(spacing: 9) {
             Image(systemName: "sparkles")
                 .foregroundStyle(.secondary)
-            TextField("告诉我你想做什么…", text: $text)
+            TextField("我会帮助指挥官解决问题！", text: $text)
                 .textFieldStyle(.plain)
                 .focused(isFocused)
                 .onSubmit(onSubmit)

@@ -390,6 +390,36 @@ struct OptionWindowResizeModeTests {
     }
 
     @Test @MainActor
+    func resizeContainerOverlayWinsHitTestingAboveHostingView() {
+        let hostingView = NSHostingView(
+            rootView: Color.clear.frame(width: 336, height: 346).fixedSize()
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 336, height: 346),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        let container = WindowResizeContainerNSView(
+            frame: NSRect(x: 0, y: 0, width: 336, height: 346)
+        )
+        window.contentView = container
+        hostingView.frame = container.bounds
+        hostingView.autoresizingMask = [.width, .height]
+        container.addSubview(hostingView)
+
+        let overlay = OptionWindowResizeNSView(frame: container.bounds)
+        overlay.setResizeModeActive(true)
+        container.addSubview(overlay, positioned: .above, relativeTo: hostingView)
+
+        let rightEdgePoint = NSPoint(
+            x: container.bounds.maxX - 4,
+            y: container.bounds.midY
+        )
+        #expect(container.hitTest(rightEdgePoint) === overlay)
+    }
+
+    @Test @MainActor
     func activeOverlayRendersOrangeBorder() throws {
         let overlay = OptionWindowResizeNSView(frame: NSRect(x: 0, y: 0, width: 160, height: 120))
         overlay.cornerRadius = 24

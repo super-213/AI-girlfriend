@@ -31,3 +31,8 @@ playground.xcworkspace
 .kiro
 
 lil-agents-main/
+
+!看板娘.xcodeproj/project.xcworkspace/
+!看板娘.xcodeproj/project.xcworkspace/xcshareddata/
+!看板娘.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+!看板娘.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved

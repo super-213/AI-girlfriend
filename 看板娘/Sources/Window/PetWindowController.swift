@@ -132,12 +132,15 @@ final class PetWindowController: ObservableObject {
     private var resizeWorkItem: DispatchWorkItem?
     private var screenObserver: NSObjectProtocol?
     private var modifierPollTimer: Timer?
+    private var localModifierEventMonitor: Any?
+    private var globalModifierEventMonitor: Any?
     private var hasRestoredPlacement = false
     private var isResizeModeActive = false
     private var isUserResizing = false
     private var resizeStartFrame: NSRect?
     private var resizeStartScale: CGFloat = 1
     private var lastReportedContentSize: CGSize = .zero
+    private var suppressContentResizeUntil: Date?
     private let placementKey = "petWindowPlacement.v2"
     private let contentScaleKey = "petWindowContentScale.v1"
     private let minimumContentScale = PetWindowSizing.minimumContentScale
@@ -168,11 +171,38 @@ final class PetWindowController: ObservableObject {
         }
         RunLoop.main.add(timer, forMode: .common)
         modifierPollTimer = timer
+
+        localModifierEventMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: .flagsChanged
+        ) { [weak self] event in
+            MainActor.assumeIsolated {
+                self?.setResizeModeActive(
+                    event.modifierFlags
+                        .intersection(.deviceIndependentFlagsMask)
+                        .contains(.option)
+                )
+            }
+            return event
+        }
+
+        globalModifierEventMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: .flagsChanged
+        ) { [weak self] event in
+            DispatchQueue.main.async {
+                self?.setResizeModeActive(
+                    event.modifierFlags
+                        .intersection(.deviceIndependentFlagsMask)
+                        .contains(.option)
+                )
+            }
+        }
     }
 
     deinit {
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
         modifierPollTimer?.invalidate()
+        if let localModifierEventMonitor { NSEvent.removeMonitor(localModifierEventMonitor) }
+        if let globalModifierEventMonitor { NSEvent.removeMonitor(globalModifierEventMonitor) }
     }
 
     func attach(window: NSWindow) {
@@ -191,8 +221,11 @@ final class PetWindowController: ObservableObject {
 
     func reportContentSize(_ proposedSize: CGSize) {
         guard proposedSize.width > 0, proposedSize.height > 0 else { return }
-        lastReportedContentSize = proposedSize
         guard !isUserResizing else { return }
+        if let suppressContentResizeUntil, Date() < suppressContentResizeUntil { return }
+
+        self.suppressContentResizeUntil = nil
+        lastReportedContentSize = proposedSize
 
         let scaledSize = CGSize(
             width: proposedSize.width * contentScale,
@@ -231,24 +264,36 @@ final class PetWindowController: ObservableObject {
     }
 
     private func installResizeOverlayIfNeeded(on window: NSWindow) {
-        guard let contentView = window.contentView else { return }
-        if let resizeOverlay, resizeOverlay.superview === contentView { return }
+        guard let currentContentView = window.contentView else { return }
+
+        let container: WindowResizeContainerNSView
+        if let existingContainer = currentContentView as? WindowResizeContainerNSView {
+            container = existingContainer
+        } else {
+            let hostedContentView = currentContentView
+            container = WindowResizeContainerNSView(frame: hostedContentView.frame)
+            container.autoresizesSubviews = true
+            window.contentView = container
+
+            hostedContentView.frame = container.bounds
+            hostedContentView.autoresizingMask = [.width, .height]
+            container.addSubview(hostedContentView)
+        }
+
+        if let resizeOverlay, resizeOverlay.superview === container { return }
 
         self.resizeOverlay?.removeFromSuperview()
-        let overlay = OptionWindowResizeNSView(frame: contentView.bounds)
+        let overlay = OptionWindowResizeNSView(frame: container.bounds)
         overlay.minimumSize = PetWindowSizing.minimumSize
         overlay.cornerRadius = 16
         overlay.autoresizingMask = [.width, .height]
         overlay.frameConstraint = { [weak self] initialFrame, proposedFrame, edges, visibleFrame in
             guard let self else { return proposedFrame }
-            return PetWindowScaleGeometry.uniformlyResizedFrame(
+            return self.constrainedResizeFrame(
                 initialFrame: initialFrame,
                 proposedFrame: proposedFrame,
                 edges: edges,
-                minimumSize: PetWindowSizing.minimumSize,
-                visibleFrame: visibleFrame,
-                minimumScaleFactor: self.minimumContentScale / self.resizeStartScale,
-                maximumScaleFactor: self.maximumContentScale / self.resizeStartScale
+                visibleFrame: visibleFrame
             )
         }
         overlay.onResizeBegan = { [weak self] frame in
@@ -260,7 +305,9 @@ final class PetWindowController: ObservableObject {
         overlay.onResizeEnded = { [weak self] frame in
             self?.endUserResize(at: frame)
         }
-        contentView.addSubview(overlay, positioned: .above, relativeTo: nil)
+        // NSHostingView 会优先命中内部 SwiftUI 手势。边框必须与 hosting view
+        // 成为普通容器中的兄弟视图，才能收到完整的拖拽事件序列。
+        container.addSubview(overlay, positioned: .above, relativeTo: nil)
         resizeOverlay = overlay
         overlay.setResizeModeActive(isResizeModeActive)
     }
@@ -275,6 +322,23 @@ final class PetWindowController: ObservableObject {
         isResizeModeActive = active
         resizeOverlay?.setResizeModeActive(active)
         PetWindowHitTestCoordinator.shared.setResizeModeActive(active)
+    }
+
+    private func constrainedResizeFrame(
+        initialFrame: NSRect,
+        proposedFrame: NSRect,
+        edges: WindowResizeEdges,
+        visibleFrame: NSRect
+    ) -> NSRect {
+        PetWindowScaleGeometry.uniformlyResizedFrame(
+            initialFrame: initialFrame,
+            proposedFrame: proposedFrame,
+            edges: edges,
+            minimumSize: PetWindowSizing.minimumSize,
+            visibleFrame: visibleFrame,
+            minimumScaleFactor: minimumContentScale / resizeStartScale,
+            maximumScaleFactor: maximumContentScale / resizeStartScale
+        )
     }
 
     private func beginUserResize(from frame: NSRect) {
@@ -298,16 +362,12 @@ final class PetWindowController: ObservableObject {
         updateUserResize(to: frame)
         resizeStartFrame = nil
         isUserResizing = false
+        // SwiftUI 在 scaleEffect 改变后的短暂布局周期里会报告反推后的临时尺寸。
+        // 窗口已经由拖拽落在正确 frame 上，忽略这批报告，避免松手后又弹回去。
+        suppressContentResizeUntil = Date().addingTimeInterval(0.25)
         UserDefaults.standard.set(Double(contentScale), forKey: contentScaleKey)
         savePlacement()
         setInteractionLocked(false)
-
-        if lastReportedContentSize.width > 0, lastReportedContentSize.height > 0 {
-            resizeWindow(to: CGSize(
-                width: lastReportedContentSize.width * contentScale,
-                height: lastReportedContentSize.height * contentScale
-            ))
-        }
     }
 
     func savePlacement() {

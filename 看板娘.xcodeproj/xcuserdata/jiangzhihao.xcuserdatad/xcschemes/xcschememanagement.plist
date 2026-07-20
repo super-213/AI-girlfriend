@@ -6,8 +6,28 @@
 	<dict>
 		<key>看板娘.xcscheme_^#shared#^_</key>
 		<dict>
+			<key>isShown</key>
+			<true/>
 			<key>orderHint</key>
 			<integer>0</integer>
+		</dict>
+	</dict>
+	<key>SuppressBuildableAutocreation</key>
+	<dict>
+		<key>62A3BF002D19899F003DB0DF</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>62A3BF112D1989A0003DB0DF</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>62A3BF1B2D1989A0003DB0DF</key>
+		<dict>
+			<key>primary</key>
+			<true/>
 		</dict>
 	</dict>
 </dict>
