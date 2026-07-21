@@ -249,7 +249,11 @@ final class PetWindowController: ObservableObject {
             }
         }
         resizeWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: item)
+        // 等到下一个主线程循环再调整 NSWindow，既避免在 SwiftUI
+        // 正在布局时重入，也能合并同一帧的多次尺寸报告。不再做 80ms
+        // 防抖：流式输出会连续改变气泡高度，延迟会让 SwiftUI 内容
+        // 先重排、窗口后追赶，视觉上就是桌宠上下抖动。
+        DispatchQueue.main.async(execute: item)
     }
 
     func setInteractionLocked(_ locked: Bool) {

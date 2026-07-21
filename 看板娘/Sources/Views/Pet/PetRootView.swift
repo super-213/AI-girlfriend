@@ -118,7 +118,9 @@ struct PetRootView: View {
                     onDismiss: petViewBackend.dismissOutputBox,
                     onOpenDialog: { AppWindowRouter.shared.showDialog() }
                 )
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                // 输出框高度由流式文本决定。如果再从底部移入，
+                // 它会与窗口扩展产生两套纵向运动，让下方的 GIF 看起来上下移动。
+                .transition(.opacity)
             }
 
             if coordinator.snapshot.renderedState != .idle {
