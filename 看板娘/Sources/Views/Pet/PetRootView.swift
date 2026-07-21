@@ -137,7 +137,8 @@ struct PetRootView: View {
                         isFocused: $isInputFocused,
                         isDisabled: coordinator.snapshot.activityState == .waitingForConfirmation,
                         onHover: { isHoveringInput = $0 },
-                        onSubmit: submitInput
+                        onSubmit: submitInput,
+                        onCancel: cancelInput
                     )
                     .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
                 }
@@ -220,6 +221,13 @@ struct PetRootView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
             isInputFocused = false
         }
+    }
+
+    private func cancelInput() {
+        petViewBackend.userInput = ""
+        isInputFocused = false
+        isHoveringInput = false
+        keepInputVisible = false
     }
 
     private func handlePetHover(_ hovering: Bool) {

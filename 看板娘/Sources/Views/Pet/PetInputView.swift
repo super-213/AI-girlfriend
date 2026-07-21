@@ -11,6 +11,7 @@ struct PetInputView: View {
     let isDisabled: Bool
     let onHover: (Bool) -> Void
     let onSubmit: () -> Void
+    let onCancel: () -> Void
 
     var body: some View {
         HStack(spacing: 9) {
@@ -28,6 +29,14 @@ struct PetInputView: View {
                 .buttonStyle(.plain)
                 .help("发送")
             }
+            Button(action: onCancel) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 17))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("取消输入并收起")
+            .accessibilityLabel("取消输入并收起")
         }
         .font(.system(size: 13))
         .padding(.horizontal, 13)
