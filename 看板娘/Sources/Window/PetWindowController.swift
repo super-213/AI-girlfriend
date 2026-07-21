@@ -16,6 +16,17 @@ enum PetWindowSizing {
     static let minimumSize = NSSize(width: 180, height: 180)
     static let minimumContentScale: CGFloat = 0.5
     static let maximumContentScale: CGFloat = 2
+    static let baseWindowWidth: CGFloat = 356
+    static let characterBaseHeight: CGFloat = 280
+    static let horizontalPadding: CGFloat = 16
+
+    static func windowWidth(for scale: CGFloat) -> CGFloat {
+        max(baseWindowWidth * scale, minimumSize.width)
+    }
+
+    static func panelWidth(for scale: CGFloat) -> CGFloat {
+        max(windowWidth(for: scale) - horizontalPadding, 0)
+    }
 }
 
 /// 纯几何计算，内容变化时绝不改写宠物中心 X 与底部 Y。
@@ -44,13 +55,16 @@ struct PetWindowScaleGeometry {
         edges: WindowResizeEdges,
         minimumSize: NSSize,
         visibleFrame: NSRect,
+        fixedContentHeight: CGFloat = 0,
         minimumScaleFactor: CGFloat = 0,
         maximumScaleFactor: CGFloat = .greatestFiniteMagnitude
     ) -> NSRect {
         guard initialFrame.width > 0, initialFrame.height > 0 else { return proposedFrame }
 
+        let fixedHeight = min(max(fixedContentHeight, 0), initialFrame.height)
+        let scalableHeight = max(initialFrame.height - fixedHeight, 1)
         let widthScale = proposedFrame.width / initialFrame.width
-        let heightScale = proposedFrame.height / initialFrame.height
+        let heightScale = (proposedFrame.height - fixedHeight) / scalableHeight
         let hasHorizontalEdge = edges.contains(.left) || edges.contains(.right)
         let hasVerticalEdge = edges.contains(.top) || edges.contains(.bottom)
 
@@ -66,7 +80,7 @@ struct PetWindowScaleGeometry {
         let minimumScale = max(
             max(
                 minimumSize.width / initialFrame.width,
-                minimumSize.height / initialFrame.height
+                (minimumSize.height - fixedHeight) / scalableHeight
             ),
             minimumScaleFactor
         )
@@ -83,16 +97,17 @@ struct PetWindowScaleGeometry {
             )
         }
 
-        let availableHeight: CGFloat
+        let availableTotalHeight: CGFloat
         if edges.contains(.bottom) {
-            availableHeight = initialFrame.maxY - visibleFrame.minY
+            availableTotalHeight = initialFrame.maxY - visibleFrame.minY
         } else {
-            availableHeight = visibleFrame.maxY - initialFrame.minY
+            availableTotalHeight = visibleFrame.maxY - initialFrame.minY
         }
+        let availableHeightScale = max(availableTotalHeight - fixedHeight, 0) / scalableHeight
 
         let maximumScale = max(
             min(
-                min(availableWidth / initialFrame.width, availableHeight / initialFrame.height),
+                min(availableWidth / initialFrame.width, availableHeightScale),
                 maximumScaleFactor
             ),
             minimumScale
@@ -100,7 +115,7 @@ struct PetWindowScaleGeometry {
         let scale = min(max(proposedScale, minimumScale), maximumScale)
         let size = NSSize(
             width: initialFrame.width * scale,
-            height: initialFrame.height * scale
+            height: fixedHeight + scalableHeight * scale
         )
 
         let originX: CGFloat
@@ -227,14 +242,10 @@ final class PetWindowController: ObservableObject {
         self.suppressContentResizeUntil = nil
         lastReportedContentSize = proposedSize
 
-        let scaledSize = CGSize(
-            width: proposedSize.width * contentScale,
-            height: proposedSize.height * contentScale
-        )
         resizeWorkItem?.cancel()
         let item = DispatchWorkItem { [weak self] in
             Task { @MainActor in
-                self?.resizeWindow(to: scaledSize)
+                self?.resizeWindow(to: proposedSize)
             }
         }
         resizeWorkItem = item
@@ -336,6 +347,10 @@ final class PetWindowController: ObservableObject {
             edges: edges,
             minimumSize: PetWindowSizing.minimumSize,
             visibleFrame: visibleFrame,
+            fixedContentHeight: max(
+                initialFrame.height - PetWindowSizing.characterBaseHeight * resizeStartScale,
+                0
+            ),
             minimumScaleFactor: minimumContentScale / resizeStartScale,
             maximumScaleFactor: maximumContentScale / resizeStartScale
         )
@@ -362,8 +377,8 @@ final class PetWindowController: ObservableObject {
         updateUserResize(to: frame)
         resizeStartFrame = nil
         isUserResizing = false
-        // SwiftUI 在 scaleEffect 改变后的短暂布局周期里会报告反推后的临时尺寸。
-        // 窗口已经由拖拽落在正确 frame 上，忽略这批报告，避免松手后又弹回去。
+        // 拖拽结束时 SwiftUI 仍可能报告上一帧的临时尺寸。窗口已经落在正确
+        // frame 上，短暂忽略这批报告，避免松手后又弹回去。
         suppressContentResizeUntil = Date().addingTimeInterval(0.25)
         UserDefaults.standard.set(Double(contentScale), forKey: contentScaleKey)
         savePlacement()

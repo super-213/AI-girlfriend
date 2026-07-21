@@ -54,14 +54,6 @@ struct PetWindowScaledContent<Content: View>: View {
     }
 }
 
-private extension View {
-    func scaledToPetWindow(by scale: CGFloat) -> some View {
-        PetWindowScaledContent(scale: scale) {
-            self
-        }
-    }
-}
-
 struct PetRootView: View {
     @ObservedObject var petViewBackend: PetViewBackend
     @ObservedObject private var coordinator: PetStateCoordinator
@@ -148,39 +140,40 @@ struct PetRootView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
                 }
             }
-            .frame(width: 320, height: 42, alignment: .bottom)
+            .frame(maxWidth: .infinity, minHeight: 42, maxHeight: 42, alignment: .bottom)
             .animation(DesignAnimation.fast, value: shouldShowInput)
 
-            PetCharacterView(
-                backend: petViewBackend,
-                coordinator: coordinator,
-                onHover: handlePetHover,
-                onTap: petViewBackend.handleTap,
-                onDoubleTap: { AppWindowRouter.shared.showDialog() },
-                onRightClick: {
-                    withAnimation(DesignAnimation.spring) { showQuickMenu.toggle() }
-                },
-                onDragBegan: {
-                    showQuickMenu = false
-                    PetWindowController.shared.beginDragging()
-                },
-                onDragChanged: { initialOrigin, delta in
-                    PetWindowController.shared.dragWindow(from: initialOrigin, screenDelta: delta)
-                },
-                onDragEnded: { PetWindowController.shared.endDragging() }
-            )
-            // 使用与最宽输出框相同的宽度作为对齐基准，避免气泡显示/隐藏时
-            // 桌宠的左、中、右位置发生横向跳动。
-            .frame(width: 340, alignment: petHorizontalAlignment)
+            PetWindowScaledContent(scale: windowController.contentScale) {
+                PetCharacterView(
+                    backend: petViewBackend,
+                    coordinator: coordinator,
+                    onHover: handlePetHover,
+                    onTap: petViewBackend.handleTap,
+                    onDoubleTap: { AppWindowRouter.shared.showDialog() },
+                    onRightClick: {
+                        withAnimation(DesignAnimation.spring) { showQuickMenu.toggle() }
+                    },
+                    onDragBegan: {
+                        showQuickMenu = false
+                        PetWindowController.shared.beginDragging()
+                    },
+                    onDragChanged: { initialOrigin, delta in
+                        PetWindowController.shared.dragWindow(from: initialOrigin, screenDelta: delta)
+                    },
+                    onDragEnded: { PetWindowController.shared.endDragging() }
+                )
+            }
+            .scaleEffect(hasAppeared ? 1 : 0.96, anchor: .bottom)
+            // 面板宽度跟随窗口，角色在这段可用宽度内按设置对齐。
+            .frame(maxWidth: .infinity, alignment: petHorizontalAlignment)
             .animation(DesignAnimation.fast, value: storedHorizontalPlacement)
         }
+        .frame(width: PetWindowSizing.panelWidth(for: windowController.contentScale))
         .padding(8)
         .fixedSize(horizontal: true, vertical: true)
         .background(PetWindowAccessor())
         .reportPetWindowContentSize()
-        .scaledToPetWindow(by: windowController.contentScale)
         .opacity(hasAppeared ? 1 : 0)
-        .scaleEffect(hasAppeared ? 1 : 0.96, anchor: .bottom)
         .onAppear {
             petViewBackend.onAppear()
             withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) { hasAppeared = true }

@@ -55,7 +55,7 @@ struct PetSpeechBubbleView: View {
         }
         .foregroundStyle(.primary)
         .padding(13)
-        .frame(width: 340, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)

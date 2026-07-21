@@ -37,7 +37,7 @@ struct PetConfirmationCardView: View {
             }
         }
         .padding(14)
-        .frame(width: 340)
+        .frame(maxWidth: .infinity)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.orange.opacity(0.4)))
         .shadow(color: .black.opacity(0.16), radius: 18, y: 8)

@@ -25,7 +25,7 @@ struct PetQuickMenuView: View {
             item("退出", "power", tint: .red) { NSApp.terminate(nil) }
         }
         .padding(10)
-        .frame(width: 300)
+        .frame(maxWidth: .infinity)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 17).strokeBorder(.white.opacity(0.25)))
         .shadow(color: .black.opacity(0.14), radius: 16, y: 7)

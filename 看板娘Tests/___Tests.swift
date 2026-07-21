@@ -342,9 +342,51 @@ struct PetWindowScaleGeometryTests {
         #expect(resized.width == initial.width * 1.5)
         #expect(resized.height == initial.height * 1.5)
     }
+
+    @Test
+    func fixedPanelHeightDoesNotScaleWithCharacter() {
+        let initial = NSRect(x: 500, y: 120, width: 356, height: 346)
+        let fixedPanelHeight: CGFloat = 66
+        let resized = PetWindowScaleGeometry.uniformlyResizedFrame(
+            initialFrame: initial,
+            proposedFrame: NSRect(x: 500, y: 120, width: 267, height: 346),
+            edges: [.right],
+            minimumSize: PetWindowSizing.minimumSize,
+            visibleFrame: visible,
+            fixedContentHeight: fixedPanelHeight
+        )
+
+        #expect(resized.width == 267)
+        #expect(resized.height == 276)
+        #expect(resized.height - PetWindowSizing.characterBaseHeight * 0.75 == fixedPanelHeight)
+    }
+
+    @Test
+    func verticalDragDerivesScaleAfterSubtractingFixedPanelHeight() {
+        let initial = NSRect(x: 500, y: 120, width: 356, height: 346)
+        let resized = PetWindowScaleGeometry.uniformlyResizedFrame(
+            initialFrame: initial,
+            proposedFrame: NSRect(x: 500, y: 120, width: 356, height: 276),
+            edges: [.top],
+            minimumSize: PetWindowSizing.minimumSize,
+            visibleFrame: visible,
+            fixedContentHeight: 66
+        )
+
+        #expect(resized.width == 267)
+        #expect(resized.height == 276)
+        #expect(resized.minY == initial.minY)
+    }
 }
 
 struct PetWindowRuntimeSizingTests {
+    @Test
+    func panelWidthTracksWindowScaleWithoutScalingPanelContent() {
+        #expect(PetWindowSizing.panelWidth(for: 0.5) == 164)
+        #expect(PetWindowSizing.panelWidth(for: 1) == 340)
+        #expect(PetWindowSizing.panelWidth(for: 2) == 696)
+    }
+
     @Test @MainActor
     func scaledContentReportsItsVisualSizeInsteadOfUnscaledLayoutSize() {
         let rootView = PetWindowScaledContent(scale: 0.5) {
