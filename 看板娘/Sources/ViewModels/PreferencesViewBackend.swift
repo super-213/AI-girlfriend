@@ -541,6 +541,10 @@ extension PreferencesViewBackend {
 
 /// 临时值管理扩展
 extension PreferencesViewBackend {
+    var temporaryPetHorizontalPlacement: String {
+        tempData.petHorizontalPlacement
+    }
+
     /// 加载当前值到临时存储
     func loadTemporaryValues(
         apiKey: String,
@@ -548,7 +552,8 @@ extension PreferencesViewBackend {
         systemPrompt: String,
         apiUrl: String,
         provider: String,
-        overlapRatio: Double
+        overlapRatio: Double,
+        petHorizontalPlacement: String
     ) {
         tempData = PreferencesData(
             apiKey: apiKey,
@@ -557,6 +562,7 @@ extension PreferencesViewBackend {
             apiUrl: apiUrl,
             provider: provider,
             overlapRatio: overlapRatio,
+            petHorizontalPlacement: petHorizontalPlacement,
             staticMessages: staticMessages
         )
     }
@@ -568,7 +574,8 @@ extension PreferencesViewBackend {
         systemPrompt: String,
         apiUrl: String,
         provider: String,
-        overlapRatio: Double
+        overlapRatio: Double,
+        petHorizontalPlacement: String
     ) {
         let currentData = PreferencesData(
             apiKey: apiKey,
@@ -577,6 +584,7 @@ extension PreferencesViewBackend {
             apiUrl: apiUrl,
             provider: provider,
             overlapRatio: overlapRatio,
+            petHorizontalPlacement: petHorizontalPlacement,
             staticMessages: staticMessages
         )
         hasUnsavedChanges = currentData != tempData

@@ -15,6 +15,7 @@ struct PreferencesData: Equatable {
     var apiUrl: String
     var provider: String
     var overlapRatio: Double
+    var petHorizontalPlacement: String
     var staticMessages: [String]
     
     static let `default` = PreferencesData(
@@ -24,6 +25,7 @@ struct PreferencesData: Equatable {
         apiUrl: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
         provider: "zhipu",
         overlapRatio: 0.3,
+        petHorizontalPlacement: PetHorizontalPlacement.defaultValue.rawValue,
         staticMessages: []
     )
     
@@ -35,6 +37,7 @@ struct PreferencesData: Equatable {
         apiUrl: "http://localhost:11434/api/chat",
         provider: "ollama",
         overlapRatio: 0.3,
+        petHorizontalPlacement: PetHorizontalPlacement.defaultValue.rawValue,
         staticMessages: []
     )
 }

@@ -10,6 +10,7 @@ struct PetRootView: View {
     @ObservedObject private var coordinator: PetStateCoordinator
     @ObservedObject private var windowController: PetWindowController
     @AppStorage("commandConfirmationStyle") private var commandConfirmationStyle = "nearPet"
+    @AppStorage(PetHorizontalPlacement.storageKey) private var storedHorizontalPlacement = PetHorizontalPlacement.defaultValue.rawValue
 
     @State private var isHoveringPet = false
     @State private var isHoveringInput = false
@@ -30,6 +31,14 @@ struct PetRootView: View {
 
     private var usesNearbyConfirmation: Bool {
         commandConfirmationStyle == "nearPet"
+    }
+
+    private var petHorizontalAlignment: Alignment {
+        switch PetHorizontalPlacement(rawValue: storedHorizontalPlacement) ?? .defaultValue {
+        case .left: return .leading
+        case .center: return .center
+        case .right: return .trailing
+        }
     }
 
     var body: some View {
@@ -103,6 +112,10 @@ struct PetRootView: View {
                 },
                 onDragEnded: { PetWindowController.shared.endDragging() }
             )
+            // 使用与最宽输出框相同的宽度作为对齐基准，避免气泡显示/隐藏时
+            // 桌宠的左、中、右位置发生横向跳动。
+            .frame(width: 340, alignment: petHorizontalAlignment)
+            .animation(DesignAnimation.fast, value: storedHorizontalPlacement)
         }
         .padding(8)
         .fixedSize(horizontal: true, vertical: true)

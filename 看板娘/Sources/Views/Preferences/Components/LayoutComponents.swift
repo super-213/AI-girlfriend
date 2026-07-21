@@ -42,8 +42,17 @@ struct OverlapSliderControl: View {
 /// 重叠预览组件
 struct OverlapPreview: View {
     let overlapRatio: Double
+    let horizontalPlacement: PetHorizontalPlacement
 
     private let previewMetrics = PetLayoutMetrics.live.scaled(by: 0.4)
+
+    private var petAlignment: Alignment {
+        switch horizontalPlacement {
+        case .left: return .leading
+        case .center: return .center
+        case .right: return .trailing
+        }
+    }
     
     var body: some View {
         GeometryReader { _ in
@@ -94,7 +103,7 @@ struct OverlapPreview: View {
                         
                         RoundedRectangle(cornerRadius: 8)
                             .fill(Color.orange.opacity(0.2))
-                            .frame(height: previewMetrics.petFrameSize)
+                            .frame(width: previewMetrics.petFrameSize, height: previewMetrics.petFrameSize)
                             .overlay(
                                 VStack(spacing: 4) {
                                     Image(systemName: "heart.fill")
@@ -106,6 +115,7 @@ struct OverlapPreview: View {
                                 }
                             )
                             .shadow(color: .orange.opacity(0.2), radius: 4, x: 0, y: 2)
+                            .frame(maxWidth: .infinity, alignment: petAlignment)
                         
                         Spacer()
                     }

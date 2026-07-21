@@ -10,6 +10,7 @@ import SwiftUI
 /// 布局设置标签页
 struct LayoutSettingsTab: View {
     @Binding var overlapRatio: Double
+    @Binding var petHorizontalPlacement: String
     @Binding var sleepMinutes: Double
     @Binding var commandConfirmationStyle: String
     @Binding var bubbleAutoHideDuration: Double
@@ -26,7 +27,10 @@ struct LayoutSettingsTab: View {
                     .padding(.top, DesignSpacing.md)
                 
                 // 预览区域
-                OverlapPreview(overlapRatio: overlapRatio)
+                OverlapPreview(
+                    overlapRatio: overlapRatio,
+                    horizontalPlacement: PetHorizontalPlacement(rawValue: petHorizontalPlacement) ?? .defaultValue
+                )
                     .frame(height: 180)
                     .padding(.horizontal, DesignSpacing.lg)
                 
@@ -37,6 +41,18 @@ struct LayoutSettingsTab: View {
                 Divider().padding(.horizontal, DesignSpacing.xl)
 
                 VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("桌宠水平位置")
+                        Picker("桌宠水平位置", selection: $petHorizontalPlacement) {
+                            ForEach(PetHorizontalPlacement.allCases) { placement in
+                                Label(placement.displayName, systemImage: placement.systemImage)
+                                    .tag(placement.rawValue)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                    }
+
                     HStack {
                         Text("空闲休息")
                         Spacer()

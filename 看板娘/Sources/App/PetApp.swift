@@ -24,7 +24,7 @@ struct PetApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         // 与桌宠 + 固定输入槽的基础尺寸一致，避免首次悬浮才触发窗口扩容。
-        .defaultSize(width: 336, height: 346)
+        .defaultSize(width: 356, height: 346)
         .defaultPosition(.center)
         .commands {
             CommandGroup(replacing: .appSettings) {

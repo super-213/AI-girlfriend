@@ -7,6 +7,34 @@
 
 import CoreGraphics
 
+/// 桌宠相对于上方输入框和输出框的水平位置。
+enum PetHorizontalPlacement: String, CaseIterable, Identifiable {
+    case left
+    case center
+    case right
+
+    static let storageKey = "petHorizontalPlacement"
+    static let defaultValue: PetHorizontalPlacement = .center
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .left: return "靠左"
+        case .center: return "居中"
+        case .right: return "靠右"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .left: return "align.horizontal.left"
+        case .center: return "align.horizontal.center"
+        case .right: return "align.horizontal.right"
+        }
+    }
+}
+
 /// 布局常量，定义统一的间距和尺寸
 struct LayoutConstants {
     static let sectionSpacing: CGFloat = 20

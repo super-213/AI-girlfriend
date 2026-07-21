@@ -4,6 +4,21 @@ import SwiftUI
 import Testing
 @testable import 看板娘
 
+struct PetHorizontalPlacementTests {
+    @Test
+    func centerIsTheDefaultPlacement() {
+        #expect(PetHorizontalPlacement.defaultValue == .center)
+        #expect(PetHorizontalPlacement.defaultValue.rawValue == "center")
+    }
+
+    @Test
+    func allPersistedPlacementValuesRoundTrip() {
+        for placement in PetHorizontalPlacement.allCases {
+            #expect(PetHorizontalPlacement(rawValue: placement.rawValue) == placement)
+        }
+    }
+}
+
 struct PetStateCoordinatorTests {
     @Test @MainActor
     func conversationLifecycleAndStaleEvents() {
