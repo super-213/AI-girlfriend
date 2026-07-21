@@ -5,6 +5,63 @@
 
 import SwiftUI
 
+/// `scaleEffect` 只改变绘制结果，不会改变 SwiftUI 的布局占位。桌宠窗口跟随缩放
+/// 变小时，未缩放的布局占位会超出 NSHostingView，最终把 GIF 的下半部分裁掉。
+/// 这个布局用缩放后的尺寸参与父布局，同时仍按未缩放尺寸放置内容，保证视觉变换
+/// 后的内容恰好落在窗口范围内。
+struct PetWindowScaledLayout: Layout {
+    let scale: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard let subview = subviews.first else { return .zero }
+        let contentSize = subview.sizeThatFits(.unspecified)
+        let resolvedScale = max(scale, 0)
+        return CGSize(
+            width: contentSize.width * resolvedScale,
+            height: contentSize.height * resolvedScale
+        )
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard let subview = subviews.first else { return }
+        let contentSize = subview.sizeThatFits(.unspecified)
+        subview.place(
+            at: CGPoint(x: bounds.midX, y: bounds.maxY),
+            anchor: .bottom,
+            proposal: ProposedViewSize(contentSize)
+        )
+    }
+}
+
+struct PetWindowScaledContent<Content: View>: View {
+    let scale: CGFloat
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        PetWindowScaledLayout(scale: scale) {
+            content
+                .scaleEffect(scale, anchor: .bottom)
+        }
+    }
+}
+
+private extension View {
+    func scaledToPetWindow(by scale: CGFloat) -> some View {
+        PetWindowScaledContent(scale: scale) {
+            self
+        }
+    }
+}
+
 struct PetRootView: View {
     @ObservedObject var petViewBackend: PetViewBackend
     @ObservedObject private var coordinator: PetStateCoordinator
@@ -121,7 +178,7 @@ struct PetRootView: View {
         .fixedSize(horizontal: true, vertical: true)
         .background(PetWindowAccessor())
         .reportPetWindowContentSize()
-        .scaleEffect(windowController.contentScale, anchor: .bottom)
+        .scaledToPetWindow(by: windowController.contentScale)
         .opacity(hasAppeared ? 1 : 0)
         .scaleEffect(hasAppeared ? 1 : 0.96, anchor: .bottom)
         .onAppear {

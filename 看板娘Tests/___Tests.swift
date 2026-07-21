@@ -346,6 +346,19 @@ struct PetWindowScaleGeometryTests {
 
 struct PetWindowRuntimeSizingTests {
     @Test @MainActor
+    func scaledContentReportsItsVisualSizeInsteadOfUnscaledLayoutSize() {
+        let rootView = PetWindowScaledContent(scale: 0.5) {
+            Color.red
+                .frame(width: 336, height: 346)
+                .fixedSize()
+        }
+        let hostingView = NSHostingView(rootView: rootView)
+
+        #expect(hostingView.fittingSize.width == 168)
+        #expect(hostingView.fittingSize.height == 173)
+    }
+
+    @Test @MainActor
     func hostingFixedPetContentStillAcceptsOneHundredEightyPointWindow() {
         let rootView = Color.clear
             .frame(width: 336, height: 346)
