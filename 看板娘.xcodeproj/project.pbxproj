@@ -433,7 +433,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.3.3;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.zhihaojiang.MD-editer.---";
+				PRODUCT_BUNDLE_IDENTIFIER = com.zhihaojiang.kanbanmusume;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;
@@ -461,7 +461,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.3.3;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.zhihaojiang.MD-editer.---";
+				PRODUCT_BUNDLE_IDENTIFIER = com.zhihaojiang.kanbanmusume;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;
@@ -478,7 +478,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.zhihaojiang.MD-editer.---Tests";
+				PRODUCT_BUNDLE_IDENTIFIER = com.zhihaojiang.kanbanmusume.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 6.0;
@@ -496,7 +496,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.zhihaojiang.MD-editer.---Tests";
+				PRODUCT_BUNDLE_IDENTIFIER = com.zhihaojiang.kanbanmusume.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 6.0;
@@ -512,10 +512,10 @@
 				DEVELOPMENT_TEAM = 656G5NMSYR;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.zhihaojiang.MD-editer.---UITests";
+				PRODUCT_BUNDLE_IDENTIFIER = com.zhihaojiang.kanbanmusume.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TEST_TARGET_NAME = "看板娘";
 			};
 			name = Debug;
@@ -528,10 +528,10 @@
 				DEVELOPMENT_TEAM = 656G5NMSYR;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.zhihaojiang.MD-editer.---UITests";
+				PRODUCT_BUNDLE_IDENTIFIER = com.zhihaojiang.kanbanmusume.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TEST_TARGET_NAME = "看板娘";
 			};
 			name = Release;
