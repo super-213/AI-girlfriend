@@ -96,13 +96,15 @@ final class PetViewBackend: ObservableObject {
     }
 
     deinit {
-        notificationObservers.forEach(NotificationCenter.default.removeObserver)
-        outputBoxHideTimer?.cancel()
-        periodicAutoActionTimer?.cancel()
-        memoryCleanupTimer?.cancel()
-        assetRotationTimer?.cancel()
-        automationTimer?.invalidate()
-        sleepTimer?.invalidate()
+        MainActor.assumeIsolated {
+            notificationObservers.forEach(NotificationCenter.default.removeObserver)
+            outputBoxHideTimer?.cancel()
+            periodicAutoActionTimer?.cancel()
+            memoryCleanupTimer?.cancel()
+            assetRotationTimer?.cancel()
+            automationTimer?.invalidate()
+            sleepTimer?.invalidate()
+        }
     }
 
     func onAppear() {

@@ -214,10 +214,12 @@ final class PetWindowController: ObservableObject {
     }
 
     deinit {
-        if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
-        modifierPollTimer?.invalidate()
-        if let localModifierEventMonitor { NSEvent.removeMonitor(localModifierEventMonitor) }
-        if let globalModifierEventMonitor { NSEvent.removeMonitor(globalModifierEventMonitor) }
+        MainActor.assumeIsolated {
+            if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
+            modifierPollTimer?.invalidate()
+            if let localModifierEventMonitor { NSEvent.removeMonitor(localModifierEventMonitor) }
+            if let globalModifierEventMonitor { NSEvent.removeMonitor(globalModifierEventMonitor) }
+        }
     }
 
     func attach(window: NSWindow) {
@@ -503,7 +505,7 @@ struct PetWindowAccessor: NSViewRepresentable {
 }
 
 struct PetContentSizePreferenceKey: PreferenceKey {
-    static var defaultValue: CGSize = .zero
+    static let defaultValue: CGSize = .zero
 
     static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
         let next = nextValue()

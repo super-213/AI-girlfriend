@@ -26,6 +26,7 @@ enum APIStreamError: LocalizedError {
 
 /// AI API通信管理器
 /// 负责与智谱清言、OpenAI-Compatible 和 Ollama API 进行流式通信
+@MainActor
 final class APIManager: NSObject, URLSessionDataDelegate {
     
     // MARK: - 配置存储
@@ -63,11 +64,11 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     // MARK: - 回调
     
     /// 接收到新内容时的回调闭包
-    private var onReceive: ((String) -> Void)?
+    private var onReceive: (@MainActor @Sendable (String) -> Void)?
     
     /// 请求完成时的回调闭包
-    private var onComplete: (() -> Void)?
-    private var onError: ((Error) -> Void)?
+    private var onComplete: (@MainActor @Sendable () -> Void)?
+    private var onError: (@MainActor @Sendable (Error) -> Void)?
 
     // MARK: - 外部接口
     
@@ -78,9 +79,9 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     ///   - onComplete: 请求完成时的回调
     func sendStreamRequest(
         userInput: String,
-        onReceive: @escaping (String) -> Void,
-        onComplete: @escaping () -> Void,
-        onError: ((Error) -> Void)? = nil
+        onReceive: @escaping @MainActor @Sendable (String) -> Void,
+        onComplete: @escaping @MainActor @Sendable () -> Void,
+        onError: (@MainActor @Sendable (Error) -> Void)? = nil
     ) {
         let messages: [[String: String]] = [
             systemMessage(),
@@ -101,9 +102,9 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     ///   - onComplete: 请求完成时的回调
     func sendStreamRequest(
         messages: [[String: String]],
-        onReceive: @escaping (String) -> Void,
-        onComplete: @escaping () -> Void,
-        onError: ((Error) -> Void)? = nil
+        onReceive: @escaping @MainActor @Sendable (String) -> Void,
+        onComplete: @escaping @MainActor @Sendable () -> Void,
+        onError: (@MainActor @Sendable (Error) -> Void)? = nil
     ) {
         cancelPreviousTask()
 
@@ -128,29 +129,22 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     /// 发送非流式 JSON 请求，用于触发器意图检测等结构化输出场景
     func sendJSONRequest(
         messages: [[String: String]],
-        onComplete: @escaping (String) -> Void
+        onComplete: @escaping @MainActor @Sendable (String) -> Void
     ) {
         guard let request = buildRequest(with: messages, stream: false) else {
-            DispatchQueue.main.async {
-                onComplete("")
-            }
+            onComplete("")
             return
         }
 
         URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
-            let content: String
-            if let error {
+            let errorDescription = error?.localizedDescription
+            Task { @MainActor [weak self] in
                 #if DEBUG
-                print("JSON 请求出错：\(error.localizedDescription)")
+                if let errorDescription {
+                    print("JSON 请求出错：\(errorDescription)")
+                }
                 #endif
-                content = ""
-            } else if let data {
-                content = self?.parseNonStreamContent(data) ?? ""
-            } else {
-                content = ""
-            }
-
-            DispatchQueue.main.async {
+                let content = data.flatMap { self?.parseNonStreamContent($0) } ?? ""
                 onComplete(content)
             }
         }.resume()
@@ -364,12 +358,19 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     ///   - session: URL会话
     ///   - dataTask: 数据任务
     ///   - data: 接收到的数据
-    func urlSession(
+    nonisolated func urlSession(
         _ session: URLSession,
         dataTask: URLSessionDataTask,
         didReceive data: Data
     ) {
-        guard activeTaskIdentifier == dataTask.taskIdentifier else { return }
+        let taskIdentifier = dataTask.taskIdentifier
+        Task { @MainActor [weak self] in
+            self?.handleReceivedData(data, taskIdentifier: taskIdentifier)
+        }
+    }
+
+    private func handleReceivedData(_ data: Data, taskIdentifier: Int) {
+        guard activeTaskIdentifier == taskIdentifier else { return }
         guard let rawText = String(data: data, encoding: .utf8) else { return }
 
         #if DEBUG
@@ -408,9 +409,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             if let choices = json["choices"] as? [[String: Any]],
                let delta = choices.first?["delta"] as? [String: Any],
                let content = delta["content"] as? String {
-                DispatchQueue.main.async { [weak self] in
-                    self?.onReceive?(content)
-                }
+                onReceive?(content)
             }
         }
     }
@@ -442,9 +441,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             if let message = json["message"] as? [String: Any],
                let content = message["content"] as? String,
                !content.isEmpty {
-                DispatchQueue.main.async { [weak self] in
-                    self?.onReceive?(content)
-                }
+                onReceive?(content)
             }
         }
     }
@@ -464,9 +461,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             
             // 跳过 [DONE] 标记
             guard jsonString != "[DONE]" else {
-                DispatchQueue.main.async { [weak self] in
-                    self?.finishStream()
-                }
+                finishStream()
                 continue
             }
             
@@ -484,9 +479,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             // 结束
             if let finish = first["finish_reason"] as? String,
                finish == "stop" {
-                DispatchQueue.main.async { [weak self] in
-                    self?.finishStream()
-                }
+                finishStream()
                 return
             }
 
@@ -494,9 +487,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             if let delta = first["delta"] as? [String: Any],
                let content = delta["content"] as? String,
                !content.isEmpty {
-                DispatchQueue.main.async { [weak self] in
-                    self?.onReceive?(content)
-                }
+                onReceive?(content)
             }
         }
     }
@@ -507,14 +498,16 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     ///   - session: URL会话
     ///   - task: URL任务
     ///   - error: 错误信息（如果有）
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        DispatchQueue.main.async { [weak self] in
-            guard self?.activeTaskIdentifier == task.taskIdentifier else { return }
-            if let error = error {
+    nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        let taskIdentifier = task.taskIdentifier
+        let errorDescription = error?.localizedDescription
+        Task { @MainActor [weak self] in
+            guard self?.activeTaskIdentifier == taskIdentifier else { return }
+            if let errorDescription {
                 #if DEBUG
-                print("任务出错：\(error.localizedDescription)")
+                print("任务出错：\(errorDescription)")
                 #endif
-                self?.finishStream(with: APIStreamError.transport(error.localizedDescription))
+                self?.finishStream(with: APIStreamError.transport(errorDescription))
             } else {
                 self?.finishStream()
             }

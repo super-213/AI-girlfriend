@@ -34,6 +34,7 @@ enum LocalMP3PlayerError: LocalizedError {
     }
 }
 
+@MainActor
 final class LocalMP3PlayerService: NSObject, AVAudioPlayerDelegate {
     static let shared = LocalMP3PlayerService()
 
@@ -112,7 +113,13 @@ final class LocalMP3PlayerService: NSObject, AVAudioPlayerDelegate {
         cleanupScopedResource()
     }
 
-    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        Task { @MainActor [weak self] in
+            self?.handlePlaybackFinished()
+        }
+    }
+
+    private func handlePlaybackFinished() {
         guard let activeTriggerId else {
             cleanupScopedResource()
             return
@@ -123,8 +130,10 @@ final class LocalMP3PlayerService: NSObject, AVAudioPlayerDelegate {
         finish?(activeTriggerId)
     }
 
-    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
-        cleanupScopedResource()
+    nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        Task { @MainActor [weak self] in
+            self?.cleanupScopedResource()
+        }
     }
 
     private func cleanupScopedResource() {

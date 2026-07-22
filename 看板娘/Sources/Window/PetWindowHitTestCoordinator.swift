@@ -6,6 +6,7 @@
 import AppKit
 import SwiftUI
 
+@MainActor
 protocol PetInteractiveRegion: AnyObject {
     func containsPetInteraction(at screenPoint: NSPoint) -> Bool
 }
@@ -39,8 +40,10 @@ final class PetWindowHitTestCoordinator {
     }
 
     deinit {
-        if let localMonitor { NSEvent.removeMonitor(localMonitor) }
-        if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
+        MainActor.assumeIsolated {
+            if let localMonitor { NSEvent.removeMonitor(localMonitor) }
+            if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
+        }
     }
 
     func attach(window: NSWindow) {

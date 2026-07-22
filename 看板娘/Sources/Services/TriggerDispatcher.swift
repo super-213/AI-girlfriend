@@ -19,6 +19,7 @@ enum TriggerHandlingResult: Equatable {
     case failed(String)
 }
 
+@MainActor
 final class TriggerDispatcher {
     static let shared = TriggerDispatcher()
 

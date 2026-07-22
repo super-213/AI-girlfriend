@@ -285,7 +285,7 @@ private struct AutomationRow: View {
     let triggerTitle: String?
     let isSelected: Bool
     let onSelect: () -> Void
-    let onToggle: (Bool) -> Void
+    let onToggle: @MainActor @Sendable (Bool) -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -318,7 +318,11 @@ private struct AutomationRow: View {
 
                 Toggle("", isOn: Binding(
                     get: { automation.isEnabled },
-                    set: onToggle
+                    set: { enabled in
+                        Task { @MainActor in
+                            onToggle(enabled)
+                        }
+                    }
                 ))
                 .toggleStyle(.switch)
                 .labelsHidden()

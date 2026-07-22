@@ -7,6 +7,7 @@
 
 import Foundation
 
+@MainActor
 final class TriggerStore: ObservableObject {
     static let shared = TriggerStore()
 

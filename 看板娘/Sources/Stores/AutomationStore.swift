@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 
+@MainActor
 final class AutomationStore: ObservableObject {
     static let shared = AutomationStore()
 

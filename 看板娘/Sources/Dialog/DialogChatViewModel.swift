@@ -25,6 +25,7 @@ struct DialogMessage: Identifiable, Equatable {
     }
 }
 
+@MainActor
 final class DialogChatViewModel: ObservableObject {
     @Published var messages: [DialogMessage] = []
     @Published var inputText: String = ""

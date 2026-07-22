@@ -9,7 +9,8 @@ import Foundation
 import SDWebImage
 
 /// 内存优化管理器
-class MemoryOptimizer {
+@MainActor
+final class MemoryOptimizer {
     
     static let shared = MemoryOptimizer()
     
