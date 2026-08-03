@@ -22,11 +22,12 @@ final class TriggerStore: ObservableObject {
         load()
     }
 
-    func addTrigger() {
-        let trigger = TriggerDefinition.makeDefault()
+    @discardableResult
+    func addTrigger(_ trigger: TriggerDefinition = .makeDefault()) -> TriggerDefinition {
         triggers.insert(trigger, at: 0)
         runtimeStates[trigger.id] = .idle(triggerId: trigger.id, isEnabled: trigger.isEnabled)
         save()
+        return trigger
     }
 
     func trigger(id: UUID) -> TriggerDefinition? {
