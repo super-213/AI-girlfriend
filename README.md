@@ -68,20 +68,35 @@
 ### 4. 对话窗口
 - `Ctrl + T` 打开悬浮对话窗口
 - 支持多轮上下文，支持“新建对话”
+- 使用原生 `tool_calls` 驱动 Agent 循环，而不是解析模型生成的命令文本
+- 工具执行结果以 `tool message` 回灌模型，高风险操作需要用户确认
+- 每轮注入当前本地日期、时间和时区
+
+### 5. 通用 Agent Runtime
+
+Ctrl+T 完整对话由通用 Agent Runtime 编排，当前内置工具包括：
+
+- `get_current_datetime`：读取本机日期、时间、星期和时区
+- `list_directory` / `read_file`：目录和文本文件读取
+- `run_command`：经确认后执行非交互式 Shell 命令
+- `list_pet_characters` / `switch_pet_character`：桌宠角色查询与切换
+- `list_automations` / `run_automation`：自动化查询与执行
+
+`AgentTool` 协议与 `AgentToolRegistry` 支持继续注册结构化工具。Runtime 支持多工具调用、结果回灌、未知工具/参数错误反馈、取消、最大迭代限制和人在回路确认。Qwen/OpenAI-compatible、智谱和 Ollama 分别在 `APIManager` 中适配为统一的 `AgentMessage`/`AgentToolCall`。
 - 与主窗口共用 `APIManager` 配置（同一套模型参数）
 
-### 5. 命令执行（受控）
+### 6. 命令执行（受控）
 - 模型回复中出现命令标记后进入等待确认状态
 - 可在设置中选择宠物附近确认卡片或系统确认弹窗
 - 用户确认后本地执行，并将执行结果回注给模型
 - 内置白名单前缀：`ls`、`pwd`、`cat`、`zip`、`tar`、`cp`、`mv`、`mkdir`、`rmdir`
 - 拦截危险/交互式命令（如 `rm -rf`、`sudo` 等）
 
-### 6. 音乐搜索
+### 7. 音乐搜索
 - 检测“我想听 / 播放 / 来一首”等关键词
 - 自动打开 `music://` 或 Web 版 Apple Music 搜索
 
-### 7. 机器可调用控制服务
+### 8. 机器可调用控制服务
 - `PetControlService` 是应用内部唯一的稳定控制面
 - 支持结构化请求/响应、错误码、请求来源、请求 ID 和 actor 标识
 - 当前已覆盖消息发送、角色切换、自动化查询/更新/运行、设置更新和 skill 导入

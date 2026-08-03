@@ -4,6 +4,114 @@ import SwiftUI
 import Testing
 @testable import 看板娘
 
+struct AgentFoundationTests {
+    @MainActor
+    private final class FakeModelClient: AgentModelClient {
+        var responses: [AgentModelResponse] = []
+        private(set) var requests: [[AgentMessage]] = []
+
+        func sendAgentStreamRequest(
+            messages: [AgentMessage],
+            tools: [AgentToolDefinition],
+            onReceive: @escaping @MainActor @Sendable (String) -> Void,
+            onComplete: @escaping @MainActor @Sendable (AgentModelResponse) -> Void,
+            onError: @escaping @MainActor @Sendable (Error) -> Void
+        ) {
+            requests.append(messages)
+            let response = responses.removeFirst()
+            if !response.content.isEmpty { onReceive(response.content) }
+            onComplete(response)
+        }
+
+        func cancelStreamRequest() {}
+    }
+
+    @MainActor
+    private final class EchoTool: AgentTool {
+        let definition = AgentToolDefinition(
+            name: "echo",
+            description: "echo test",
+            parameters: ["type": "object", "properties": [:]]
+        )
+        let requiresConfirmation = false
+        func approvalSummary(arguments: [String: Any]) -> String { "echo" }
+        func execute(
+            arguments: [String: Any],
+            completion: @escaping @MainActor (AgentToolExecutionResult) -> Void
+        ) {
+            completion(.success(arguments["value"] as? String ?? ""))
+        }
+    }
+
+    @Test
+    func toolCallArgumentsAndOpenAIMessageEncodingRoundTrip() throws {
+        let call = AgentToolCall(
+            id: "call-1",
+            name: "read_file",
+            arguments: #"{"path":"/tmp/example.txt"}"#
+        )
+        let arguments = try call.decodedArguments()
+        #expect(arguments["path"] as? String == "/tmp/example.txt")
+
+        let message = AgentMessage.assistant(content: nil, toolCalls: [call]).jsonObject()
+        let encodedCalls = message["tool_calls"] as? [[String: Any]]
+        let function = encodedCalls?.first?["function"] as? [String: Any]
+        #expect(message["role"] as? String == "assistant")
+        #expect(function?["name"] as? String == "read_file")
+        #expect(function?["arguments"] as? String == call.arguments)
+    }
+
+    @Test
+    func toolResultUsesStructuredSuccessEnvelope() throws {
+        let success = AgentToolExecutionResult.success("星期一")
+        let data = try #require(success.modelContent.data(using: .utf8))
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["ok"] as? Bool == true)
+        #expect(object["result"] as? String == "星期一")
+    }
+
+    @Test @MainActor
+    func standardRegistryExposesCoreAndAppTools() {
+        let names = Set(AgentToolRegistry.standard().definitions.map(\.name))
+        #expect(names.contains("get_current_datetime"))
+        #expect(names.contains("read_file"))
+        #expect(names.contains("run_command"))
+        #expect(names.contains("switch_pet_character"))
+        #expect(names.contains("run_automation"))
+    }
+
+    @Test @MainActor
+    func runtimeFeedsToolObservationBackAndContinuesUntilFinalAnswer() {
+        let client = FakeModelClient()
+        client.responses = [
+            AgentModelResponse(
+                content: "",
+                toolCalls: [
+                    AgentToolCall(id: "call-echo", name: "echo", arguments: #"{"value":"ok"}"#)
+                ]
+            ),
+            AgentModelResponse(content: "完成", toolCalls: [])
+        ]
+        let registry = AgentToolRegistry()
+        registry.register(EchoTool())
+        let runtime = AgentRuntime(
+            apiManager: client,
+            registry: registry,
+            systemPromptProvider: { "system" }
+        )
+        var completed = false
+        runtime.onCompleted = { completed = true }
+
+        runtime.send("test")
+
+        #expect(completed)
+        #expect(client.requests.count == 2)
+        #expect(client.requests[1].last?.role == .tool)
+        #expect(client.requests[1].last?.content?.contains("ok") == true)
+        #expect(runtime.messages.last?.content == "完成")
+    }
+}
+
 struct ModelConfigurationLibraryTests {
     @Test
     func configurationRequiresAnHTTPServiceURL() {

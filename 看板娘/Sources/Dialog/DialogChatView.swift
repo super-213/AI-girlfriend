@@ -41,15 +41,15 @@ struct DialogChatView: View {
             RoundedRectangle(cornerRadius: 30, style: .continuous)
                 .fill(Color(nsColor: .windowBackgroundColor).opacity(0.98))
         )
-        .alert("执行命令确认", isPresented: $viewModel.showCommandConfirm) {
+        .alert("工具调用确认", isPresented: $viewModel.showToolConfirmation) {
             Button("执行", role: .none) {
-                viewModel.confirmAndRunCommand()
+                viewModel.approvePendingTool()
             }
             Button("取消", role: .cancel) {
-                viewModel.cancelPendingCommand()
+                viewModel.declinePendingTool()
             }
         } message: {
-            Text("将执行命令：\(viewModel.pendingCommand)")
+            Text("Agent 请求执行：\(viewModel.pendingToolSummary)")
         }
     }
 
@@ -159,7 +159,7 @@ struct DialogChatView: View {
                     }
                 )
                 .frame(height: 34)
-                .disabled(viewModel.isRequesting || viewModel.isExecutingCommand)
+                .disabled(viewModel.isRequesting || viewModel.isExecutingTool)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 4)
@@ -173,7 +173,7 @@ struct DialogChatView: View {
                     )
             )
 
-            if viewModel.isRequesting && !viewModel.isExecutingCommand {
+            if viewModel.isRequesting && !viewModel.isExecutingTool {
                 Button(action: viewModel.stopGenerating) {
                     Image(systemName: "stop.fill")
                         .font(.system(size: 10, weight: .bold))
@@ -182,7 +182,7 @@ struct DialogChatView: View {
                 .buttonStyle(.borderedProminent)
                 .buttonBorderShape(.circle)
                 .help("停止生成")
-            } else if viewModel.isExecutingCommand {
+            } else if viewModel.isExecutingTool {
                 ProgressView()
                     .controlSize(.small)
                     .frame(width: 18, height: 18)

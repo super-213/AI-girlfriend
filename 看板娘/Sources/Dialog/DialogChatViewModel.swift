@@ -12,6 +12,7 @@ struct DialogMessage: Identifiable, Equatable {
     enum Role: String {
         case user
         case assistant
+        case tool
     }
 
     let id: UUID
@@ -30,15 +31,19 @@ final class DialogChatViewModel: ObservableObject {
     @Published var messages: [DialogMessage] = []
     @Published var inputText: String = ""
     @Published var isRequesting: Bool = false
-    @Published var showCommandConfirm: Bool = false
-    @Published var pendingCommand: String = ""
-    @Published var isExecutingCommand: Bool = false
+    @Published var showToolConfirmation: Bool = false
+    @Published var pendingToolSummary: String = ""
+    @Published var isExecutingTool: Bool = false
 
     private let apiManager = APIManager()
-    private var activeStreamToken = UUID()
-    private var lastUserInput: String = ""
-    private let maxCommandIterations = 5
-    private var commandIterationCount = 0
+    private lazy var agentRuntime = AgentRuntime(apiManager: apiManager) { [apiManager] in
+        apiManager.systemPromptContent()
+    }
+    private var activeAssistantID: UUID?
+
+    init() {
+        configureAgentRuntime()
+    }
 
     func sendCurrentInput() {
         send(inputText)
@@ -46,169 +51,114 @@ final class DialogChatViewModel: ObservableObject {
 
     func send(_ rawText: String) {
         let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isRequesting, !isExecutingCommand else { return }
+        guard !trimmed.isEmpty, !isRequesting, !isExecutingTool else { return }
 
-        lastUserInput = trimmed
-        commandIterationCount = 0
         messages.append(DialogMessage(role: .user, content: trimmed))
         inputText = ""
-        requestAssistantReply()
+        agentRuntime.send(trimmed)
     }
 
     func startNewConversation() {
-        apiManager.cancelStreamRequest()
-        activeStreamToken = UUID()
+        agentRuntime.startNewConversation()
         isRequesting = false
-        isExecutingCommand = false
-        showCommandConfirm = false
-        pendingCommand = ""
-        lastUserInput = ""
-        commandIterationCount = 0
+        isExecutingTool = false
+        showToolConfirmation = false
+        pendingToolSummary = ""
+        activeAssistantID = nil
         messages.removeAll()
         inputText = ""
     }
 
     func stopGenerating() {
-        guard isRequesting, !isExecutingCommand else { return }
-        activeStreamToken = UUID()
-        apiManager.cancelStreamRequest()
+        guard isRequesting, !isExecutingTool else { return }
+        agentRuntime.cancel()
         isRequesting = false
+        isExecutingTool = false
+        showToolConfirmation = false
+        pendingToolSummary = ""
         if let last = messages.last, last.role == .assistant, last.content.isEmpty {
             messages.removeLast()
         }
         appendAssistantStatus("已停止生成。")
     }
 
-    func confirmAndRunCommand() {
-        let command = pendingCommand
-        showCommandConfirm = false
-        pendingCommand = ""
-
-        guard !command.isEmpty else { return }
-
-        guard CommandExecutionSupport.isCommandSafe(command) else {
-            appendAssistantStatus("[完成] 已阻止危险或交互式命令: \(command)")
-            return
-        }
-
-        isExecutingCommand = true
-        isRequesting = true
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            let (exitCode, output) = CommandExecutionSupport.runShell(command)
-            let trimmedOutput = output.trimmingCharacters(in: .whitespacesAndNewlines)
-
-            DispatchQueue.main.async {
-                self.isExecutingCommand = false
-                self.commandIterationCount += 1
-
-                guard self.commandIterationCount <= self.maxCommandIterations else {
-                    self.isRequesting = false
-                    self.appendAssistantStatus("[完成] 命令执行次数过多，已停止自动执行")
-                    return
-                }
-
-                let resultText = """
-                执行完毕
-                命令: \(command)
-                退出码: \(exitCode)
-                输出:
-                \(trimmedOutput.isEmpty ? "(无输出)" : trimmedOutput)
-                """
-                self.messages.append(DialogMessage(role: .user, content: resultText))
-                self.requestAssistantReply()
-            }
-        }
+    func approvePendingTool() {
+        showToolConfirmation = false
+        pendingToolSummary = ""
+        agentRuntime.approvePendingTool()
     }
 
-    func cancelPendingCommand() {
-        showCommandConfirm = false
-        pendingCommand = ""
-        isRequesting = false
-        appendAssistantStatus("[完成] 已取消执行命令")
+    func declinePendingTool() {
+        showToolConfirmation = false
+        pendingToolSummary = ""
+        agentRuntime.declinePendingTool()
     }
 
-    private func requestAssistantReply() {
-        let outgoingMessages = buildOutgoingMessages()
-        let assistantID = UUID()
-        let streamToken = UUID()
-
-        activeStreamToken = streamToken
-        isRequesting = true
-        messages.append(DialogMessage(id: assistantID, role: .assistant, content: ""))
-
-        apiManager.sendStreamRequest(messages: outgoingMessages) { [weak self] newContent in
-            Task { @MainActor [weak self] in
-                self?.appendAssistantChunk(newContent, to: assistantID, streamToken: streamToken)
-            }
-        } onComplete: { [weak self] in
-            Task { @MainActor [weak self] in
-                self?.finishAssistantReply(for: assistantID, streamToken: streamToken)
-            }
-        } onError: { [weak self] error in
-            Task { @MainActor [weak self] in
-                guard let self, self.activeStreamToken == streamToken else { return }
-                self.isRequesting = false
-                self.appendAssistantStatus("请求失败：\(error.localizedDescription)")
-            }
-        }
-    }
-
-    private func appendAssistantChunk(_ chunk: String, to messageID: UUID, streamToken: UUID) {
-        guard activeStreamToken == streamToken else { return }
+    private func appendAssistantChunk(_ chunk: String, to messageID: UUID) {
         guard let index = messages.firstIndex(where: { $0.id == messageID }) else { return }
         messages[index].content += chunk
     }
 
-    private func finishAssistantReply(for messageID: UUID, streamToken: UUID) {
-        guard activeStreamToken == streamToken else { return }
-        isRequesting = false
-
-        guard let index = messages.firstIndex(where: { $0.id == messageID }) else { return }
-        let content = messages[index].content.trimmingCharacters(in: .whitespacesAndNewlines)
-        if content.isEmpty {
-            messages[index].content = "（未收到模型回复）"
-            return
-        }
-
-        handleAssistantReply(messageID: messageID, assistantReply: content)
+    private func fillEmptyAssistantMessage(_ text: String) {
+        guard let messageID = activeAssistantID,
+              let index = messages.firstIndex(where: { $0.id == messageID }),
+              messages[index].content.isEmpty else { return }
+        messages[index].content = text
     }
 
-    private func handleAssistantReply(messageID: UUID, assistantReply: String) {
-        guard !CommandExecutionSupport.isCompletionReply(assistantReply) else { return }
-        guard !isExecutingCommand else { return }
-        guard let command = CommandExecutionSupport.extractCommand(from: assistantReply) else { return }
-
-        let normalized = CommandExecutionSupport.normalizeCommand(command, basedOn: lastUserInput)
-        pendingCommand = normalized
-
-        guard let index = messages.firstIndex(where: { $0.id == messageID }) else { return }
-        if normalized != command, let range = messages[index].content.range(of: command) {
-            messages[index].content.replaceSubrange(range, with: normalized)
+    private func configureAgentRuntime() {
+        agentRuntime.onAssistantResponseStarted = { [weak self] in
+            guard let self else { return }
+            let id = UUID()
+            self.activeAssistantID = id
+            self.isRequesting = true
+            self.isExecutingTool = false
+            self.messages.append(DialogMessage(id: id, role: .assistant, content: ""))
         }
-
-        if !CommandExecutionSupport.hasCommandTag(in: messages[index].content) {
-            messages[index].content += "\n[命令] \(normalized)"
+        agentRuntime.onAssistantText = { [weak self] chunk in
+            guard let self, let id = self.activeAssistantID else { return }
+            self.appendAssistantChunk(chunk, to: id)
         }
-
-        showCommandConfirm = true
+        agentRuntime.onToolStarted = { [weak self] name in
+            guard let self else { return }
+            self.isExecutingTool = true
+            self.fillEmptyAssistantMessage("正在调用工具：\(name)…")
+        }
+        agentRuntime.onToolFinished = { [weak self] name, result in
+            guard let self else { return }
+            self.isExecutingTool = false
+            if result.isError {
+                self.messages.append(DialogMessage(
+                    role: .tool,
+                    content: "工具 \(name) 执行失败：\(result.content)"
+                ))
+            }
+        }
+        agentRuntime.onApprovalRequested = { [weak self] approval in
+            guard let self else { return }
+            self.isExecutingTool = false
+            self.pendingToolSummary = approval.summary
+            self.fillEmptyAssistantMessage("请求调用工具：\(approval.toolName)")
+            self.showToolConfirmation = true
+        }
+        agentRuntime.onCompleted = { [weak self] in
+            guard let self else { return }
+            self.isRequesting = false
+            self.isExecutingTool = false
+            self.fillEmptyAssistantMessage("（模型没有返回文本）")
+        }
+        agentRuntime.onError = { [weak self] error in
+            guard let self else { return }
+            self.isRequesting = false
+            self.isExecutingTool = false
+            self.showToolConfirmation = false
+            self.pendingToolSummary = ""
+            self.fillEmptyAssistantMessage("请求失败：\(error.localizedDescription)")
+        }
     }
 
     private func appendAssistantStatus(_ status: String) {
         messages.append(DialogMessage(role: .assistant, content: status))
     }
 
-    private func buildOutgoingMessages() -> [[String: String]] {
-        var outgoing: [[String: String]] = [
-            ["role": "system", "content": apiManager.systemPromptContent()]
-        ]
-
-        for item in messages {
-            outgoing.append([
-                "role": item.role.rawValue,
-                "content": item.content
-            ])
-        }
-        return outgoing
-    }
 }

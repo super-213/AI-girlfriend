@@ -70,6 +70,20 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     private var onComplete: (@MainActor @Sendable () -> Void)?
     private var onError: (@MainActor @Sendable (Error) -> Void)?
 
+    private struct StreamingToolCallPart {
+        var id = ""
+        var name = ""
+        var arguments = ""
+    }
+
+    private var isAgentRequest = false
+    private var agentOnReceive: (@MainActor @Sendable (String) -> Void)?
+    private var agentOnComplete: (@MainActor @Sendable (AgentModelResponse) -> Void)?
+    private var agentOnError: (@MainActor @Sendable (Error) -> Void)?
+    private var agentStreamBuffer = ""
+    private var agentText = ""
+    private var agentToolCallParts: [Int: StreamingToolCallPart] = [:]
+
     // MARK: - 外部接口
     
     /// 发送流式请求到AI API
@@ -121,6 +135,34 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         }
 
         // 启动请求
+        task = session.dataTask(with: request)
+        activeTaskIdentifier = task?.taskIdentifier
+        task?.resume()
+    }
+
+    /// Sends a provider-neutral agent request with native function tools.
+    func sendAgentStreamRequest(
+        messages: [AgentMessage],
+        tools: [AgentToolDefinition],
+        onReceive: @escaping @MainActor @Sendable (String) -> Void,
+        onComplete: @escaping @MainActor @Sendable (AgentModelResponse) -> Void,
+        onError: @escaping @MainActor @Sendable (Error) -> Void
+    ) {
+        cancelPreviousTask()
+
+        isAgentRequest = true
+        agentOnReceive = onReceive
+        agentOnComplete = onComplete
+        agentOnError = onError
+        agentStreamBuffer = ""
+        agentText = ""
+        agentToolCallParts = [:]
+
+        guard let request = buildAgentRequest(messages: messages, tools: tools) else {
+            finishAgentStream(with: APIStreamError.invalidConfiguration)
+            return
+        }
+
         task = session.dataTask(with: request)
         activeTaskIdentifier = task?.taskIdentifier
         task?.resume()
@@ -235,6 +277,69 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         return request
     }
 
+    private func buildAgentRequest(
+        messages: [AgentMessage],
+        tools: [AgentToolDefinition]
+    ) -> URLRequest? {
+        let messageObjects = provider.lowercased() == "ollama"
+            ? messages.map { $0.ollamaJSONObject() }
+            : messages.map { $0.jsonObject() }
+        let toolObjects = tools.map { $0.jsonObject() }
+        var payload: [String: Any]
+
+        switch provider.lowercased() {
+        case "zhipu":
+            payload = [
+                "model": aiModel,
+                "messages": messageObjects,
+                "tools": toolObjects,
+                "tool_choice": "auto",
+                "top_p": 0.7,
+                "temperature": 0.7,
+                "stream": true
+            ]
+        case "qwen":
+            payload = [
+                "model": aiModel,
+                "messages": messageObjects,
+                "tools": toolObjects,
+                "tool_choice": "auto",
+                "temperature": 0.7,
+                "stream": true
+            ]
+        case "ollama":
+            payload = [
+                "model": aiModel,
+                "messages": messageObjects,
+                "tools": toolObjects,
+                "stream": true,
+                "options": ["temperature": 0.7, "top_p": 0.7]
+            ]
+        default:
+            return nil
+        }
+
+        var finalApiUrl = apiUrl
+        if provider.lowercased() == "qwen",
+           finalApiUrl.contains("dashscope.aliyuncs.com/compatible-mode/v1"),
+           !finalApiUrl.contains("/chat/completions") {
+            if finalApiUrl.hasSuffix("/") { finalApiUrl.removeLast() }
+            finalApiUrl += "/chat/completions"
+        }
+
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let url = URL(string: finalApiUrl) else { return nil }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = data
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if provider.lowercased() != "ollama" {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+        return request
+    }
+
     private func parseNonStreamContent(_ data: Data) -> String {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return ""
@@ -325,6 +430,13 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         activeTaskIdentifier = nil
         task?.cancel()
         task = nil
+        isAgentRequest = false
+        agentOnReceive = nil
+        agentOnComplete = nil
+        agentOnError = nil
+        agentStreamBuffer = ""
+        agentText = ""
+        agentToolCallParts = [:]
     }
 
     func cancelStreamRequest() {
@@ -377,6 +489,11 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         print("接收到原始数据：\n\(rawText)")
         #endif
         
+        if isAgentRequest {
+            handleAgentReceivedText(rawText)
+            return
+        }
+
         switch provider.lowercased() {
         case "zhipu":
             parseSSEResponse(rawText)
@@ -389,6 +506,143 @@ final class APIManager: NSObject, URLSessionDataDelegate {
 
         default:
             break
+        }
+    }
+
+    private func handleAgentReceivedText(_ rawText: String) {
+        agentStreamBuffer += rawText
+        while let newline = agentStreamBuffer.firstIndex(of: "\n") {
+            let line = String(agentStreamBuffer[..<newline])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            agentStreamBuffer.removeSubrange(...newline)
+            processAgentStreamLine(line)
+            guard isAgentRequest else { return }
+        }
+    }
+
+    private func processAgentStreamLine(_ rawLine: String) {
+        guard !rawLine.isEmpty else { return }
+        var line = rawLine
+        if line.hasPrefix("data:") {
+            line = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+        }
+        guard line != "[DONE]" else {
+            finishAgentStream()
+            return
+        }
+        guard let data = line.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+
+        if let error = json["error"] as? [String: Any] {
+            let message = error["message"] as? String ?? "模型服务返回错误"
+            finishAgentStream(with: APIStreamError.transport(message))
+            return
+        }
+
+        if provider.lowercased() == "ollama" {
+            processOllamaAgentChunk(json)
+        } else {
+            processOpenAICompatibleAgentChunk(json)
+        }
+    }
+
+    private func processOpenAICompatibleAgentChunk(_ json: [String: Any]) {
+        guard let choice = (json["choices"] as? [[String: Any]])?.first else { return }
+        if let delta = choice["delta"] as? [String: Any] {
+            if let content = delta["content"] as? String, !content.isEmpty {
+                agentText += content
+                agentOnReceive?(content)
+            }
+            if let calls = delta["tool_calls"] as? [[String: Any]] {
+                for call in calls {
+                    let index = call["index"] as? Int ?? 0
+                    var part = agentToolCallParts[index] ?? StreamingToolCallPart()
+                    if let id = call["id"] as? String { part.id += id }
+                    if let function = call["function"] as? [String: Any] {
+                        if let name = function["name"] as? String { part.name += name }
+                        if let arguments = function["arguments"] as? String { part.arguments += arguments }
+                    }
+                    agentToolCallParts[index] = part
+                }
+            }
+        }
+
+        if let finishReason = choice["finish_reason"] as? String,
+           ["stop", "tool_calls", "function_call"].contains(finishReason) {
+            finishAgentStream()
+        }
+    }
+
+    private func processOllamaAgentChunk(_ json: [String: Any]) {
+        if let message = json["message"] as? [String: Any] {
+            if let content = message["content"] as? String, !content.isEmpty {
+                agentText += content
+                agentOnReceive?(content)
+            }
+            if let calls = message["tool_calls"] as? [[String: Any]] {
+                for (index, call) in calls.enumerated() {
+                    guard let function = call["function"] as? [String: Any],
+                          let name = function["name"] as? String else { continue }
+                    let arguments: String
+                    if let rawArguments = function["arguments"] as? String {
+                        arguments = rawArguments
+                    } else if let object = function["arguments"],
+                              JSONSerialization.isValidJSONObject(object),
+                              let data = try? JSONSerialization.data(withJSONObject: object) {
+                        arguments = String(data: data, encoding: .utf8) ?? "{}"
+                    } else {
+                        arguments = "{}"
+                    }
+                    agentToolCallParts[index] = StreamingToolCallPart(
+                        id: call["id"] as? String ?? "ollama-\(UUID().uuidString)",
+                        name: name,
+                        arguments: arguments
+                    )
+                }
+            }
+        }
+        if json["done"] as? Bool == true {
+            finishAgentStream()
+        }
+    }
+
+    private func finishAgentStream(with error: Error? = nil) {
+        guard isAgentRequest else { return }
+        let completion = agentOnComplete
+        let errorHandler = agentOnError
+        let response = AgentModelResponse(
+            content: agentText,
+            toolCalls: agentToolCallParts
+                .sorted { $0.key < $1.key }
+                .map { _, part in
+                    AgentToolCall(
+                        id: part.id.isEmpty ? "call-\(UUID().uuidString)" : part.id,
+                        name: part.name,
+                        arguments: part.arguments.isEmpty ? "{}" : part.arguments
+                    )
+                }
+                .filter { !$0.name.isEmpty }
+        )
+
+        isAgentRequest = false
+        agentOnReceive = nil
+        agentOnComplete = nil
+        agentOnError = nil
+        onReceive = nil
+        onComplete = nil
+        onError = nil
+        activeTaskIdentifier = nil
+        task = nil
+        agentStreamBuffer = ""
+        agentText = ""
+        agentToolCallParts = [:]
+
+        if let error {
+            errorHandler?(error)
+        } else {
+            completion?(response)
         }
     }
     /// 解析智谱的SSE逻辑
@@ -507,9 +761,21 @@ final class APIManager: NSObject, URLSessionDataDelegate {
                 #if DEBUG
                 print("任务出错：\(errorDescription)")
                 #endif
-                self?.finishStream(with: APIStreamError.transport(errorDescription))
+                if self?.isAgentRequest == true {
+                    self?.finishAgentStream(with: APIStreamError.transport(errorDescription))
+                } else {
+                    self?.finishStream(with: APIStreamError.transport(errorDescription))
+                }
             } else {
-                self?.finishStream()
+                if self?.isAgentRequest == true {
+                    if let remainder = self?.agentStreamBuffer,
+                       !remainder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        self?.processAgentStreamLine(remainder)
+                    }
+                    self?.finishAgentStream()
+                } else {
+                    self?.finishStream()
+                }
             }
         }
     }
