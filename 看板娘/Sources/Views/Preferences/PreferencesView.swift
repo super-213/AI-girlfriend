@@ -28,7 +28,6 @@ struct PreferencesView: View {
     @AppStorage("bubbleAutoHideDuration") private var bubbleAutoHideDuration: Double = 15
     
     @Environment(\.presentationMode) var presentationMode
-    @State private var selectedIndex: Int = 0
     @State private var editingCharacterIndex: Int?
     @State private var modelConfigurations: [ModelConfiguration] = []
     @State private var originalModelConfigurations: [ModelConfiguration] = []
@@ -46,13 +45,11 @@ struct PreferencesView: View {
         case model
         case apiUrl
         case apiKey
-        case characterPicker
     }
     
     init(petViewBackend: PetViewBackend) {
         self.petViewBackend = petViewBackend
         _backend = StateObject(wrappedValue: PreferencesViewBackend(petViewBackend: petViewBackend))
-        _selectedIndex = State(initialValue: availableCharacters.firstIndex(where: { $0.name == petViewBackend.currentCharacter.name }) ?? 0)
     }
 
     var body: some View {
@@ -228,13 +225,14 @@ extension PreferencesView {
             
         case .characterBinding:
             CharacterBindingTab(
-                selectedIndex: $selectedIndex,
-                focusedField: $focusedField,
                 allCharacters: allCharacters,
                 customCharacters: backend.customCharacters,
-                availableCharactersCount: availableCharacters.count,
+                builtInCharactersCount: availableCharacters.count,
+                currentCharacterID: petViewBackend.currentCharacter.id,
                 onCharacterChange: handleCharacterChange,
-                onImport: showImportDialog,
+                onImport: { idleURL, interactionURL, name in
+                    backend.importGIF(normalGif: idleURL, clickGif: interactionURL, name: name)
+                },
                 onDelete: backend.deleteCustomCharacter,
                 onConfigure: { editingCharacterIndex = $0 },
                 showImportError: $backend.showImportError,
@@ -390,78 +388,9 @@ extension PreferencesView {
     }
 }
 
-// MARK: - 导入对话框
+// MARK: - 角色状态素材
 
 extension PreferencesView {
-    private func showImportDialog() {
-        let copyrightAlert = NSAlert()
-        copyrightAlert.messageText = "确认素材使用权"
-        copyrightAlert.informativeText = "请确认你拥有所导入素材的使用权；素材版权责任由导入者承担。"
-        copyrightAlert.addButton(withTitle: "我已确认")
-        copyrightAlert.addButton(withTitle: "取消")
-        guard copyrightAlert.runModal() == .alertFirstButtonReturn else { return }
-
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.allowedContentTypes = [.gif, .png, .jpeg]
-        panel.message = "选择角色待命素材（GIF、PNG 或 JPEG）"
-        
-        panel.begin { response in
-            guard response == .OK, let normalUrl = panel.url else { return }
-            promptForCharacterName(normalUrl: normalUrl)
-        }
-    }
-    
-    private func promptForCharacterName(normalUrl: URL) {
-        let alert = NSAlert()
-        alert.messageText = "输入角色名称"
-        alert.informativeText = "请为新角色输入一个名称"
-        alert.addButton(withTitle: "继续")
-        alert.addButton(withTitle: "取消")
-        
-        let inputField = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
-        inputField.placeholderString = "角色名称"
-        alert.accessoryView = inputField
-        
-        let response = alert.runModal()
-        guard response == .alertFirstButtonReturn else { return }
-        
-        let characterName = inputField.stringValue
-        promptForClickGif(normalUrl: normalUrl, characterName: characterName)
-    }
-    
-    private func promptForClickGif(normalUrl: URL, characterName: String) {
-        let clickAlert = NSAlert()
-        clickAlert.messageText = "选择互动素材（可选）"
-        clickAlert.informativeText = "可为角色添加点击时播放的 GIF、PNG 或 JPEG。"
-        clickAlert.addButton(withTitle: "选择")
-        clickAlert.addButton(withTitle: "跳过")
-        
-        let clickResponse = clickAlert.runModal()
-        
-        if clickResponse == .alertFirstButtonReturn {
-            selectClickGif(normalUrl: normalUrl, characterName: characterName)
-        } else {
-            _ = backend.importGIF(normalGif: normalUrl, clickGif: nil, name: characterName)
-        }
-    }
-    
-    private func selectClickGif(normalUrl: URL, characterName: String) {
-        let clickPanel = NSOpenPanel()
-        clickPanel.allowsMultipleSelection = false
-        clickPanel.canChooseDirectories = false
-        clickPanel.canChooseFiles = true
-        clickPanel.allowedContentTypes = [.gif, .png, .jpeg]
-        clickPanel.message = "选择互动素材"
-        
-        clickPanel.begin { clickPanelResponse in
-            let clickUrl = clickPanelResponse == .OK ? clickPanel.url : nil
-            _ = backend.importGIF(normalGif: normalUrl, clickGif: clickUrl, name: characterName)
-        }
-    }
-
     private func showStateAssetPanel(characterIndex: Int, state: PetActivityState) {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false

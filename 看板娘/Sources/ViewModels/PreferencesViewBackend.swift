@@ -184,10 +184,16 @@ final class PreferencesViewBackend: ObservableObject {
     /// 删除指定索引的自定义角色
     /// - Parameter index: 要删除的角色索引
     func deleteCustomCharacter(at index: Int) {
-        guard index < customCharacters.count else { return }
+        guard customCharacters.indices.contains(index) else { return }
         
         let character = customCharacters[index]
         let fileManager = FileManager.default
+
+        // 删除当前正在使用的自定义角色前先安全回退，避免运行时继续引用即将删除的素材。
+        if petViewBackend.currentCharacter.id == character.id,
+           let fallbackCharacter = availableCharacters.first {
+            petViewBackend.switchToCharacter(fallbackCharacter)
+        }
         
         let locations = Set(
             character.assetsByState.values.flatMap { $0 }.map(\.location)
@@ -813,6 +819,8 @@ extension PreferencesViewBackend {
     /// 获取当前角色在列表中的索引
     /// - Returns: 当前角色的索引
     func getCurrentCharacterIndex() -> Int {
-        return availableCharacters.firstIndex(where: { $0.name == petViewBackend.currentCharacter.name }) ?? 0
+        var characters = availableCharacters
+        characters.append(contentsOf: customCharacters)
+        return characters.firstIndex(where: { $0.id == petViewBackend.currentCharacter.id }) ?? 0
     }
 }
