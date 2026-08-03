@@ -14,8 +14,10 @@ struct EnhancedActionButtons: View {
     let onCancel: () -> Void
     let isSaveDisabled: Bool
     let hasUnsavedChanges: Bool
-    
-    @State private var pulseAnimation: CGFloat = 1.0
+    var secondaryTitle: String = "取消"
+    var isCancelDisabled: Bool = false
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     
     var body: some View {
         HStack(spacing: DesignSpacing.md) {
@@ -25,11 +27,12 @@ struct EnhancedActionButtons: View {
             
             Spacer()
             
-            Button("取消") {
+            Button(secondaryTitle) {
                 onCancel()
             }
             .buttonStyle(PlainButtonStyle())
-            .enhancedButtonStyle(isPrimary: false, isDisabled: false)
+            .enhancedButtonStyle(isPrimary: false, isDisabled: isCancelDisabled)
+            .disabled(isCancelDisabled)
             
             Button("保存") {
                 onSave()
@@ -37,7 +40,12 @@ struct EnhancedActionButtons: View {
             .buttonStyle(PlainButtonStyle())
             .enhancedButtonStyle(isPrimary: true, isDisabled: isSaveDisabled)
             .disabled(isSaveDisabled)
+            .keyboardShortcut("s", modifiers: .command)
         }
+        .animation(
+            reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1),
+            value: hasUnsavedChanges
+        )
     }
     
     private var unsavedChangesIndicator: some View {
@@ -45,21 +53,12 @@ struct EnhancedActionButtons: View {
             Circle()
                 .fill(DesignColors.warning)
                 .frame(width: 8, height: 8)
-                .scaleEffect(pulseAnimation)
-                .animation(
-                    Animation.easeInOut(duration: 1.0).repeatForever(autoreverses: true),
-                    value: pulseAnimation
-                )
             Text("未保存的更改")
                 .font(DesignFonts.caption)
                 .foregroundColor(.secondary)
         }
         .transition(.opacity.combined(with: .scale))
-        .onAppear {
-            pulseAnimation = 1.3
-        }
-        .onDisappear {
-            pulseAnimation = 1.0
-        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("有未保存的更改")
     }
 }

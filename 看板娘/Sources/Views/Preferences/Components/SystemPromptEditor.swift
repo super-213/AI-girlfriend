@@ -14,9 +14,10 @@ struct SystemPromptEditor: View {
     let characterLimit: Int = 500
     let defaultPrompt: String
     var focusedField: FocusState<PreferencesView.FocusableField?>.Binding
-    private let editorWidth: CGFloat = 400
-    private let editorCornerRadius: CGFloat = 16
-    private let editorBackgroundColor = Color(nsColor: .textBackgroundColor)
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let editorCornerRadius: CGFloat = 12
     
     var characterCount: Int {
         text.count
@@ -28,38 +29,56 @@ struct SystemPromptEditor: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: LayoutConstants.fieldSpacing) {
-            // 标签和字符计数
-            HStack {
-                Text("系统提示词:")
-                    .font(DesignFonts.body)
+            HStack(alignment: .firstTextBaseline) {
+                Text("角色指令")
+                    .font(.subheadline.weight(.semibold))
                 
                 Spacer()
                 
-                Text("[\(characterCount)/\(characterLimit)]")
+                Text("\(characterCount) / \(characterLimit)")
                     .font(DesignFonts.caption.monospacedDigit())
                     .foregroundColor(isOverLimit ? DesignColors.warning : .secondary)
                     .accessibilityLabel("字符计数：\(characterCount) 个，限制 \(characterLimit) 个")
             }
-            
-            // 文本编辑器
-            TextEditor(text: $text)
-                .font(DesignFonts.input)
-                .padding(DesignSpacing.sm)
-                .frame(
-                    width: editorWidth,
-                    height: LayoutConstants.systemPromptHeight,
-                    alignment: .topLeading
-                )
-                .scrollContentBackground(.hidden)
-                .background(
-                    RoundedRectangle(cornerRadius: editorCornerRadius, style: .continuous)
-                        .fill(editorBackgroundColor)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: editorCornerRadius, style: .continuous))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .focused(focusedField, equals: .systemPrompt)
-                .accessibilityLabel("系统提示词文本编辑器")
-                .accessibilityValue(text)
+
+            ZStack(alignment: .topLeading) {
+                if text.isEmpty {
+                    Text("描述角色的身份、语气和回答方式…")
+                        .font(DesignFonts.input)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, DesignSpacing.md)
+                        .padding(.vertical, 11)
+                        .allowsHitTesting(false)
+                }
+
+                TextEditor(text: $text)
+                    .font(DesignFonts.input)
+                    .padding(DesignSpacing.sm)
+                    .scrollContentBackground(.hidden)
+                    .focused(focusedField, equals: .systemPrompt)
+                    .accessibilityLabel("角色指令文本编辑器")
+                    .accessibilityValue(text)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 180, idealHeight: 220, maxHeight: 260)
+            .background(
+                RoundedRectangle(cornerRadius: editorCornerRadius, style: .continuous)
+                    .fill(Color(nsColor: .textBackgroundColor))
+            )
+            .clipShape(RoundedRectangle(cornerRadius: editorCornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: editorCornerRadius, style: .continuous)
+                    .stroke(
+                        focusedField.wrappedValue == .systemPrompt
+                            ? Color.accentColor.opacity(0.7)
+                            : Color.primary.opacity(0.1),
+                        lineWidth: focusedField.wrappedValue == .systemPrompt ? 2 : 1
+                    )
+            )
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: 0.15),
+                value: focusedField.wrappedValue == .systemPrompt
+            )
             
             // 超长警告
             if isOverLimit {
@@ -74,10 +93,17 @@ struct SystemPromptEditor: View {
                 .accessibilityLabel("警告：提示词较长，建议精简")
             }
             
-            // 重置按钮
-            Button(action: resetToDefault) {
-                Text("重置为默认")
+            HStack {
+                Text("用于约束 AI 的身份、语气与行为。")
+                    .font(DesignFonts.caption)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button("恢复默认", action: resetToDefault)
+                    .buttonStyle(.borderless)
                     .font(.caption)
+                    .disabled(text == defaultPrompt)
             }
             .accessibilityLabel("重置系统提示词为默认值")
             .accessibilityHint("将系统提示词恢复为默认设置")
@@ -86,5 +112,6 @@ struct SystemPromptEditor: View {
     
     func resetToDefault() {
         text = defaultPrompt
+        focusedField.wrappedValue = .systemPrompt
     }
 }

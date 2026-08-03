@@ -35,6 +35,8 @@ struct PreferencesView: View {
     @State private var selectedModelConfigurationID = ""
     @State private var activeModelConfigurationID = ""
     @State private var originalActiveModelConfigurationID = ""
+    @State private var styleDraftSystemPrompt = ""
+    @State private var styleDraftMessages: [String] = []
     @FocusState private var focusedField: FocusableField?
     
     /// 可聚焦字段枚举
@@ -169,16 +171,13 @@ extension PreferencesView {
         switch section {
         case .style:
             StyleSettingsTab(
-                systemPrompt: $systemPrompt,
-                staticMessages: $backend.staticMessages,
+                systemPrompt: $styleDraftSystemPrompt,
+                staticMessages: $styleDraftMessages,
                 focusedField: $focusedField,
-                onSave: saveSettings,
-                onCancel: cancelChanges,
-                hasUnsavedChanges: backend.hasUnsavedChanges
+                onSave: saveStyleSettings,
+                onCancel: restoreStyleDraft,
+                hasUnsavedChanges: styleHasUnsavedChanges
             )
-            .onChange(of: backend.staticMessages) { _, _ in
-                checkChanges()
-            }
             
         case .model:
             ModelSettingsTab(
@@ -261,6 +260,19 @@ extension PreferencesView {
         saveSettings(dismissAfterSave: true)
     }
 
+    private func saveStyleSettings() {
+        focusedField = nil
+        systemPrompt = styleDraftSystemPrompt
+        backend.staticMessages = styleDraftMessages
+        saveSettings(dismissAfterSave: false)
+    }
+
+    private func restoreStyleDraft() {
+        focusedField = nil
+        styleDraftSystemPrompt = systemPrompt
+        styleDraftMessages = backend.staticMessages
+    }
+
     private func saveSettings(dismissAfterSave: Bool) {
         _ = backend.saveSettings(
             apiKey: apiKey,
@@ -341,9 +353,8 @@ extension PreferencesView {
             overlapRatio: overlapRatio,
             petHorizontalPlacement: petHorizontalPlacement
         )
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            focusedField = .systemPrompt
-        }
+        styleDraftSystemPrompt = systemPrompt
+        styleDraftMessages = backend.staticMessages
     }
     
     private func checkChanges() {
@@ -361,6 +372,10 @@ extension PreferencesView {
     private var modelConfigurationsHaveUnsavedChanges: Bool {
         modelConfigurations != originalModelConfigurations
             || activeModelConfigurationID != originalActiveModelConfigurationID
+    }
+
+    private var styleHasUnsavedChanges: Bool {
+        styleDraftSystemPrompt != systemPrompt || styleDraftMessages != backend.staticMessages
     }
     
     private func handleCharacterChange(_ newIndex: Int) {

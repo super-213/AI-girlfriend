@@ -11,20 +11,26 @@ import SwiftUI
 /// 支持添加、编辑和删除静态提示词
 struct StaticMessagesEditor: View {
     @Binding var messages: [String]
-    @State private var newMessage: String = ""
-    @State private var editingIndex: Int? = nil
-    @State private var editingText: String = ""
+    @State private var newMessage = ""
+    @State private var editingIndex: Int?
+    @State private var editingText = ""
+    @FocusState private var focusedInput: FocusedInput?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private enum FocusedInput: Hashable {
+        case newMessage
+        case message(Int)
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: LayoutConstants.fieldSpacing) {
-            // 标签和计数
-            HStack {
-                Text("静态提示词:")
-                    .font(DesignFonts.body)
+            HStack(alignment: .firstTextBaseline) {
+                Text("自动消息")
+                    .font(.subheadline.weight(.semibold))
                 
                 Spacer()
                 
-                Text("[\(messages.count) 条]")
+                Text("\(messages.count) 条")
                     .font(DesignFonts.caption.monospacedDigit())
                     .foregroundColor(.secondary)
             }
@@ -36,12 +42,18 @@ struct StaticMessagesEditor: View {
                 emptyState
             }
             
-            // 添加新消息
             addMessageField
             
-            Text("静态提示词将替代角色的默认自动消息")
+            Text("角色会从这些消息中随机选取一条；留空则使用角色默认消息。")
                 .font(DesignFonts.caption)
                 .foregroundColor(.secondary)
+        }
+        .onExitCommand(perform: cancelEdit)
+        .onChange(of: messages) { _, _ in
+            // “还原”或其他外部更新发生时，不保留已过期的行编辑状态。
+            if editingIndex != nil {
+                cancelEdit()
+            }
         }
     }
 }
@@ -50,93 +62,128 @@ struct StaticMessagesEditor: View {
 
 extension StaticMessagesEditor {
     private var messagesList: some View {
-        ScrollView {
-            VStack(spacing: 8) {
-                ForEach(Array(messages.enumerated()), id: \.offset) { index, message in
-                    messageRow(index: index, message: message)
-                }
+        VStack(spacing: DesignSpacing.xs) {
+            ForEach(Array(messages.enumerated()), id: \.offset) { index, message in
+                messageRow(index: index, message: message)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
         }
-        .frame(height: 150)
-        .border(DesignColors.border, width: LayoutConstants.borderWidth)
     }
     
     private var emptyState: some View {
-        Text("暂无静态提示词，请添加")
-            .font(DesignFonts.caption)
-            .foregroundColor(.secondary)
-            .frame(height: 60)
-            .frame(maxWidth: .infinity)
-            .background(Color.gray.opacity(0.05))
-            .border(DesignColors.border, width: LayoutConstants.borderWidth)
+        HStack(spacing: DesignSpacing.sm) {
+            Image(systemName: "text.bubble")
+            Text("还没有自动消息")
+        }
+        .font(DesignFonts.caption)
+        .foregroundStyle(.secondary)
+        .frame(height: 64)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.secondary.opacity(0.06))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
     }
     
     private var addMessageField: some View {
         HStack(spacing: 8) {
-            TextField("输入新的静态提示词", text: $newMessage)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
+            TextField("输入新的自动消息", text: $newMessage)
+                .textFieldStyle(.roundedBorder)
                 .font(DesignFonts.input)
+                .focused($focusedInput, equals: .newMessage)
+                .onSubmit(addMessage)
             
             Button(action: addMessage) {
-                Image(systemName: "plus.circle.fill")
-                    .foregroundColor(.blue)
+                Label("添加", systemImage: "plus")
             }
-            .buttonStyle(PlainButtonStyle())
+            .buttonStyle(.bordered)
             .disabled(newMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .help("添加消息（回车）")
         }
     }
     
     private func messageRow(index: Int, message: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text("\(index + 1).")
-                .font(DesignFonts.input)
-                .foregroundColor(.secondary)
-                .frame(width: 20, alignment: .trailing)
+        HStack(alignment: .center, spacing: DesignSpacing.sm) {
+            Text("\(index + 1)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(Color.secondary.opacity(0.09)))
             
             if editingIndex == index {
                 TextField("编辑消息", text: $editingText)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .textFieldStyle(.roundedBorder)
                     .font(DesignFonts.input)
+                    .focused($focusedInput, equals: .message(index))
+                    .onSubmit { saveEdit(at: index) }
             } else {
                 Text(message)
                     .font(DesignFonts.input)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(6)
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(4)
+                    .lineLimit(3)
+                    .textSelection(.enabled)
             }
             
             actionButtons(for: index)
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, DesignSpacing.sm)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(editingIndex == index ? Color.accentColor.opacity(0.08) : Color.secondary.opacity(0.05))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(
+                    editingIndex == index ? Color.accentColor.opacity(0.35) : Color.primary.opacity(0.07),
+                    lineWidth: 1
+                )
+        )
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            guard editingIndex != index else { return }
+            startEdit(at: index)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("第 \(index + 1) 条自动消息")
     }
     
     private func actionButtons(for index: Int) -> some View {
         HStack(spacing: 4) {
             if editingIndex == index {
                 Button(action: { saveEdit(at: index) }) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
+                    Image(systemName: "checkmark")
                 }
-                .buttonStyle(PlainButtonStyle())
+                .buttonStyle(.borderless)
+                .frame(width: 28, height: 28)
+                .disabled(editingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .help("完成编辑（回车）")
                 
                 Button(action: cancelEdit) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.gray)
+                    Image(systemName: "xmark")
                 }
-                .buttonStyle(PlainButtonStyle())
+                .buttonStyle(.borderless)
+                .frame(width: 28, height: 28)
+                .help("取消编辑（Esc）")
             } else {
                 Button(action: { startEdit(at: index) }) {
-                    Image(systemName: "pencil.circle")
-                        .foregroundColor(.blue)
+                    Image(systemName: "pencil")
                 }
-                .buttonStyle(PlainButtonStyle())
+                .buttonStyle(.borderless)
+                .frame(width: 28, height: 28)
+                .help("编辑消息")
                 
                 Button(action: { deleteMessage(at: index) }) {
-                    Image(systemName: "trash.circle")
-                        .foregroundColor(.red)
+                    Image(systemName: "trash")
                 }
-                .buttonStyle(PlainButtonStyle())
+                .buttonStyle(.borderless)
+                .foregroundStyle(.red)
+                .frame(width: 28, height: 28)
+                .help("删除消息（可通过“还原”恢复）")
             }
         }
     }
@@ -148,27 +195,45 @@ extension StaticMessagesEditor {
     private func addMessage() {
         let trimmed = newMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        messages.append(trimmed)
+        withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1)) {
+            messages.append(trimmed)
+        }
         newMessage = ""
+        focusedInput = .newMessage
     }
     
     private func startEdit(at index: Int) {
+        guard messages.indices.contains(index) else { return }
         editingIndex = index
         editingText = messages[index]
+        focusedInput = .message(index)
     }
     
     private func saveEdit(at index: Int) {
-        messages[index] = editingText
+        let trimmed = editingText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard messages.indices.contains(index), !trimmed.isEmpty else { return }
+        messages[index] = trimmed
         editingIndex = nil
         editingText = ""
+        focusedInput = nil
     }
     
     private func cancelEdit() {
         editingIndex = nil
         editingText = ""
+        focusedInput = nil
     }
     
     private func deleteMessage(at index: Int) {
-        messages.remove(at: index)
+        guard messages.indices.contains(index) else { return }
+        _ = withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1)) {
+            messages.remove(at: index)
+        }
+
+        if editingIndex == index {
+            cancelEdit()
+        } else if let editingIndex, editingIndex > index {
+            self.editingIndex = editingIndex - 1
+        }
     }
 }

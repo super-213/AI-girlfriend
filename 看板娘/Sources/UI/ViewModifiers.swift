@@ -18,7 +18,7 @@ extension View {
     
     /// 应用带有交互反馈的增强按钮样式
     func enhancedButtonStyle(isPrimary: Bool = true, isDisabled: Bool = false) -> some View {
-        self.modifier(EnhancedButtonStyle(isPrimary: isPrimary, isDisabled: isDisabled))
+        self.buttonStyle(EnhancedButtonStyle(isPrimary: isPrimary, isDisabled: isDisabled))
     }
     
     /// 应用带有自定义滚动条的平滑滚动样式
@@ -69,14 +69,29 @@ struct EnhancedTextFieldStyle: ViewModifier {
 
 /// 通过交互反馈增强按钮的视图修饰器
 /// 支持主要和次要按钮样式，包含悬停、按下和禁用状态
-struct EnhancedButtonStyle: ViewModifier {
+struct EnhancedButtonStyle: ButtonStyle {
     let isPrimary: Bool
-    @State private var isHovered: Bool = false
-    @State private var isPressed: Bool = false
     let isDisabled: Bool
-    
-    func body(content: Content) -> some View {
-        content
+
+    func makeBody(configuration: Configuration) -> some View {
+        EnhancedButtonStyleBody(
+            configuration: configuration,
+            isPrimary: isPrimary,
+            isDisabled: isDisabled
+        )
+    }
+}
+
+private struct EnhancedButtonStyleBody: View {
+    let configuration: ButtonStyleConfiguration
+    let isPrimary: Bool
+    let isDisabled: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovered = false
+
+    var body: some View {
+        configuration.label
             .buttonStyle(.plain)
             .padding(.horizontal, DesignSpacing.lg)
             .padding(.vertical, DesignSpacing.sm)
@@ -85,26 +100,15 @@ struct EnhancedButtonStyle: ViewModifier {
                     .fill(buttonBackgroundColor)
             )
             .foregroundColor(buttonForegroundColor)
-            .scaleEffect(isPressed ? 0.95 : (isHovered ? 1.02 : 1.0))
+            .scaleEffect(configuration.isPressed && !isDisabled ? 0.97 : 1)
             .opacity(isDisabled ? 0.5 : 1.0)
-            .animation(DesignAnimation.gentle, value: isHovered)
-            .animation(DesignAnimation.fast, value: isPressed)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: configuration.isPressed)
+            .animation(reduceMotion ? nil : DesignAnimation.gentle, value: isHovered)
             .onHover { hovering in
                 if !isDisabled {
                     isHovered = hovering
                 }
             }
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        if !isDisabled {
-                            isPressed = true
-                        }
-                    }
-                    .onEnded { _ in
-                        isPressed = false
-                    }
-            )
     }
     
     /// 根据按钮状态计算背景颜色
@@ -113,11 +117,11 @@ struct EnhancedButtonStyle: ViewModifier {
             return DesignColors.secondary.opacity(0.3)
         }
         if isPrimary {
-            return isPressed ? DesignColors.primaryActive :
+            return configuration.isPressed ? DesignColors.primaryActive :
                    isHovered ? DesignColors.primaryHover :
                    DesignColors.primary
         } else {
-            return isPressed ? DesignColors.secondary.opacity(0.4) :
+            return configuration.isPressed ? DesignColors.secondary.opacity(0.4) :
                    isHovered ? DesignColors.secondary.opacity(0.3) :
                    DesignColors.secondary.opacity(0.2)
         }
