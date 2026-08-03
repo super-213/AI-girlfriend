@@ -162,9 +162,15 @@ PetApp (入口)
     ▼
 PetViewBackend.submitInput()
     │
-    ├─▶ 命中音乐关键词？
-    │   ├─ 是 ─▶ MusicPlayerService.playSong()
-    │   └─ 否 ─▶ APIManager.sendStreamRequest()
+    ├─▶ TriggerDispatcher 意图识别
+    │   ├─ 命中 ─▶ 执行触发器
+    │   └─ 未命中 ─▶ 创建单次 Agent 会话
+    │                       │
+    │                       ▼
+    │                 AgentRuntime
+    │                 ├─▶ 原生 tool_calls
+    │                 ├─▶ 工具结果回灌
+    │                 └─▶ 继续推理直至最终回答
     │
     ▼
 流式回调 onReceive
@@ -175,6 +181,8 @@ PetViewBackend.submitInput()
     ▼
 视图实时渲染
 ```
+
+临时桌宠气泡和 Ctrl+T 完整对话共享同一套工具注册表与 Agent 循环。区别是临时气泡在每次新输入前调用 `startNewConversation()`，因此不会跨输入保存聊天历史，但单次任务内部的多轮工具调用上下文会完整保留。
 
 ### 2. Agent/Skill 注入流程
 

@@ -52,7 +52,15 @@ final class PetViewBackend: ObservableObject {
         case automation
     }
 
+    private enum PendingConfirmationKind {
+        case agentTool
+        case legacyCommand
+    }
+
     private let apiManager: APIManager
+    private lazy var agentRuntime = AgentRuntime(apiManager: apiManager) { [apiManager] in
+        apiManager.systemPromptContent()
+    }
     private let automationStore: AutomationStore
     private let triggerDispatcher: TriggerDispatcher
     private let assetResolver = PetAssetResolver()
@@ -71,6 +79,7 @@ final class PetViewBackend: ObservableObject {
     private var commandIterationCount = 0
     private var activeRequestID: UUID?
     private var pendingCommandRunID: UUID?
+    private var pendingConfirmationKind: PendingConfirmationKind?
     private var hasReceivedStreamContent = false
 
     init(
@@ -85,6 +94,7 @@ final class PetViewBackend: ObservableObject {
         self.stateCoordinator = stateCoordinator ?? PetStateCoordinator()
 
         currentCharacter = Self.initialCharacter()
+        configureAgentRuntime()
         bindState()
         registerNotifications()
         startPeriodicMemoryCleanup()
@@ -133,6 +143,7 @@ final class PetViewBackend: ObservableObject {
         }
 
         noteUserActivity()
+        agentRuntime.startNewConversation()
         let runID = UUID()
         activeRequestID = runID
         lastUserInput = trimmedInput
@@ -227,10 +238,15 @@ final class PetViewBackend: ObservableObject {
 
     func cancelActiveRequest() {
         guard activeRequestID != nil || isRecognizingTrigger || isExecutingCommand else { return }
+        agentRuntime.cancel()
         apiManager.cancelStreamRequest()
         activeRequestID = nil
         isRecognizingTrigger = false
         isExecutingCommand = false
+        showCommandConfirm = false
+        pendingCommand = ""
+        pendingCommandRunID = nil
+        pendingConfirmationKind = nil
         stateCoordinator.send(.resetToIdle)
         streamedResponse = "已停止当前任务。"
         revealOutputBox(autoHideAfter: 6)
@@ -261,11 +277,21 @@ final class PetViewBackend: ObservableObject {
     }
 
     func confirmAndRunCommand() {
+        if pendingConfirmationKind == .agentTool {
+            showCommandConfirm = false
+            pendingCommand = ""
+            pendingCommandRunID = nil
+            pendingConfirmationKind = nil
+            agentRuntime.approvePendingTool()
+            return
+        }
+
         let command = pendingCommand
         let runID = pendingCommandRunID ?? activeRequestID ?? UUID()
         showCommandConfirm = false
         pendingCommand = ""
         pendingCommandRunID = nil
+        pendingConfirmationKind = nil
 
         guard !command.isEmpty else {
             stateCoordinator.send(.resetToIdle)
@@ -316,9 +342,19 @@ final class PetViewBackend: ObservableObject {
     }
 
     func cancelPendingCommand() {
+        if pendingConfirmationKind == .agentTool {
+            showCommandConfirm = false
+            pendingCommand = ""
+            pendingCommandRunID = nil
+            pendingConfirmationKind = nil
+            agentRuntime.declinePendingTool()
+            return
+        }
+
         showCommandConfirm = false
         pendingCommand = ""
         pendingCommandRunID = nil
+        pendingConfirmationKind = nil
         activeRequestID = nil
         streamedResponse = "[完成] 已取消执行命令"
         revealOutputBox(autoHideAfter: 8)
@@ -340,8 +376,84 @@ final class PetViewBackend: ObservableObject {
     }
 
     private func continueChatProcessing(_ input: String, runID: UUID) {
-        messageHistory.append(["role": "user", "content": input])
-        sendRequest(runID: runID, kind: .conversation)
+        activeRequestID = runID
+        streamedResponse = ""
+        hasReceivedStreamContent = false
+        revealOutputBox(autoHideAfter: 30)
+        agentRuntime.send(input)
+    }
+
+    private func configureAgentRuntime() {
+        agentRuntime.onAssistantResponseStarted = { [weak self] in
+            guard let self, let runID = self.activeRequestID else { return }
+            self.streamedResponse = ""
+            self.hasReceivedStreamContent = false
+            self.isExecutingCommand = false
+            self.stateCoordinator.send(.conversationStarted(runID))
+        }
+        agentRuntime.onAssistantText = { [weak self] chunk in
+            guard let self, let runID = self.activeRequestID, !chunk.isEmpty else { return }
+            if !self.hasReceivedStreamContent {
+                self.hasReceivedStreamContent = true
+                self.stateCoordinator.send(.conversationStreamStarted(runID))
+            }
+            self.streamedResponse += chunk
+            if self.streamedResponse.count > 5_000 {
+                self.streamedResponse = String(self.streamedResponse.suffix(5_000))
+            }
+            self.revealOutputBox(autoHideAfter: 30)
+        }
+        agentRuntime.onToolStarted = { [weak self] name in
+            guard let self, let runID = self.activeRequestID else { return }
+            self.isExecutingCommand = true
+            self.streamedResponse = "正在调用工具：\(name)…"
+            self.revealOutputBox(autoHideAfter: 30)
+            self.stateCoordinator.send(.commandStarted(runID))
+        }
+        agentRuntime.onToolFinished = { [weak self] name, result in
+            guard let self else { return }
+            self.isExecutingCommand = false
+            if result.isError {
+                self.streamedResponse = "工具 \(name) 执行失败：\(result.content)"
+                self.revealOutputBox(autoHideAfter: 15)
+            }
+        }
+        agentRuntime.onApprovalRequested = { [weak self] approval in
+            guard let self, let runID = self.activeRequestID else { return }
+            self.isExecutingCommand = false
+            self.pendingCommand = approval.summary
+            self.pendingCommandRunID = runID
+            self.pendingConfirmationKind = .agentTool
+            self.showCommandConfirm = true
+            self.streamedResponse = "Agent 请求调用工具：\(approval.toolName)"
+            self.revealOutputBox(autoHideAfter: 30)
+            self.stateCoordinator.send(.commandConfirmationRequested(runID))
+        }
+        agentRuntime.onCompleted = { [weak self] in
+            guard let self, let runID = self.activeRequestID else { return }
+            self.isExecutingCommand = false
+            if self.streamedResponse.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                self.streamedResponse = "模型没有返回内容，需要你补充说明或重试。"
+                self.stateCoordinator.send(.conversationNeedsInput(runID))
+            } else {
+                self.stateCoordinator.send(.conversationCompleted(runID))
+            }
+            self.revealOutputBox(autoHideAfter: self.configuredBubbleDuration)
+            self.activeRequestID = nil
+        }
+        agentRuntime.onError = { [weak self] error in
+            guard let self, let runID = self.activeRequestID else { return }
+            let message = error.localizedDescription
+            self.isExecutingCommand = false
+            self.showCommandConfirm = false
+            self.pendingCommand = ""
+            self.pendingCommandRunID = nil
+            self.pendingConfirmationKind = nil
+            self.streamedResponse = "请求失败：\(message)"
+            self.revealOutputBox(autoHideAfter: 15)
+            self.stateCoordinator.send(.conversationFailed(runID, message))
+            self.activeRequestID = nil
+        }
     }
 
     private func sendRequest(runID: UUID, kind: RequestKind) {
@@ -424,6 +536,7 @@ final class PetViewBackend: ObservableObject {
         let normalized = CommandExecutionSupport.normalizeCommand(command, basedOn: lastUserInput)
         pendingCommand = normalized
         pendingCommandRunID = runID
+        pendingConfirmationKind = .legacyCommand
         if normalized != command, let range = streamedResponse.range(of: command) {
             streamedResponse.replaceSubrange(range, with: normalized)
         }

@@ -102,7 +102,7 @@ struct PetRootView: View {
 
             if usesNearbyConfirmation && petViewBackend.showCommandConfirm {
                 PetConfirmationCardView(
-                    command: petViewBackend.pendingCommand,
+                    summary: petViewBackend.pendingCommand,
                     onConfirm: petViewBackend.confirmAndRunCommand,
                     onCancel: petViewBackend.cancelPendingCommand
                 )
@@ -188,11 +188,11 @@ struct PetRootView: View {
         .onChange(of: isInputFocused) { _, focused in
             petViewBackend.handleInputFocusChanged(focused)
         }
-        .alert("执行命令确认", isPresented: systemConfirmationBinding) {
+        .alert("工具调用确认", isPresented: systemConfirmationBinding) {
             Button("执行") { petViewBackend.confirmAndRunCommand() }
             Button("取消", role: .cancel) { petViewBackend.cancelPendingCommand() }
         } message: {
-            Text("将执行命令：\(petViewBackend.pendingCommand)")
+            Text("Agent 请求执行：\(petViewBackend.pendingCommand)")
         }
     }
 

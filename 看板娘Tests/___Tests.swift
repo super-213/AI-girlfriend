@@ -110,6 +110,29 @@ struct AgentFoundationTests {
         #expect(client.requests[1].last?.content?.contains("ok") == true)
         #expect(runtime.messages.last?.content == "完成")
     }
+
+    @Test @MainActor
+    func startingNewConversationDropsPreviousTurnContext() {
+        let client = FakeModelClient()
+        client.responses = [
+            AgentModelResponse(content: "first", toolCalls: []),
+            AgentModelResponse(content: "second", toolCalls: [])
+        ]
+        let runtime = AgentRuntime(
+            apiManager: client,
+            registry: AgentToolRegistry(),
+            systemPromptProvider: { "system" }
+        )
+
+        runtime.send("one")
+        runtime.startNewConversation()
+        runtime.send("two")
+
+        #expect(client.requests.count == 2)
+        #expect(client.requests[1].count == 2)
+        #expect(client.requests[1][0].role == .system)
+        #expect(client.requests[1][1] == .user("two"))
+    }
 }
 
 struct ModelConfigurationLibraryTests {

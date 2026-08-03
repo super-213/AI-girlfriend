@@ -316,6 +316,113 @@ extension PreferencesViewBackend {
             UserDefaults.standard.set(data, forKey: AgentSkillStorageKeys.skillFiles)
         }
     }
+
+    /// 读取技能工作台中的 Markdown 内容。
+    func readMarkdownFile(at path: String) -> String? {
+        do {
+            return try String(contentsOfFile: path, encoding: .utf8)
+        } catch {
+            skillFileErrorMessage = "读取 Markdown 失败：\(error.localizedDescription)"
+            showSkillFileError = true
+            return nil
+        }
+    }
+
+    /// 保存 agent.md 的正文，并同步更新时间。
+    func saveAgentFileContent(_ content: String) -> Bool {
+        guard var agentFile else { return false }
+
+        do {
+            try content.write(
+                to: URL(fileURLWithPath: agentFile.path),
+                atomically: true,
+                encoding: .utf8
+            )
+            agentFile.updatedAt = Date()
+            self.agentFile = agentFile
+            saveAgentFile()
+            return true
+        } catch {
+            skillFileErrorMessage = "保存 agent.md 失败：\(error.localizedDescription)"
+            showSkillFileError = true
+            return false
+        }
+    }
+
+    /// 保存指定 skill.md 的正文。
+    func saveSkillFileContent(id: UUID, content: String) -> Bool {
+        guard let skill = skillFiles.first(where: { $0.id == id }) else { return false }
+
+        do {
+            try content.write(
+                to: URL(fileURLWithPath: skill.path),
+                atomically: true,
+                encoding: .utf8
+            )
+            return true
+        } catch {
+            skillFileErrorMessage = "保存 \(skill.name) 失败：\(error.localizedDescription)"
+            showSkillFileError = true
+            return false
+        }
+    }
+
+    /// 在应用的技能目录中新建一个可立即编辑的 skill.md。
+    @discardableResult
+    func createSkillFile(named requestedName: String) -> SkillFile? {
+        let trimmedName = requestedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseName = trimmedName.lowercased().hasSuffix(".md")
+            ? String(trimmedName.dropLast(3))
+            : trimmedName
+        let safeName = baseName
+            .components(separatedBy: CharacterSet(charactersIn: "/\\:"))
+            .joined(separator: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !safeName.isEmpty else {
+            skillFileErrorMessage = "请输入技能文件名称。"
+            showSkillFileError = true
+            return nil
+        }
+
+        do {
+            let directory = try agentSkillsDirectory()
+            let fileManager = FileManager.default
+            var destination = directory.appendingPathComponent("\(safeName).md")
+            var suffix = 2
+            while fileManager.fileExists(atPath: destination.path) {
+                destination = directory.appendingPathComponent("\(safeName)-\(suffix).md")
+                suffix += 1
+            }
+
+            let displayName = destination.deletingPathExtension().lastPathComponent
+            let content = """
+            ---
+            name: \(displayName)
+            description: 描述这个技能适合处理什么任务。
+            ---
+
+            # \(displayName)
+
+            在这里编写技能说明、操作步骤和必要的约束。
+            """
+            try content.write(to: destination, atomically: true, encoding: .utf8)
+
+            let skill = SkillFile(
+                id: UUID(),
+                name: destination.lastPathComponent,
+                path: destination.path,
+                addedAt: Date()
+            )
+            skillFiles.append(skill)
+            saveSkillFiles()
+            return skill
+        } catch {
+            skillFileErrorMessage = "新建 skill.md 失败：\(error.localizedDescription)"
+            showSkillFileError = true
+            return nil
+        }
+    }
     
     func importAgentFile(from url: URL) -> Bool {
         do {
@@ -417,11 +524,19 @@ extension PreferencesViewBackend {
         }
     }
     
-    func removeAgentFile() {
-        guard let agentFile = agentFile else { return }
-        try? FileManager.default.removeItem(at: URL(fileURLWithPath: agentFile.path))
-        self.agentFile = nil
-        saveAgentFile()
+    @discardableResult
+    func removeAgentFile() -> Bool {
+        guard let agentFile = agentFile else { return false }
+        do {
+            try FileManager.default.removeItem(at: URL(fileURLWithPath: agentFile.path))
+            self.agentFile = nil
+            saveAgentFile()
+            return true
+        } catch {
+            skillFileErrorMessage = "删除 agent.md 失败：\(error.localizedDescription)"
+            showSkillFileError = true
+            return false
+        }
     }
     
     func importSkillFiles(from urls: [URL]) -> Int {
@@ -454,12 +569,20 @@ extension PreferencesViewBackend {
         return imported
     }
     
-    func deleteSkillFile(at index: Int) {
-        guard index < skillFiles.count else { return }
+    @discardableResult
+    func deleteSkillFile(at index: Int) -> Bool {
+        guard skillFiles.indices.contains(index) else { return false }
         let skill = skillFiles[index]
-        try? FileManager.default.removeItem(at: URL(fileURLWithPath: skill.path))
-        skillFiles.remove(at: index)
-        saveSkillFiles()
+        do {
+            try FileManager.default.removeItem(at: URL(fileURLWithPath: skill.path))
+            skillFiles.remove(at: index)
+            saveSkillFiles()
+            return true
+        } catch {
+            skillFileErrorMessage = "删除 \(skill.name) 失败：\(error.localizedDescription)"
+            showSkillFileError = true
+            return false
+        }
     }
 }
 

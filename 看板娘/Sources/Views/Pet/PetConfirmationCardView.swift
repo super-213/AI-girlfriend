@@ -7,18 +7,18 @@ import AppKit
 import SwiftUI
 
 struct PetConfirmationCardView: View {
-    let command: String
+    let summary: String
     let onConfirm: () -> Void
     let onCancel: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
-            Label("等待执行确认", systemImage: "exclamationmark.shield.fill")
+            Label("等待工具调用确认", systemImage: "exclamationmark.shield.fill")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.orange)
 
             ScrollView(.horizontal) {
-                Text(command)
+                Text(summary)
                     .font(.system(size: 12, design: .monospaced))
                     .textSelection(.enabled)
                     .padding(9)
@@ -27,7 +27,7 @@ struct PetConfirmationCardView: View {
             .background(.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
 
             HStack {
-                Button("复制") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(command, forType: .string) }
+                Button("复制") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(summary, forType: .string) }
                     .buttonStyle(.plain)
                 Spacer()
                 Button("取消", role: .cancel, action: onCancel)

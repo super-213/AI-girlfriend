@@ -208,10 +208,16 @@ extension PreferencesView {
                 agentFile: backend.agentFile,
                 skillFiles: backend.skillFiles,
                 onImportAgent: showAgentImportDialog,
-                onGenerateAgent: { _ = backend.generateDefaultAgentFile() },
+                onGenerateAgent: {
+                    backend.generateDefaultAgentFile() ? backend.agentFile : nil
+                },
                 onRemoveAgent: backend.removeAgentFile,
                 onImportSkills: showSkillImportDialog,
-                onDeleteSkill: backend.deleteSkillFile(at:)
+                onDeleteSkill: backend.deleteSkillFile(at:),
+                onReadFile: backend.readMarkdownFile(at:),
+                onSaveAgent: backend.saveAgentFileContent(_:),
+                onSaveSkill: backend.saveSkillFileContent(id:content:),
+                onCreateSkill: backend.createSkillFile(named:)
             )
 
         case .automation:
