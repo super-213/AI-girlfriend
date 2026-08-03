@@ -30,6 +30,11 @@ struct PreferencesView: View {
     @Environment(\.presentationMode) var presentationMode
     @State private var selectedIndex: Int = 0
     @State private var editingCharacterIndex: Int?
+    @State private var modelConfigurations: [ModelConfiguration] = []
+    @State private var originalModelConfigurations: [ModelConfiguration] = []
+    @State private var selectedModelConfigurationID = ""
+    @State private var activeModelConfigurationID = ""
+    @State private var originalActiveModelConfigurationID = ""
     @FocusState private var focusedField: FocusableField?
     
     /// 可聚焦字段枚举
@@ -58,7 +63,7 @@ struct PreferencesView: View {
             .tint(DesignColors.primary)
             .accentColor(DesignColors.primary)
             .navigationSplitViewStyle(.balanced)
-            .frame(minWidth: 600, idealWidth: 650, maxWidth: 800, minHeight: 400, idealHeight: 450, maxHeight: 600)
+            .frame(minWidth: 760, idealWidth: 860, maxWidth: 1_020, minHeight: 480, idealHeight: 560, maxHeight: 720)
             .onAppear(perform: handleAppear)
             .onReceive(NotificationCenter.default.publisher(for: .openPetPreferenceSection)) { notification in
                 guard let rawValue = notification.object as? String,
@@ -177,19 +182,14 @@ extension PreferencesView {
             
         case .model:
             ModelSettingsTab(
-                provider: $provider,
-                aiModel: $aiModel,
-                apiUrl: $apiUrl,
-                apiKey: $apiKey,
+                configurations: $modelConfigurations,
+                selectedConfigurationID: $selectedModelConfigurationID,
+                activeConfigurationID: $activeModelConfigurationID,
                 focusedField: $focusedField,
-                onProviderChange: handleProviderChange,
-                onSave: saveSettings,
+                onSave: saveModelSettings,
                 onCancel: cancelChanges,
-                hasUnsavedChanges: backend.hasUnsavedChanges
+                hasUnsavedChanges: backend.hasUnsavedChanges || modelConfigurationsHaveUnsavedChanges
             )
-            .onChange(of: aiModel) { _, _ in checkChanges() }
-            .onChange(of: apiUrl) { _, _ in checkChanges() }
-            .onChange(of: apiKey) { _, _ in checkChanges() }
             
         case .layout:
             LayoutSettingsTab(
@@ -258,11 +258,16 @@ extension PreferencesView {
     }
     
     private func saveSettings() {
+        saveSettings(dismissAfterSave: true)
+    }
+
+    private func saveSettings(dismissAfterSave: Bool) {
         _ = backend.saveSettings(
             apiKey: apiKey,
             apiUrl: apiUrl,
             aiModel: aiModel,
             provider: provider,
+            dismissAfterSave: dismissAfterSave,
             onSuccess: {
                 backend.loadTemporaryValues(
                     apiKey: apiKey,
@@ -279,6 +284,30 @@ extension PreferencesView {
             }
         )
     }
+
+    private func saveModelSettings() {
+        let normalizedConfigurations = modelConfigurations.map { $0.normalized() }
+        guard let activeConfiguration = normalizedConfigurations.first(where: { $0.id == activeModelConfigurationID }) else {
+            return
+        }
+
+        let library = ModelConfigurationLibrary(
+            configurations: normalizedConfigurations,
+            activeConfigurationID: activeModelConfigurationID
+        )
+        library.save()
+
+        modelConfigurations = normalizedConfigurations
+        originalModelConfigurations = normalizedConfigurations
+        originalActiveModelConfigurationID = activeModelConfigurationID
+
+        provider = activeConfiguration.provider
+        aiModel = activeConfiguration.aiModel
+        apiUrl = activeConfiguration.apiUrl
+        apiKey = activeConfiguration.apiKey
+
+        saveSettings(dismissAfterSave: false)
+    }
     
     private func cancelChanges() {
         petHorizontalPlacement = backend.temporaryPetHorizontalPlacement
@@ -289,6 +318,20 @@ extension PreferencesView {
     private func handleAppear() {
         backend.selectedSection = AppWindowRouter.shared.pendingPreferenceSection
         petHorizontalPlacement = (PetHorizontalPlacement(rawValue: petHorizontalPlacement) ?? .defaultValue).rawValue
+
+        let legacyConfiguration = ModelConfiguration.migratedLegacy(
+            provider: provider,
+            aiModel: aiModel,
+            apiUrl: apiUrl,
+            apiKey: apiKey
+        )
+        let library = ModelConfigurationLibrary.load(legacyConfiguration: legacyConfiguration)
+        modelConfigurations = library.configurations
+        originalModelConfigurations = library.configurations
+        activeModelConfigurationID = library.activeConfigurationID
+        originalActiveModelConfigurationID = library.activeConfigurationID
+        selectedModelConfigurationID = library.activeConfigurationID
+
         backend.loadTemporaryValues(
             apiKey: apiKey,
             aiModel: aiModel,
@@ -315,15 +358,9 @@ extension PreferencesView {
         )
     }
     
-    private func handleProviderChange(_ newProvider: String) {
-        let result = backend.handleProviderChange(
-            newProvider: newProvider,
-            currentApiUrl: apiUrl,
-            currentModel: aiModel
-        )
-        apiUrl = result.apiUrl
-        aiModel = result.model
-        checkChanges()
+    private var modelConfigurationsHaveUnsavedChanges: Bool {
+        modelConfigurations != originalModelConfigurations
+            || activeModelConfigurationID != originalActiveModelConfigurationID
     }
     
     private func handleCharacterChange(_ newIndex: Int) {

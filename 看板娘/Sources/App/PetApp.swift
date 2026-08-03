@@ -100,11 +100,12 @@ final class AppWindowRouter {
 
         if preferencesWindow == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 680, height: 500),
+                contentRect: NSRect(x: 0, y: 0, width: 860, height: 560),
                 styleMask: [.titled, .closable, .miniaturizable, .resizable],
                 backing: .buffered,
                 defer: false
             )
+            window.minSize = NSSize(width: 760, height: 480)
             window.center()
             window.title = "偏好设置"
             window.isReleasedWhenClosed = false

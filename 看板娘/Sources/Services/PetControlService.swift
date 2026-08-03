@@ -496,6 +496,19 @@ final class PetControlService: PetControlling {
                 defaults.set(data, forKey: "staticMessages")
             }
 
+            if patch.apiKey != nil || patch.apiUrl != nil || patch.aiModel != nil || patch.provider != nil {
+                let legacyConfiguration = ModelConfiguration.migratedLegacy(
+                    provider: defaults.string(forKey: "provider") ?? "zhipu",
+                    aiModel: defaults.string(forKey: "aiModel") ?? "glm-4v-flash",
+                    apiUrl: defaults.string(forKey: "apiUrl") ?? "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+                    apiKey: defaults.string(forKey: "apiKey") ?? ""
+                )
+                ModelConfigurationLibrary.synchronizeActiveConfiguration(
+                    in: defaults,
+                    legacyConfiguration: legacyConfiguration
+                )
+            }
+
             NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
             let snapshot = settingsSnapshot()
             audit("updateSettings", context: patch.context, status: "accepted", message: snapshot.provider)

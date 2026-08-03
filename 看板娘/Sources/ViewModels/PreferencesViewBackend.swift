@@ -663,6 +663,7 @@ extension PreferencesViewBackend {
         apiUrl: String,
         aiModel: String,
         provider: String = "zhipu",
+        dismissAfterSave: Bool = true,
         onSuccess: @escaping () -> Void,
         onDismiss: @escaping () -> Void
     ) -> Bool {
@@ -689,6 +690,7 @@ extension PreferencesViewBackend {
             withAnimation(.easeInOut(duration: 0.3)) {
                 self.showSuccessMessage = false
             }
+            guard dismissAfterSave else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 onDismiss()
             }

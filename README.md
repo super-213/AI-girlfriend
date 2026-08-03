@@ -382,6 +382,8 @@ aiModel: "qwen-plus"
 
 `qwen` 是历史保留的 provider ID，实际按 OpenAI-compatible `/v1/chat/completions` 流式接口发送和解析。可用于 DashScope、LM Studio、vLLM、LocalAI 等兼容服务；LM Studio 常用地址为 `http://localhost:1234/v1/chat/completions`。
 
+偏好设置中可为每个服务保存独立的模型配置（名称、服务类型、模型、API 地址和 API Key），例如同时保留“通义千问云端”和“LM Studio 本地”，再将任意一项设为当前配置。旧版的单配置会在首次打开偏好设置时自动迁移。
+
 #### 3. Ollama（本地）
 ```swift
 provider: "ollama"

@@ -4,6 +4,107 @@ import SwiftUI
 import Testing
 @testable import 看板娘
 
+struct ModelConfigurationLibraryTests {
+    @Test
+    func configurationRequiresAnHTTPServiceURL() {
+        var configuration = ModelConfiguration.preset(for: .openAICompatible)
+        #expect(configuration.isValid)
+
+        configuration.apiUrl = "localhost:1234/v1/chat/completions"
+        #expect(!configuration.isValid)
+
+        configuration.apiUrl = "http://localhost:1234/v1/chat/completions"
+        #expect(configuration.isValid)
+    }
+
+    @Test
+    func legacyLMStudioConfigurationMigratesIntoNamedLibrary() {
+        let suiteName = "ModelConfigurationLibraryTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let legacy = ModelConfiguration.migratedLegacy(
+            provider: "qwen",
+            aiModel: "local/qwen3",
+            apiUrl: "http://localhost:1234/v1/chat/completions",
+            apiKey: "lm-studio"
+        )
+        let library = ModelConfigurationLibrary.load(from: defaults, legacyConfiguration: legacy)
+
+        #expect(library.configurations.count == 1)
+        #expect(library.configurations[0].name == "LM Studio 本地")
+        #expect(library.activeConfigurationID == library.configurations[0].id)
+        #expect(defaults.data(forKey: ModelConfigurationLibrary.configurationsKey) != nil)
+    }
+
+    @Test
+    func multipleCompatibleServicesRoundTripWithoutOverwritingEachOther() {
+        let suiteName = "ModelConfigurationLibraryTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let cloud = ModelConfiguration(
+            name: "通义千问云端",
+            provider: "qwen",
+            aiModel: "qwen-plus",
+            apiUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+            apiKey: "cloud-key"
+        )
+        let local = ModelConfiguration(
+            name: "LM Studio 本地",
+            provider: "qwen",
+            aiModel: "local/qwen3",
+            apiUrl: "http://localhost:1234/v1/chat/completions",
+            apiKey: "lm-studio"
+        )
+        let saved = ModelConfigurationLibrary(
+            configurations: [cloud, local],
+            activeConfigurationID: local.id
+        )
+        saved.save(to: defaults)
+
+        let loaded = ModelConfigurationLibrary.load(from: defaults, legacyConfiguration: cloud)
+        #expect(loaded == saved)
+        #expect(loaded.configurations[0].apiKey == "cloud-key")
+        #expect(loaded.configurations[1].apiKey == "lm-studio")
+    }
+
+    @Test
+    func externalSettingsPatchUpdatesOnlyTheActiveProfileDetails() {
+        let suiteName = "ModelConfigurationLibraryTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let cloud = ModelConfiguration.preset(for: .openAICompatible)
+        var local = ModelConfiguration.preset(for: .openAICompatible)
+        local.name = "LM Studio 本地"
+        local.apiUrl = "http://localhost:1234/v1/chat/completions"
+        let original = ModelConfigurationLibrary(
+            configurations: [cloud, local],
+            activeConfigurationID: local.id
+        )
+        original.save(to: defaults)
+
+        let patched = ModelConfiguration.migratedLegacy(
+            provider: "qwen",
+            aiModel: "local/new-model",
+            apiUrl: local.apiUrl,
+            apiKey: "new-key"
+        )
+        ModelConfigurationLibrary.synchronizeActiveConfiguration(
+            in: defaults,
+            legacyConfiguration: patched
+        )
+
+        let loaded = ModelConfigurationLibrary.load(from: defaults, legacyConfiguration: cloud)
+        #expect(loaded.configurations[0] == cloud)
+        #expect(loaded.configurations[1].id == local.id)
+        #expect(loaded.configurations[1].name == "LM Studio 本地")
+        #expect(loaded.configurations[1].aiModel == "local/new-model")
+        #expect(loaded.configurations[1].apiKey == "new-key")
+    }
+}
+
 struct PetHorizontalPlacementTests {
     @Test
     func centerIsTheDefaultPlacement() {
