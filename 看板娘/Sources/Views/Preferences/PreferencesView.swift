@@ -197,6 +197,7 @@ extension PreferencesView {
                 sleepMinutes: $sleepMinutes,
                 commandConfirmationStyle: $commandConfirmationStyle,
                 bubbleAutoHideDuration: $bubbleAutoHideDuration,
+                character: petViewBackend.currentCharacter,
                 onSave: saveSettings,
                 onCancel: cancelChanges,
                 hasUnsavedChanges: backend.hasUnsavedChanges
