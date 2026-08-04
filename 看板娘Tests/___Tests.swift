@@ -135,6 +135,38 @@ struct AgentFoundationTests {
     }
 }
 
+struct StreamingTextCoalescerTests {
+    @Test @MainActor
+    func flushCombinesPendingFragmentsInOrder() {
+        var updates: [String] = []
+        let coalescer = StreamingTextCoalescer(interval: .seconds(10)) {
+            updates.append($0)
+        }
+
+        coalescer.append("你")
+        coalescer.append("好")
+        #expect(updates.isEmpty)
+
+        coalescer.flush()
+        #expect(updates == ["你好"])
+    }
+
+    @Test @MainActor
+    func resetDropsFragmentsFromThePreviousRequest() {
+        var updates: [String] = []
+        let coalescer = StreamingTextCoalescer(interval: .seconds(10)) {
+            updates.append($0)
+        }
+
+        coalescer.append("旧请求")
+        coalescer.reset()
+        coalescer.append("新请求")
+        coalescer.flush()
+
+        #expect(updates == ["新请求"])
+    }
+}
+
 struct ModelConfigurationLibraryTests {
     @Test
     func configurationRequiresAnHTTPServiceURL() {

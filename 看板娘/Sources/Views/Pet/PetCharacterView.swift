@@ -117,8 +117,9 @@ private final class PetArtworkBoundsCache {
     }
 }
 
-struct PetCharacterView: View {
-    @ObservedObject var backend: PetViewBackend
+struct PetCharacterView: View, @MainActor Equatable {
+    let character: PetCharacter
+    let resolvedAsset: PetResolvedAsset?
     @ObservedObject var coordinator: PetStateCoordinator
     let horizontalPosition: Double
     let onHover: (Bool) -> Void
@@ -129,13 +130,20 @@ struct PetCharacterView: View {
     let onDragChanged: (NSPoint, NSPoint) -> Void
     let onDragEnded: () -> Void
 
+    static func == (lhs: PetCharacterView, rhs: PetCharacterView) -> Bool {
+        lhs.character == rhs.character
+            && lhs.resolvedAsset == rhs.resolvedAsset
+            && lhs.coordinator === rhs.coordinator
+            && lhs.horizontalPosition == rhs.horizontalPosition
+    }
+
     var body: some View {
         ZStack {
             media
-                .scaleEffect(backend.currentCharacter.displayOptions.scale)
+                .scaleEffect(character.displayOptions.scale)
                 .offset(
-                    x: backend.currentCharacter.displayOptions.horizontalOffset,
-                    y: backend.currentCharacter.displayOptions.verticalOffset
+                    x: character.displayOptions.horizontalOffset,
+                    y: character.displayOptions.verticalOffset
                 )
             PetTransientEffectView(
                 state: coordinator.snapshot.renderedState,
@@ -155,23 +163,23 @@ struct PetCharacterView: View {
                 onDragEnded: onDragEnded
             )
         )
-        .accessibilityLabel("\(backend.currentCharacter.name)，\(coordinator.snapshot.renderedState.displayName)")
+        .accessibilityLabel("\(character.name)，\(coordinator.snapshot.renderedState.displayName)")
         .onDisappear { SDImageCache.shared.clearMemory() }
     }
 
     private var artworkAlignmentOffset: CGFloat {
-        guard let asset = backend.currentResolvedAsset?.asset,
+        guard let asset = resolvedAsset?.asset,
               let bounds = PetArtworkBoundsCache.shared.bounds(for: asset) else { return 0 }
         return PetArtworkAlignmentGeometry.horizontalOffset(
             bounds: bounds,
-            displayScale: CGFloat(backend.currentCharacter.displayOptions.scale),
+            displayScale: CGFloat(character.displayOptions.scale),
             position: horizontalPosition
         )
     }
 
     @ViewBuilder
     private var media: some View {
-        if let asset = backend.currentResolvedAsset?.asset {
+        if let asset = resolvedAsset?.asset {
             if asset.type == .gif {
                 gifView(asset: asset)
             } else if let image = staticImage(location: asset.location) {
@@ -194,13 +202,13 @@ struct PetCharacterView: View {
                 .resizable()
                 .customLoopCount(asset.loop ? nil : 1)
                 .scaledToFit()
-                .id(backend.currentResolvedAsset?.asset.id)
+                .id(asset.id)
         } else {
             AnimatedImage(name: asset.location)
                 .resizable()
                 .customLoopCount(asset.loop ? nil : 1)
                 .scaledToFit()
-                .id(backend.currentResolvedAsset?.asset.id)
+                .id(asset.id)
         }
     }
 

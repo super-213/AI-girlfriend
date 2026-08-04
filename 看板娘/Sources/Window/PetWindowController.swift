@@ -240,6 +240,10 @@ final class PetWindowController: ObservableObject {
         guard proposedSize.width > 0, proposedSize.height > 0 else { return }
         guard !isUserResizing else { return }
         if let suppressContentResizeUntil, Date() < suppressContentResizeUntil { return }
+        guard abs(lastReportedContentSize.width - proposedSize.width) > 0.5
+                || abs(lastReportedContentSize.height - proposedSize.height) > 0.5 else {
+            return
+        }
 
         self.suppressContentResizeUntil = nil
         lastReportedContentSize = proposedSize

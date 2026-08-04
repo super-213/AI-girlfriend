@@ -11,6 +11,7 @@ import SwiftUI
 struct DialogChatView: View {
     @ObservedObject var viewModel: DialogChatViewModel
     let onClose: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isCloseButtonHovered = false
     @State private var isNewChatButtonHovered = false
     
@@ -136,10 +137,15 @@ struct DialogChatView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .onChange(of: viewModel.messages.count) { _, _ in
-                scrollToBottom(proxy)
+                scrollToBottom(proxy, animated: !viewModel.isRequesting)
             }
-            .onChange(of: viewModel.messages.last?.content ?? "") { _, _ in
-                scrollToBottom(proxy)
+            .onChange(of: viewModel.messages.last?.content.utf8.count ?? 0) { _, _ in
+                scrollToBottom(proxy, animated: false)
+            }
+            .onChange(of: viewModel.isRequesting) { _, isRequesting in
+                if !isRequesting {
+                    scrollToBottom(proxy, animated: true)
+                }
             }
         }
     }
@@ -219,9 +225,13 @@ struct DialogChatView: View {
         }
     }
 
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
         guard let lastID = viewModel.messages.last?.id else { return }
-        withAnimation(.easeOut(duration: 0.2)) {
+        if animated && !reduceMotion {
+            withAnimation(.easeOut(duration: 0.18)) {
+                proxy.scrollTo(lastID, anchor: .bottom)
+            }
+        } else {
             proxy.scrollTo(lastID, anchor: .bottom)
         }
     }

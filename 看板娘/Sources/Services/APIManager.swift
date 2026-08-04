@@ -485,10 +485,6 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         guard activeTaskIdentifier == taskIdentifier else { return }
         guard let rawText = String(data: data, encoding: .utf8) else { return }
 
-        #if DEBUG
-        print("接收到原始数据：\n\(rawText)")
-        #endif
-        
         if isAgentRequest {
             handleAgentReceivedText(rawText)
             return

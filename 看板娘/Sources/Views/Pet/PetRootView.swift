@@ -151,7 +151,8 @@ struct PetRootView: View {
             PetHorizontalPositionLayout(position: horizontalPosition) {
                 PetWindowScaledContent(scale: windowController.contentScale) {
                     PetCharacterView(
-                        backend: petViewBackend,
+                        character: petViewBackend.currentCharacter,
+                        resolvedAsset: petViewBackend.currentResolvedAsset,
                         coordinator: coordinator,
                         horizontalPosition: horizontalPosition,
                         onHover: handlePetHover,
@@ -169,6 +170,7 @@ struct PetRootView: View {
                         },
                         onDragEnded: { PetWindowController.shared.endDragging() }
                     )
+                    .equatable()
                 }
                 .scaleEffect(hasAppeared ? 1 : 0.96, anchor: .bottom)
             }

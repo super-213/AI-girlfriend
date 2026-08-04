@@ -40,6 +40,10 @@ final class DialogChatViewModel: ObservableObject {
         apiManager.systemPromptContent()
     }
     private var activeAssistantID: UUID?
+    private lazy var streamTextCoalescer = StreamingTextCoalescer { [weak self] text in
+        guard let self, let id = self.activeAssistantID else { return }
+        self.appendAssistantChunk(text, to: id)
+    }
 
     init() {
         configureAgentRuntime()
@@ -59,6 +63,7 @@ final class DialogChatViewModel: ObservableObject {
     }
 
     func startNewConversation() {
+        streamTextCoalescer.reset()
         agentRuntime.startNewConversation()
         isRequesting = false
         isExecutingTool = false
@@ -71,6 +76,7 @@ final class DialogChatViewModel: ObservableObject {
 
     func stopGenerating() {
         guard isRequesting, !isExecutingTool else { return }
+        streamTextCoalescer.flush()
         agentRuntime.cancel()
         isRequesting = false
         isExecutingTool = false
@@ -109,6 +115,7 @@ final class DialogChatViewModel: ObservableObject {
     private func configureAgentRuntime() {
         agentRuntime.onAssistantResponseStarted = { [weak self] in
             guard let self else { return }
+            self.streamTextCoalescer.flush()
             let id = UUID()
             self.activeAssistantID = id
             self.isRequesting = true
@@ -116,11 +123,11 @@ final class DialogChatViewModel: ObservableObject {
             self.messages.append(DialogMessage(id: id, role: .assistant, content: ""))
         }
         agentRuntime.onAssistantText = { [weak self] chunk in
-            guard let self, let id = self.activeAssistantID else { return }
-            self.appendAssistantChunk(chunk, to: id)
+            self?.streamTextCoalescer.append(chunk)
         }
         agentRuntime.onToolStarted = { [weak self] name in
             guard let self else { return }
+            self.streamTextCoalescer.flush()
             self.isExecutingTool = true
             self.fillEmptyAssistantMessage("正在调用工具：\(name)…")
         }
@@ -136,6 +143,7 @@ final class DialogChatViewModel: ObservableObject {
         }
         agentRuntime.onApprovalRequested = { [weak self] approval in
             guard let self else { return }
+            self.streamTextCoalescer.flush()
             self.isExecutingTool = false
             self.pendingToolSummary = approval.summary
             self.fillEmptyAssistantMessage("请求调用工具：\(approval.toolName)")
@@ -143,12 +151,14 @@ final class DialogChatViewModel: ObservableObject {
         }
         agentRuntime.onCompleted = { [weak self] in
             guard let self else { return }
+            self.streamTextCoalescer.flush()
             self.isRequesting = false
             self.isExecutingTool = false
             self.fillEmptyAssistantMessage("（模型没有返回文本）")
         }
         agentRuntime.onError = { [weak self] error in
             guard let self else { return }
+            self.streamTextCoalescer.flush()
             self.isRequesting = false
             self.isExecutingTool = false
             self.showToolConfirmation = false

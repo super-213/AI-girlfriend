@@ -81,6 +81,9 @@ final class PetViewBackend: ObservableObject {
     private var pendingCommandRunID: UUID?
     private var pendingConfirmationKind: PendingConfirmationKind?
     private var hasReceivedStreamContent = false
+    private lazy var streamTextCoalescer = StreamingTextCoalescer { [weak self] text in
+        self?.appendStreamedResponse(text)
+    }
 
     init(
         apiManager: APIManager = APIManager(),
@@ -238,6 +241,7 @@ final class PetViewBackend: ObservableObject {
 
     func cancelActiveRequest() {
         guard activeRequestID != nil || isRecognizingTrigger || isExecutingCommand else { return }
+        streamTextCoalescer.reset()
         agentRuntime.cancel()
         apiManager.cancelStreamRequest()
         activeRequestID = nil
@@ -377,6 +381,7 @@ final class PetViewBackend: ObservableObject {
 
     private func continueChatProcessing(_ input: String, runID: UUID) {
         activeRequestID = runID
+        streamTextCoalescer.reset()
         streamedResponse = ""
         hasReceivedStreamContent = false
         revealOutputBox(autoHideAfter: 30)
@@ -386,6 +391,7 @@ final class PetViewBackend: ObservableObject {
     private func configureAgentRuntime() {
         agentRuntime.onAssistantResponseStarted = { [weak self] in
             guard let self, let runID = self.activeRequestID else { return }
+            self.streamTextCoalescer.reset()
             self.streamedResponse = ""
             self.hasReceivedStreamContent = false
             self.isExecutingCommand = false
@@ -397,14 +403,11 @@ final class PetViewBackend: ObservableObject {
                 self.hasReceivedStreamContent = true
                 self.stateCoordinator.send(.conversationStreamStarted(runID))
             }
-            self.streamedResponse += chunk
-            if self.streamedResponse.count > 5_000 {
-                self.streamedResponse = String(self.streamedResponse.suffix(5_000))
-            }
-            self.revealOutputBox(autoHideAfter: 30)
+            self.streamTextCoalescer.append(chunk)
         }
         agentRuntime.onToolStarted = { [weak self] name in
             guard let self, let runID = self.activeRequestID else { return }
+            self.streamTextCoalescer.flush()
             self.isExecutingCommand = true
             self.streamedResponse = "正在调用工具：\(name)…"
             self.revealOutputBox(autoHideAfter: 30)
@@ -420,6 +423,7 @@ final class PetViewBackend: ObservableObject {
         }
         agentRuntime.onApprovalRequested = { [weak self] approval in
             guard let self, let runID = self.activeRequestID else { return }
+            self.streamTextCoalescer.flush()
             self.isExecutingCommand = false
             self.pendingCommand = approval.summary
             self.pendingCommandRunID = runID
@@ -431,6 +435,7 @@ final class PetViewBackend: ObservableObject {
         }
         agentRuntime.onCompleted = { [weak self] in
             guard let self, let runID = self.activeRequestID else { return }
+            self.streamTextCoalescer.flush()
             self.isExecutingCommand = false
             if self.streamedResponse.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 self.streamedResponse = "模型没有返回内容，需要你补充说明或重试。"
@@ -443,6 +448,7 @@ final class PetViewBackend: ObservableObject {
         }
         agentRuntime.onError = { [weak self] error in
             guard let self, let runID = self.activeRequestID else { return }
+            self.streamTextCoalescer.reset()
             let message = error.localizedDescription
             self.isExecutingCommand = false
             self.showCommandConfirm = false
@@ -458,6 +464,7 @@ final class PetViewBackend: ObservableObject {
 
     private func sendRequest(runID: UUID, kind: RequestKind) {
         activeRequestID = runID
+        streamTextCoalescer.reset()
         hasReceivedStreamContent = false
         streamedResponse = ""
         revealOutputBox(autoHideAfter: 30)
@@ -477,13 +484,11 @@ final class PetViewBackend: ObservableObject {
                     case .automation: self.stateCoordinator.send(.automationStreamStarted(runID))
                     }
                 }
-                self.streamedResponse += chunk
-                if self.streamedResponse.count > 5_000 {
-                    self.streamedResponse = String(self.streamedResponse.suffix(5_000))
-                }
+                self.streamTextCoalescer.append(chunk)
             },
             onComplete: { [weak self] in
                 guard let self, self.activeRequestID == runID else { return }
+                self.streamTextCoalescer.flush()
                 let outcome = self.handleAssistantReply(runID: runID)
                 switch outcome {
                 case .command, .needsInput:
@@ -499,6 +504,7 @@ final class PetViewBackend: ObservableObject {
             },
             onError: { [weak self] error in
                 guard let self, self.activeRequestID == runID else { return }
+                self.streamTextCoalescer.reset()
                 let message = error.localizedDescription
                 self.streamedResponse = "请求失败：\(message)"
                 self.revealOutputBox(autoHideAfter: 15)
@@ -509,6 +515,13 @@ final class PetViewBackend: ObservableObject {
                 self.activeRequestID = nil
             }
         )
+    }
+
+    private func appendStreamedResponse(_ text: String) {
+        streamedResponse += text
+        if streamedResponse.count > 5_000 {
+            streamedResponse = String(streamedResponse.suffix(5_000))
+        }
     }
 
     private enum AssistantOutcome { case normal, command, needsInput }
