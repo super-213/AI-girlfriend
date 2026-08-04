@@ -60,7 +60,7 @@ struct PetRootView: View {
     @ObservedObject private var windowController: PetWindowController
     @AppStorage("overlapRatio") private var overlapRatio: Double = 0.3
     @AppStorage("commandConfirmationStyle") private var commandConfirmationStyle = "nearPet"
-    @AppStorage(PetHorizontalPlacement.storageKey) private var storedHorizontalPlacement = PetHorizontalPlacement.defaultValue.rawValue
+    @AppStorage(PetHorizontalPosition.storageKey) private var horizontalPosition = PetHorizontalPosition.defaultValue
 
     @State private var isHoveringPet = false
     @State private var isHoveringInput = false
@@ -83,18 +83,6 @@ struct PetRootView: View {
 
     private var usesNearbyConfirmation: Bool {
         commandConfirmationStyle == "nearPet"
-    }
-
-    private var petHorizontalAlignment: Alignment {
-        switch horizontalPlacement {
-        case .left: return .leading
-        case .center: return .center
-        case .right: return .trailing
-        }
-    }
-
-    private var horizontalPlacement: PetHorizontalPlacement {
-        PetHorizontalPlacement(rawValue: storedHorizontalPlacement) ?? .defaultValue
     }
 
     private var petStackSpacing: CGFloat {
@@ -160,31 +148,32 @@ struct PetRootView: View {
             }
             .zIndex(2)
 
-            PetWindowScaledContent(scale: windowController.contentScale) {
-                PetCharacterView(
-                    backend: petViewBackend,
-                    coordinator: coordinator,
-                    horizontalPlacement: horizontalPlacement,
-                    onHover: handlePetHover,
-                    onTap: petViewBackend.handleTap,
-                    onDoubleTap: { AppWindowRouter.shared.showDialog() },
-                    onRightClick: {
-                        withAnimation(DesignAnimation.spring) { showQuickMenu.toggle() }
-                    },
-                    onDragBegan: {
-                        showQuickMenu = false
-                        PetWindowController.shared.beginDragging()
-                    },
-                    onDragChanged: { initialOrigin, delta in
-                        PetWindowController.shared.dragWindow(from: initialOrigin, screenDelta: delta)
-                    },
-                    onDragEnded: { PetWindowController.shared.endDragging() }
-                )
+            PetHorizontalPositionLayout(position: horizontalPosition) {
+                PetWindowScaledContent(scale: windowController.contentScale) {
+                    PetCharacterView(
+                        backend: petViewBackend,
+                        coordinator: coordinator,
+                        horizontalPosition: horizontalPosition,
+                        onHover: handlePetHover,
+                        onTap: petViewBackend.handleTap,
+                        onDoubleTap: { AppWindowRouter.shared.showDialog() },
+                        onRightClick: {
+                            withAnimation(DesignAnimation.spring) { showQuickMenu.toggle() }
+                        },
+                        onDragBegan: {
+                            showQuickMenu = false
+                            PetWindowController.shared.beginDragging()
+                        },
+                        onDragChanged: { initialOrigin, delta in
+                            PetWindowController.shared.dragWindow(from: initialOrigin, screenDelta: delta)
+                        },
+                        onDragEnded: { PetWindowController.shared.endDragging() }
+                    )
+                }
+                .scaleEffect(hasAppeared ? 1 : 0.96, anchor: .bottom)
             }
-            .scaleEffect(hasAppeared ? 1 : 0.96, anchor: .bottom)
-            // 面板宽度跟随窗口，角色在这段可用宽度内按设置对齐。
-            .frame(maxWidth: .infinity, alignment: petHorizontalAlignment)
-            .animation(DesignAnimation.fast, value: storedHorizontalPlacement)
+            // 面板宽度跟随窗口，角色在这段可用宽度内连续移动。
+            .frame(maxWidth: .infinity)
             .zIndex(1)
         }
         .frame(width: PetWindowSizing.panelWidth(for: windowController.contentScale))

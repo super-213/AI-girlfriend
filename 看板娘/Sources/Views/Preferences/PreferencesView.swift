@@ -22,7 +22,7 @@ struct PreferencesView: View {
     @AppStorage("apiUrl") private var apiUrl = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
     @AppStorage("provider") private var provider = "zhipu"
     @AppStorage("overlapRatio") private var overlapRatio: Double = 0.3
-    @AppStorage(PetHorizontalPlacement.storageKey) private var petHorizontalPlacement = PetHorizontalPlacement.defaultValue.rawValue
+    @AppStorage(PetHorizontalPosition.storageKey) private var petHorizontalPosition = PetHorizontalPosition.defaultValue
     @AppStorage("petSleepMinutes") private var sleepMinutes: Double = 6
     @AppStorage("commandConfirmationStyle") private var commandConfirmationStyle = "nearPet"
     @AppStorage("bubbleAutoHideDuration") private var bubbleAutoHideDuration: Double = 15
@@ -69,7 +69,7 @@ struct PreferencesView: View {
                       let section = PreferencesViewBackend.PreferenceSection(rawValue: rawValue) else { return }
                 backend.selectedSection = section
             }
-            .onChange(of: [systemPrompt, String(overlapRatio), petHorizontalPlacement]) { _, _ in
+            .onChange(of: [systemPrompt, String(overlapRatio), String(petHorizontalPosition)]) { _, _ in
                 checkChanges()
             }
             
@@ -190,7 +190,7 @@ extension PreferencesView {
         case .layout:
             LayoutSettingsTab(
                 overlapRatio: $overlapRatio,
-                petHorizontalPlacement: $petHorizontalPlacement,
+                petHorizontalPosition: $petHorizontalPosition,
                 sleepMinutes: $sleepMinutes,
                 commandConfirmationStyle: $commandConfirmationStyle,
                 bubbleAutoHideDuration: $bubbleAutoHideDuration,
@@ -293,7 +293,7 @@ extension PreferencesView {
                     apiUrl: apiUrl,
                     provider: provider,
                     overlapRatio: overlapRatio,
-                    petHorizontalPlacement: petHorizontalPlacement
+                    petHorizontalPosition: petHorizontalPosition
                 )
             },
             onDismiss: {
@@ -328,14 +328,14 @@ extension PreferencesView {
     
     private func cancelChanges() {
         overlapRatio = backend.temporaryOverlapRatio
-        petHorizontalPlacement = backend.temporaryPetHorizontalPlacement
+        petHorizontalPosition = backend.temporaryPetHorizontalPosition
         backend.cancelChanges()
         presentationMode.wrappedValue.dismiss()
     }
     
     private func handleAppear() {
         backend.selectedSection = AppWindowRouter.shared.pendingPreferenceSection
-        petHorizontalPlacement = (PetHorizontalPlacement(rawValue: petHorizontalPlacement) ?? .defaultValue).rawValue
+        petHorizontalPosition = PetHorizontalPosition.clamped(petHorizontalPosition)
 
         let legacyConfiguration = ModelConfiguration.migratedLegacy(
             provider: provider,
@@ -357,7 +357,7 @@ extension PreferencesView {
             apiUrl: apiUrl,
             provider: provider,
             overlapRatio: overlapRatio,
-            petHorizontalPlacement: petHorizontalPlacement
+            petHorizontalPosition: petHorizontalPosition
         )
         styleDraftSystemPrompt = systemPrompt
         styleDraftMessages = backend.staticMessages
@@ -371,7 +371,7 @@ extension PreferencesView {
             apiUrl: apiUrl,
             provider: provider,
             overlapRatio: overlapRatio,
-            petHorizontalPlacement: petHorizontalPlacement
+            petHorizontalPosition: petHorizontalPosition
         )
     }
     

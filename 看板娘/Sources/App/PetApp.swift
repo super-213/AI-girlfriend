@@ -14,6 +14,7 @@ struct PetApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     init() {
+        PetHorizontalPosition.migrateStorage()
         // 初始化内存优化器
         _ = MemoryOptimizer.shared
     }

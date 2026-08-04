@@ -53,13 +53,58 @@ struct OverlapSliderControl: View {
     }
 }
 
+/// 角色水平位置无级滑块控制。
+struct HorizontalPositionSliderControl: View {
+    @Binding var horizontalPosition: Double
+
+    private var percentage: Int {
+        PetHorizontalPosition.percentage(for: horizontalPosition)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DesignSpacing.sm) {
+            HStack(alignment: .firstTextBaseline, spacing: DesignSpacing.md) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("角色水平位置")
+                        .font(.system(size: 13, weight: .medium))
+                    Text("连续调整角色在对话界面下方的位置")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Text("\(percentage)%")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(.quaternary, in: Capsule())
+                    .contentTransition(.numericText())
+            }
+
+            Slider(value: $horizontalPosition, in: PetHorizontalPosition.range)
+                .accessibilityLabel("角色水平位置")
+                .accessibilityValue("距左侧 \(percentage)%")
+
+            HStack {
+                Text("左侧")
+                Spacer()
+                Text("居中")
+                Spacer()
+                Text("右侧")
+            }
+            .font(.system(size: 10))
+            .foregroundStyle(.tertiary)
+        }
+    }
+}
+
 /// 当前桌宠界面的等比、实时布局预览。
 struct OverlapPreview: View {
     let overlapRatio: Double
-    let horizontalPlacement: PetHorizontalPlacement
+    let horizontalPosition: Double
     let character: PetCharacter
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let layoutMetrics = PetLayoutMetrics.live.scaled(by: 0.95)
 
@@ -67,12 +112,8 @@ struct OverlapPreview: View {
         Int((overlapRatio * 100).rounded())
     }
 
-    private var petAlignment: Alignment {
-        switch horizontalPlacement {
-        case .left: return .leading
-        case .center: return .center
-        case .right: return .trailing
-        }
+    private var horizontalPercentage: Int {
+        PetHorizontalPosition.percentage(for: horizontalPosition)
     }
 
     private var overlapSpacing: CGFloat {
@@ -97,7 +138,7 @@ struct OverlapPreview: View {
         }
         .shadow(color: .black.opacity(0.07), radius: 16, y: 7)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("实时布局预览，角色\(horizontalPlacement.displayName)，界面重叠 \(percentage)%")
+        .accessibilityLabel("实时布局预览，角色距左侧 \(horizontalPercentage)%，界面重叠 \(percentage)%")
     }
 
     private var previewHeader: some View {
@@ -122,8 +163,9 @@ struct OverlapPreview: View {
 
             Spacer()
 
-            Label(horizontalPlacement.displayName, systemImage: horizontalPlacement.systemImage)
+            Label("水平 \(horizontalPercentage)%", systemImage: "arrow.left.and.right")
                 .lineLimit(1)
+                .monospacedDigit()
 
             Text("·")
                 .foregroundStyle(.tertiary)
@@ -168,17 +210,15 @@ struct OverlapPreview: View {
                 }
                 .zIndex(2)
 
-                characterArtwork
-                    .frame(maxWidth: .infinity, alignment: petAlignment)
-                    .zIndex(1)
+                PetHorizontalPositionLayout(position: horizontalPosition) {
+                    characterArtwork
+                }
+                .frame(maxWidth: .infinity)
+                .zIndex(1)
             }
             .frame(width: min(max(width * 0.54, 230), 320))
             .padding(.horizontal, 24)
             .padding(.bottom, 12)
-            .animation(
-                reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 1),
-                value: horizontalPlacement
-            )
         }
         .clipped()
     }

@@ -236,17 +236,41 @@ struct ModelConfigurationLibraryTests {
     }
 }
 
-struct PetHorizontalPlacementTests {
+struct PetHorizontalPositionTests {
     @Test
-    func centerIsTheDefaultPlacement() {
-        #expect(PetHorizontalPlacement.defaultValue == .center)
-        #expect(PetHorizontalPlacement.defaultValue.rawValue == "center")
+    func centerIsTheDefaultPosition() {
+        #expect(PetHorizontalPosition.defaultValue == 0.5)
     }
 
     @Test
-    func allPersistedPlacementValuesRoundTrip() {
-        for placement in PetHorizontalPlacement.allCases {
-            #expect(PetHorizontalPlacement(rawValue: placement.rawValue) == placement)
+    func positionIsClampedAndPresentedAsAPercentage() {
+        #expect(PetHorizontalPosition.clamped(-1) == 0)
+        #expect(PetHorizontalPosition.clamped(0.375) == 0.375)
+        #expect(PetHorizontalPosition.clamped(2) == 1)
+        #expect(PetHorizontalPosition.percentage(for: 0.375) == 38)
+    }
+
+    @Test
+    func contentMovesContinuouslyAcrossAvailableContainerWidth() {
+        #expect(PetHorizontalPosition.leadingOffset(containerWidth: 200, contentWidth: 40, position: 0) == 0)
+        #expect(PetHorizontalPosition.leadingOffset(containerWidth: 200, contentWidth: 40, position: 0.25) == 40)
+        #expect(PetHorizontalPosition.leadingOffset(containerWidth: 200, contentWidth: 40, position: 0.5) == 80)
+        #expect(PetHorizontalPosition.leadingOffset(containerWidth: 200, contentWidth: 40, position: 1) == 160)
+    }
+
+    @Test
+    func legacyThreeStepValuesMigrateToContinuousPositions() throws {
+        let suiteName = "PetHorizontalPositionTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        for (legacyValue, expectedValue) in [("left", 0.0), ("center", 0.5), ("right", 1.0)] {
+            defaults.removeObject(forKey: PetHorizontalPosition.storageKey)
+            defaults.set(legacyValue, forKey: PetHorizontalPosition.legacyStorageKey)
+
+            PetHorizontalPosition.migrateStorage(in: defaults)
+
+            #expect(defaults.double(forKey: PetHorizontalPosition.storageKey) == expectedValue)
         }
     }
 
@@ -261,22 +285,28 @@ struct PetHorizontalPlacementTests {
         let left = PetArtworkAlignmentGeometry.horizontalOffset(
             bounds: bounds,
             displayScale: 1,
-            placement: .left
+            position: 0
         )
         let center = PetArtworkAlignmentGeometry.horizontalOffset(
             bounds: bounds,
             displayScale: 1,
-            placement: .center
+            position: 0.5
         )
         let right = PetArtworkAlignmentGeometry.horizontalOffset(
             bounds: bounds,
             displayScale: 1,
-            placement: .right
+            position: 1
+        )
+        let quarter = PetArtworkAlignmentGeometry.horizontalOffset(
+            bounds: bounds,
+            displayScale: 1,
+            position: 0.25
         )
 
         #expect(abs(left + 94.91) < 0.02)
         #expect(abs(center + 3.67) < 0.02)
         #expect(abs(right - 87.57) < 0.02)
+        #expect(abs(quarter - (left + (right - left) * 0.25)) < 0.001)
     }
 }
 

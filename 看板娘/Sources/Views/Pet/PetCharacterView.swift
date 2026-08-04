@@ -21,7 +21,7 @@ enum PetArtworkAlignmentGeometry {
     static func horizontalOffset(
         bounds: PetArtworkBounds,
         displayScale: CGFloat,
-        placement: PetHorizontalPlacement,
+        position: Double,
         containerSize: CGFloat = containerSize
     ) -> CGFloat {
         guard bounds.sourceSize.width > 0,
@@ -41,14 +41,10 @@ enum PetArtworkAlignmentGeometry {
         let scaledVisibleMinX = centerX + (visibleMinX - centerX) * resolvedDisplayScale
         let scaledVisibleMaxX = centerX + (visibleMaxX - centerX) * resolvedDisplayScale
 
-        switch placement {
-        case .left:
-            return -scaledVisibleMinX
-        case .center:
-            return centerX - (scaledVisibleMinX + scaledVisibleMaxX) / 2
-        case .right:
-            return containerSize - scaledVisibleMaxX
-        }
+        let progress = CGFloat(PetHorizontalPosition.clamped(position))
+        let visibleWidth = scaledVisibleMaxX - scaledVisibleMinX
+        let targetMinX = (containerSize - visibleWidth) * progress
+        return targetMinX - scaledVisibleMinX
     }
 }
 
@@ -124,7 +120,7 @@ private final class PetArtworkBoundsCache {
 struct PetCharacterView: View {
     @ObservedObject var backend: PetViewBackend
     @ObservedObject var coordinator: PetStateCoordinator
-    let horizontalPlacement: PetHorizontalPlacement
+    let horizontalPosition: Double
     let onHover: (Bool) -> Void
     let onTap: () -> Void
     let onDoubleTap: () -> Void
@@ -169,7 +165,7 @@ struct PetCharacterView: View {
         return PetArtworkAlignmentGeometry.horizontalOffset(
             bounds: bounds,
             displayScale: CGFloat(backend.currentCharacter.displayOptions.scale),
-            placement: horizontalPlacement
+            position: horizontalPosition
         )
     }
 

@@ -10,7 +10,7 @@ import SwiftUI
 /// 布局设置标签页
 struct LayoutSettingsTab: View {
     @Binding var overlapRatio: Double
-    @Binding var petHorizontalPlacement: String
+    @Binding var petHorizontalPosition: Double
     @Binding var sleepMinutes: Double
     @Binding var commandConfirmationStyle: String
     @Binding var bubbleAutoHideDuration: Double
@@ -20,10 +20,6 @@ struct LayoutSettingsTab: View {
     let onCancel: () -> Void
     let hasUnsavedChanges: Bool
 
-    private var resolvedPlacement: PetHorizontalPlacement {
-        PetHorizontalPlacement(rawValue: petHorizontalPlacement) ?? .defaultValue
-    }
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DesignSpacing.xl) {
@@ -31,7 +27,7 @@ struct LayoutSettingsTab: View {
 
                 OverlapPreview(
                     overlapRatio: overlapRatio,
-                    horizontalPlacement: resolvedPlacement,
+                    horizontalPosition: petHorizontalPosition,
                     character: character
                 )
                 .frame(height: 268)
@@ -73,24 +69,7 @@ struct LayoutSettingsTab: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: DesignSpacing.sm) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("角色水平位置")
-                        .font(.system(size: 13, weight: .medium))
-                    Text("决定角色在对话界面下方的对齐方式")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-
-                Picker("角色水平位置", selection: $petHorizontalPlacement) {
-                    ForEach(PetHorizontalPlacement.allCases) { placement in
-                        Label(placement.displayName, systemImage: placement.systemImage)
-                            .tag(placement.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
+            HorizontalPositionSliderControl(horizontalPosition: $petHorizontalPosition)
         }
     }
 

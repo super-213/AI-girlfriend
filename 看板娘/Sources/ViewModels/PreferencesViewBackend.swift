@@ -634,8 +634,8 @@ extension PreferencesViewBackend {
         tempData.overlapRatio
     }
 
-    var temporaryPetHorizontalPlacement: String {
-        tempData.petHorizontalPlacement
+    var temporaryPetHorizontalPosition: Double {
+        tempData.petHorizontalPosition
     }
 
     /// 加载当前值到临时存储
@@ -646,7 +646,7 @@ extension PreferencesViewBackend {
         apiUrl: String,
         provider: String,
         overlapRatio: Double,
-        petHorizontalPlacement: String
+        petHorizontalPosition: Double
     ) {
         tempData = PreferencesData(
             apiKey: apiKey,
@@ -655,7 +655,7 @@ extension PreferencesViewBackend {
             apiUrl: apiUrl,
             provider: provider,
             overlapRatio: overlapRatio,
-            petHorizontalPlacement: petHorizontalPlacement,
+            petHorizontalPosition: petHorizontalPosition,
             staticMessages: staticMessages
         )
     }
@@ -668,7 +668,7 @@ extension PreferencesViewBackend {
         apiUrl: String,
         provider: String,
         overlapRatio: Double,
-        petHorizontalPlacement: String
+        petHorizontalPosition: Double
     ) {
         let currentData = PreferencesData(
             apiKey: apiKey,
@@ -677,7 +677,7 @@ extension PreferencesViewBackend {
             apiUrl: apiUrl,
             provider: provider,
             overlapRatio: overlapRatio,
-            petHorizontalPlacement: petHorizontalPlacement,
+            petHorizontalPosition: petHorizontalPosition,
             staticMessages: staticMessages
         )
         hasUnsavedChanges = currentData != tempData
