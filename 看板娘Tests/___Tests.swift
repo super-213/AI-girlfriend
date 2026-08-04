@@ -249,6 +249,35 @@ struct PetHorizontalPlacementTests {
             #expect(PetHorizontalPlacement(rawValue: placement.rawValue) == placement)
         }
     }
+
+    @Test
+    func alignmentUsesTheVisibleArtworkBoundsInsteadOfTheTransparentCanvas() {
+        let bounds = PetArtworkBounds(
+            sourceSize: CGSize(width: 360, height: 534),
+            visibleMinX: 94,
+            visibleMaxX: 280
+        )
+
+        let left = PetArtworkAlignmentGeometry.horizontalOffset(
+            bounds: bounds,
+            displayScale: 1,
+            placement: .left
+        )
+        let center = PetArtworkAlignmentGeometry.horizontalOffset(
+            bounds: bounds,
+            displayScale: 1,
+            placement: .center
+        )
+        let right = PetArtworkAlignmentGeometry.horizontalOffset(
+            bounds: bounds,
+            displayScale: 1,
+            placement: .right
+        )
+
+        #expect(abs(left + 94.91) < 0.02)
+        #expect(abs(center + 3.67) < 0.02)
+        #expect(abs(right - 87.57) < 0.02)
+    }
 }
 
 struct PetStateCoordinatorTests {

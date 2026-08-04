@@ -4,13 +4,127 @@
 //
 
 import AppKit
+import ImageIO
 import SDWebImage
 import SDWebImageSwiftUI
 import SwiftUI
 
+struct PetArtworkBounds: Equatable {
+    let sourceSize: CGSize
+    let visibleMinX: CGFloat
+    let visibleMaxX: CGFloat
+}
+
+enum PetArtworkAlignmentGeometry {
+    static let containerSize: CGFloat = 280
+
+    static func horizontalOffset(
+        bounds: PetArtworkBounds,
+        displayScale: CGFloat,
+        placement: PetHorizontalPlacement,
+        containerSize: CGFloat = containerSize
+    ) -> CGFloat {
+        guard bounds.sourceSize.width > 0,
+              bounds.sourceSize.height > 0,
+              containerSize > 0 else { return 0 }
+
+        let fitScale = min(
+            containerSize / bounds.sourceSize.width,
+            containerSize / bounds.sourceSize.height
+        )
+        let fittedWidth = bounds.sourceSize.width * fitScale
+        let fittedMinX = (containerSize - fittedWidth) / 2
+        let visibleMinX = fittedMinX + bounds.visibleMinX * fitScale
+        let visibleMaxX = fittedMinX + bounds.visibleMaxX * fitScale
+        let centerX = containerSize / 2
+        let resolvedDisplayScale = max(displayScale, 0)
+        let scaledVisibleMinX = centerX + (visibleMinX - centerX) * resolvedDisplayScale
+        let scaledVisibleMaxX = centerX + (visibleMaxX - centerX) * resolvedDisplayScale
+
+        switch placement {
+        case .left:
+            return -scaledVisibleMinX
+        case .center:
+            return centerX - (scaledVisibleMinX + scaledVisibleMaxX) / 2
+        case .right:
+            return containerSize - scaledVisibleMaxX
+        }
+    }
+}
+
+@MainActor
+private final class PetArtworkBoundsCache {
+    static let shared = PetArtworkBoundsCache()
+
+    private var cachedBounds: [String: PetArtworkBounds] = [:]
+    private var unresolvedKeys = Set<String>()
+
+    func bounds(for asset: PetAnimationAsset) -> PetArtworkBounds? {
+        let key = "\(asset.id)|\(asset.location)"
+        if let cached = cachedBounds[key] { return cached }
+        guard !unresolvedKeys.contains(key),
+              let url = assetURL(for: asset.location),
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
+              let bounds = opaqueHorizontalBounds(in: image) else {
+            unresolvedKeys.insert(key)
+            return nil
+        }
+
+        cachedBounds[key] = bounds
+        return bounds
+    }
+
+    private func assetURL(for location: String) -> URL? {
+        if location.hasPrefix("/") {
+            return URL(fileURLWithPath: location)
+        }
+        return Bundle.main.url(forResource: location, withExtension: nil)
+    }
+
+    private func opaqueHorizontalBounds(in image: CGImage) -> PetArtworkBounds? {
+        let width = image.width
+        let height = image.height
+        guard width > 0, height > 0 else { return nil }
+
+        let bytesPerPixel = 4
+        let bytesPerRow = width * bytesPerPixel
+        var pixels = [UInt8](repeating: 0, count: bytesPerRow * height)
+        guard let context = CGContext(
+            data: &pixels,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        var minX = width
+        var maxX = -1
+        for y in 0..<height {
+            let rowStart = y * bytesPerRow
+            for x in 0..<width where pixels[rowStart + x * bytesPerPixel + 3] > 30 {
+                minX = min(minX, x)
+                maxX = max(maxX, x)
+            }
+        }
+
+        guard maxX >= minX else { return nil }
+        return PetArtworkBounds(
+            sourceSize: CGSize(width: width, height: height),
+            visibleMinX: CGFloat(minX),
+            visibleMaxX: CGFloat(maxX + 1)
+        )
+    }
+}
+
 struct PetCharacterView: View {
     @ObservedObject var backend: PetViewBackend
     @ObservedObject var coordinator: PetStateCoordinator
+    let horizontalPlacement: PetHorizontalPlacement
     let onHover: (Bool) -> Void
     let onTap: () -> Void
     let onDoubleTap: () -> Void
@@ -32,6 +146,7 @@ struct PetCharacterView: View {
                 effect: coordinator.transientEffect
             )
         }
+        .offset(x: artworkAlignmentOffset)
         .frame(width: 280, height: 280)
         .overlay(
             AlphaHitTestOverlay(
@@ -46,6 +161,16 @@ struct PetCharacterView: View {
         )
         .accessibilityLabel("\(backend.currentCharacter.name)，\(coordinator.snapshot.renderedState.displayName)")
         .onDisappear { SDImageCache.shared.clearMemory() }
+    }
+
+    private var artworkAlignmentOffset: CGFloat {
+        guard let asset = backend.currentResolvedAsset?.asset,
+              let bounds = PetArtworkBoundsCache.shared.bounds(for: asset) else { return 0 }
+        return PetArtworkAlignmentGeometry.horizontalOffset(
+            bounds: bounds,
+            displayScale: CGFloat(backend.currentCharacter.displayOptions.scale),
+            placement: horizontalPlacement
+        )
     }
 
     @ViewBuilder

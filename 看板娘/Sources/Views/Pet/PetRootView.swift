@@ -83,11 +83,15 @@ struct PetRootView: View {
     }
 
     private var petHorizontalAlignment: Alignment {
-        switch PetHorizontalPlacement(rawValue: storedHorizontalPlacement) ?? .defaultValue {
+        switch horizontalPlacement {
         case .left: return .leading
         case .center: return .center
         case .right: return .trailing
         }
+    }
+
+    private var horizontalPlacement: PetHorizontalPlacement {
+        PetHorizontalPlacement(rawValue: storedHorizontalPlacement) ?? .defaultValue
     }
 
     var body: some View {
@@ -150,6 +154,7 @@ struct PetRootView: View {
                 PetCharacterView(
                     backend: petViewBackend,
                     coordinator: coordinator,
+                    horizontalPlacement: horizontalPlacement,
                     onHover: handlePetHover,
                     onTap: petViewBackend.handleTap,
                     onDoubleTap: { AppWindowRouter.shared.showDialog() },
