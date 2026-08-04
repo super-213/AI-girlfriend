@@ -58,6 +58,7 @@ struct PetRootView: View {
     @ObservedObject var petViewBackend: PetViewBackend
     @ObservedObject private var coordinator: PetStateCoordinator
     @ObservedObject private var windowController: PetWindowController
+    @AppStorage("overlapRatio") private var overlapRatio: Double = 0.3
     @AppStorage("commandConfirmationStyle") private var commandConfirmationStyle = "nearPet"
     @AppStorage(PetHorizontalPlacement.storageKey) private var storedHorizontalPlacement = PetHorizontalPlacement.defaultValue.rawValue
 
@@ -67,6 +68,8 @@ struct PetRootView: View {
     @State private var showQuickMenu = false
     @State private var hasAppeared = false
     @FocusState private var isInputFocused: Bool
+
+    private let layoutMetrics = PetLayoutMetrics.live
 
     init(petViewBackend: PetViewBackend) {
         self.petViewBackend = petViewBackend
@@ -94,61 +97,68 @@ struct PetRootView: View {
         PetHorizontalPlacement(rawValue: storedHorizontalPlacement) ?? .defaultValue
     }
 
+    private var petStackSpacing: CGFloat {
+        layoutMetrics.petStackSpacing(for: overlapRatio)
+    }
+
     var body: some View {
-        VStack(spacing: 8) {
-            if showQuickMenu {
-                PetQuickMenuView(
-                    backend: petViewBackend,
-                    onDismiss: { withAnimation(DesignAnimation.fast) { showQuickMenu = false } }
-                )
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-
-            if usesNearbyConfirmation && petViewBackend.showCommandConfirm {
-                PetConfirmationCardView(
-                    summary: petViewBackend.pendingCommand,
-                    onConfirm: petViewBackend.confirmAndRunCommand,
-                    onCancel: petViewBackend.cancelPendingCommand
-                )
-                .transition(.scale(scale: 0.94, anchor: .bottom).combined(with: .opacity))
-            }
-
-            if petViewBackend.showOutputBox && !petViewBackend.streamedResponse.isEmpty {
-                PetSpeechBubbleView(
-                    text: petViewBackend.streamedResponse,
-                    state: coordinator.snapshot.renderedState,
-                    canCancel: canCancelCurrentRequest,
-                    onCancel: petViewBackend.cancelActiveRequest,
-                    onDismiss: petViewBackend.dismissOutputBox,
-                    onOpenDialog: { AppWindowRouter.shared.showDialog() }
-                )
-                // 输出框高度由流式文本决定。如果再从底部移入，
-                // 它会与窗口扩展产生两套纵向运动，让下方的 GIF 看起来上下移动。
-                .transition(.opacity)
-            }
-
-            if coordinator.snapshot.renderedState != .idle {
-                PetStatusIndicatorView(state: coordinator.snapshot.renderedState)
-                    .transition(.scale(scale: 0.9).combined(with: .opacity))
-            }
-
-            // 始终保留输入框的布局槽。悬浮不改变根视图的固有尺寸；用户通过
-            // Option 调整窗口时，由窗口控制器在固有尺寸之外统一缩放整套界面。
-            ZStack(alignment: .bottom) {
-                if shouldShowInput {
-                    PetInputView(
-                        text: $petViewBackend.userInput,
-                        isFocused: $isInputFocused,
-                        isDisabled: coordinator.snapshot.activityState == .waitingForConfirmation,
-                        onHover: { isHoveringInput = $0 },
-                        onSubmit: submitInput,
-                        onCancel: cancelInput
+        VStack(spacing: petStackSpacing) {
+            VStack(spacing: 8) {
+                if showQuickMenu {
+                    PetQuickMenuView(
+                        backend: petViewBackend,
+                        onDismiss: { withAnimation(DesignAnimation.fast) { showQuickMenu = false } }
                     )
-                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
+
+                if usesNearbyConfirmation && petViewBackend.showCommandConfirm {
+                    PetConfirmationCardView(
+                        summary: petViewBackend.pendingCommand,
+                        onConfirm: petViewBackend.confirmAndRunCommand,
+                        onCancel: petViewBackend.cancelPendingCommand
+                    )
+                    .transition(.scale(scale: 0.94, anchor: .bottom).combined(with: .opacity))
+                }
+
+                if petViewBackend.showOutputBox && !petViewBackend.streamedResponse.isEmpty {
+                    PetSpeechBubbleView(
+                        text: petViewBackend.streamedResponse,
+                        state: coordinator.snapshot.renderedState,
+                        canCancel: canCancelCurrentRequest,
+                        onCancel: petViewBackend.cancelActiveRequest,
+                        onDismiss: petViewBackend.dismissOutputBox,
+                        onOpenDialog: { AppWindowRouter.shared.showDialog() }
+                    )
+                    // 输出框高度由流式文本决定。如果再从底部移入，
+                    // 它会与窗口扩展产生两套纵向运动，让下方的 GIF 看起来上下移动。
+                    .transition(.opacity)
+                }
+
+                if coordinator.snapshot.renderedState != .idle {
+                    PetStatusIndicatorView(state: coordinator.snapshot.renderedState)
+                        .transition(.scale(scale: 0.9).combined(with: .opacity))
+                }
+
+                // 始终保留输入框的布局槽。悬浮不改变根视图的固有尺寸；用户通过
+                // Option 调整窗口时，由窗口控制器在固有尺寸之外统一缩放整套界面。
+                ZStack(alignment: .bottom) {
+                    if shouldShowInput {
+                        PetInputView(
+                            text: $petViewBackend.userInput,
+                            isFocused: $isInputFocused,
+                            isDisabled: coordinator.snapshot.activityState == .waitingForConfirmation,
+                            onHover: { isHoveringInput = $0 },
+                            onSubmit: submitInput,
+                            onCancel: cancelInput
+                        )
+                        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 42, maxHeight: 42, alignment: .bottom)
+                .animation(DesignAnimation.fast, value: shouldShowInput)
             }
-            .frame(maxWidth: .infinity, minHeight: 42, maxHeight: 42, alignment: .bottom)
-            .animation(DesignAnimation.fast, value: shouldShowInput)
+            .zIndex(2)
 
             PetWindowScaledContent(scale: windowController.contentScale) {
                 PetCharacterView(
@@ -175,6 +185,7 @@ struct PetRootView: View {
             // 面板宽度跟随窗口，角色在这段可用宽度内按设置对齐。
             .frame(maxWidth: .infinity, alignment: petHorizontalAlignment)
             .animation(DesignAnimation.fast, value: storedHorizontalPlacement)
+            .zIndex(1)
         }
         .frame(width: PetWindowSizing.panelWidth(for: windowController.contentScale))
         .padding(8)

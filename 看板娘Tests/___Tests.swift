@@ -280,6 +280,32 @@ struct PetHorizontalPlacementTests {
     }
 }
 
+struct PetLayoutMetricsTests {
+    private let metrics = PetLayoutMetrics.live
+
+    @Test
+    func overlapRatioMovesCharacterContinuouslyIntoPanelArea() {
+        #expect(metrics.petStackSpacing(for: 0) == 8)
+        #expect(metrics.petStackSpacing(for: 0.2) == 0)
+        #expect(metrics.petStackSpacing(for: 0.3) == -4)
+        #expect(metrics.petStackSpacing(for: 1) == -32)
+    }
+
+    @Test
+    func overlapRatioIsClampedBeforeCalculatingSpacing() {
+        #expect(metrics.petStackSpacing(for: -1) == 8)
+        #expect(metrics.petStackSpacing(for: 2) == -32)
+    }
+
+    @Test
+    func previewScalingPreservesTheSameOverlapGeometry() {
+        let previewMetrics = metrics.scaled(by: 0.95)
+
+        #expect(abs(previewMetrics.petStackSpacing(for: 0.21) + 0.38) < 0.001)
+        #expect(abs(previewMetrics.petStackSpacing(for: 1) + 30.4) < 0.001)
+    }
+}
+
 struct PetStateCoordinatorTests {
     @Test @MainActor
     func conversationLifecycleAndStaleEvents() {

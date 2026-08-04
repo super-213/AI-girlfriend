@@ -327,6 +327,7 @@ extension PreferencesView {
     }
     
     private func cancelChanges() {
+        overlapRatio = backend.temporaryOverlapRatio
         petHorizontalPlacement = backend.temporaryPetHorizontalPlacement
         backend.cancelChanges()
         presentationMode.wrappedValue.dismiss()

@@ -47,35 +47,28 @@ struct LayoutConstants {
     static let borderWidth: CGFloat = 1
 }
 
-/// 宠物主界面与布局预览共用的几何参数
+/// 宠物主界面与布局预览共用的垂直几何参数。
+///
+/// `petStackSpacing` 是面板组（气泡、状态和输入框）与角色画布之间的
+/// SwiftUI stack spacing。它可以为负数，让角色画布进入面板区域。
 struct PetLayoutMetrics {
-    let inputToChatSpacing: CGFloat
-    let chatHeight: CGFloat
-    let noOverlapSpacing: CGFloat
-    let petFrameSize: CGFloat
+    let separatedSpacing: CGFloat
+    let overlapTravel: CGFloat
 
     static let live = PetLayoutMetrics(
-        inputToChatSpacing: 8,
-        chatHeight: 80,
-        noOverlapSpacing: 30,
-        petFrameSize: 200
+        separatedSpacing: 8,
+        overlapTravel: 40
     )
 
-    var maxOverlapTravel: CGFloat {
-        chatHeight + noOverlapSpacing
-    }
-
-    func petTopSpacing(for overlapRatio: Double) -> CGFloat {
+    func petStackSpacing(for overlapRatio: Double) -> CGFloat {
         let clampedRatio = min(max(CGFloat(overlapRatio), 0), 1)
-        return maxOverlapTravel * (1 - clampedRatio)
+        return separatedSpacing - overlapTravel * clampedRatio
     }
 
     func scaled(by scale: CGFloat) -> PetLayoutMetrics {
         PetLayoutMetrics(
-            inputToChatSpacing: inputToChatSpacing * scale,
-            chatHeight: chatHeight * scale,
-            noOverlapSpacing: noOverlapSpacing * scale,
-            petFrameSize: petFrameSize * scale
+            separatedSpacing: separatedSpacing * scale,
+            overlapTravel: overlapTravel * scale
         )
     }
 }

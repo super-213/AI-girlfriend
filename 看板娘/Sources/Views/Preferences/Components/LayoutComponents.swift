@@ -61,6 +61,8 @@ struct OverlapPreview: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private let layoutMetrics = PetLayoutMetrics.live.scaled(by: 0.95)
+
     private var percentage: Int {
         Int((overlapRatio * 100).rounded())
     }
@@ -74,7 +76,7 @@ struct OverlapPreview: View {
     }
 
     private var overlapSpacing: CGFloat {
-        7 - CGFloat(min(max(overlapRatio, 0), 1)) * 38
+        layoutMetrics.petStackSpacing(for: overlapRatio)
     }
 
     var body: some View {

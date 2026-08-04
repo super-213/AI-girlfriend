@@ -630,6 +630,10 @@ extension PreferencesViewBackend {
 
 /// 临时值管理扩展
 extension PreferencesViewBackend {
+    var temporaryOverlapRatio: Double {
+        tempData.overlapRatio
+    }
+
     var temporaryPetHorizontalPlacement: String {
         tempData.petHorizontalPlacement
     }
