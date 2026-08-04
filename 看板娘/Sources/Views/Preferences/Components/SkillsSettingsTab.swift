@@ -452,10 +452,7 @@ struct SkillsSettingsTab: View {
             }
         case .preview:
             ScrollView {
-                Text(renderedMarkdown)
-                    .font(.body)
-                    .lineSpacing(5)
-                    .textSelection(.enabled)
+                MarkdownPreview(source: draftContent)
                     .frame(maxWidth: 680, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, DesignSpacing.xxl)
@@ -554,13 +551,6 @@ struct SkillsSettingsTab: View {
 
     private var lineCount: Int {
         draftContent.isEmpty ? 0 : draftContent.components(separatedBy: .newlines).count
-    }
-
-    private var renderedMarkdown: AttributedString {
-        (try? AttributedString(
-            markdown: draftContent,
-            options: .init(interpretedSyntax: .full)
-        )) ?? AttributedString(draftContent)
     }
 
     private func document(for id: SkillDocument.ID?) -> SkillDocument? {
