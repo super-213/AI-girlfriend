@@ -27,6 +27,10 @@ enum PetWindowSizing {
     static func panelWidth(for scale: CGFloat) -> CGFloat {
         max(windowWidth(for: scale) - horizontalPadding, 0)
     }
+
+    static func clampedContentScale(_ scale: CGFloat) -> CGFloat {
+        min(max(scale, minimumContentScale), maximumContentScale)
+    }
 }
 
 /// 纯几何计算，内容变化时绝不改写宠物中心 X 与底部 Y。
@@ -262,6 +266,21 @@ final class PetWindowController: ObservableObject {
         DispatchQueue.main.async(execute: item)
     }
 
+    /// Updates the pet's visual scale. Preference previews can opt out of
+    /// persistence until the user explicitly saves their changes.
+    func setContentScale(_ scale: CGFloat, persist: Bool = true) {
+        let clampedScale = PetWindowSizing.clampedContentScale(scale)
+
+        if persist {
+            UserDefaults.standard.set(Double(clampedScale), forKey: contentScaleKey)
+        }
+
+        guard abs(contentScale - clampedScale) > 0.0001 else { return }
+        resizeWorkItem?.cancel()
+        suppressContentResizeUntil = nil
+        contentScale = clampedScale
+    }
+
     func setInteractionLocked(_ locked: Bool) {
         PetWindowHitTestCoordinator.shared.setInteractionLocked(locked)
     }
@@ -377,10 +396,7 @@ final class PetWindowController: ObservableObject {
     private func updateUserResize(to frame: NSRect) {
         guard let resizeStartFrame, resizeStartFrame.width > 0 else { return }
         let scaleRatio = frame.width / resizeStartFrame.width
-        contentScale = min(
-            max(resizeStartScale * scaleRatio, minimumContentScale),
-            maximumContentScale
-        )
+        contentScale = PetWindowSizing.clampedContentScale(resizeStartScale * scaleRatio)
     }
 
     private func endUserResize(at frame: NSRect) {

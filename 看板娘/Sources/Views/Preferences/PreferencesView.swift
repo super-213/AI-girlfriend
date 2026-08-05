@@ -26,6 +26,9 @@ struct PreferencesView: View {
     @AppStorage("petSleepMinutes") private var sleepMinutes: Double = 6
     @AppStorage("commandConfirmationStyle") private var commandConfirmationStyle = "nearPet"
     @AppStorage("bubbleAutoHideDuration") private var bubbleAutoHideDuration: Double = 15
+
+    @State private var petContentScale = Double(PetWindowController.shared.contentScale)
+    @State private var originalPetContentScale = Double(PetWindowController.shared.contentScale)
     
     @Environment(\.presentationMode) var presentationMode
     @State private var editingCharacterIndex: Int?
@@ -71,6 +74,9 @@ struct PreferencesView: View {
             }
             .onChange(of: [systemPrompt, String(overlapRatio), String(petHorizontalPosition)]) { _, _ in
                 checkChanges()
+            }
+            .onChange(of: petContentScale) { _, newValue in
+                PetWindowController.shared.setContentScale(CGFloat(newValue), persist: false)
             }
             
             if backend.showSuccessMessage {
@@ -191,13 +197,14 @@ extension PreferencesView {
             LayoutSettingsTab(
                 overlapRatio: $overlapRatio,
                 petHorizontalPosition: $petHorizontalPosition,
+                petContentScale: $petContentScale,
                 sleepMinutes: $sleepMinutes,
                 commandConfirmationStyle: $commandConfirmationStyle,
                 bubbleAutoHideDuration: $bubbleAutoHideDuration,
                 character: petViewBackend.currentCharacter,
                 onSave: saveSettings,
                 onCancel: cancelChanges,
-                hasUnsavedChanges: backend.hasUnsavedChanges
+                hasUnsavedChanges: backend.hasUnsavedChanges || petSizeHasUnsavedChanges
             )
             
         case .skills:
@@ -279,6 +286,9 @@ extension PreferencesView {
     }
 
     private func saveSettings(dismissAfterSave: Bool) {
+        PetWindowController.shared.setContentScale(CGFloat(petContentScale), persist: true)
+        originalPetContentScale = petContentScale
+
         _ = backend.saveSettings(
             apiKey: apiKey,
             apiUrl: apiUrl,
@@ -329,6 +339,8 @@ extension PreferencesView {
     private func cancelChanges() {
         overlapRatio = backend.temporaryOverlapRatio
         petHorizontalPosition = backend.temporaryPetHorizontalPosition
+        petContentScale = originalPetContentScale
+        PetWindowController.shared.setContentScale(CGFloat(originalPetContentScale), persist: false)
         backend.cancelChanges()
         presentationMode.wrappedValue.dismiss()
     }
@@ -336,6 +348,9 @@ extension PreferencesView {
     private func handleAppear() {
         backend.selectedSection = AppWindowRouter.shared.pendingPreferenceSection
         petHorizontalPosition = PetHorizontalPosition.clamped(petHorizontalPosition)
+        let currentContentScale = Double(PetWindowController.shared.contentScale)
+        petContentScale = currentContentScale
+        originalPetContentScale = currentContentScale
 
         let legacyConfiguration = ModelConfiguration.migratedLegacy(
             provider: provider,
@@ -378,6 +393,10 @@ extension PreferencesView {
     private var modelConfigurationsHaveUnsavedChanges: Bool {
         modelConfigurations != originalModelConfigurations
             || activeModelConfigurationID != originalActiveModelConfigurationID
+    }
+
+    private var petSizeHasUnsavedChanges: Bool {
+        abs(petContentScale - originalPetContentScale) > 0.001
     }
 
     private var styleHasUnsavedChanges: Bool {

@@ -730,6 +730,13 @@ struct PetWindowScaleGeometryTests {
 
 struct PetWindowRuntimeSizingTests {
     @Test
+    func contentScaleIsClampedToSupportedPreferenceRange() {
+        #expect(PetWindowSizing.clampedContentScale(0.1) == 0.5)
+        #expect(PetWindowSizing.clampedContentScale(1.25) == 1.25)
+        #expect(PetWindowSizing.clampedContentScale(3) == 2)
+    }
+
+    @Test
     func panelWidthTracksWindowScaleWithoutScalingPanelContent() {
         #expect(PetWindowSizing.panelWidth(for: 0.5) == 164)
         #expect(PetWindowSizing.panelWidth(for: 1) == 340)

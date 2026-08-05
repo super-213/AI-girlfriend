@@ -11,6 +11,7 @@ import SwiftUI
 struct LayoutSettingsTab: View {
     @Binding var overlapRatio: Double
     @Binding var petHorizontalPosition: Double
+    @Binding var petContentScale: Double
     @Binding var sleepMinutes: Double
     @Binding var commandConfirmationStyle: String
     @Binding var bubbleAutoHideDuration: Double
@@ -28,9 +29,10 @@ struct LayoutSettingsTab: View {
                 OverlapPreview(
                     overlapRatio: overlapRatio,
                     horizontalPosition: petHorizontalPosition,
+                    contentScale: petContentScale,
                     character: character
                 )
-                .frame(height: 268)
+                .frame(height: 300)
 
                 interfaceLayoutSection
                 behaviorSection
@@ -70,6 +72,10 @@ struct LayoutSettingsTab: View {
             Divider()
 
             HorizontalPositionSliderControl(horizontalPosition: $petHorizontalPosition)
+
+            Divider()
+
+            PetSizeSliderControl(contentScale: $petContentScale)
         }
     }
 

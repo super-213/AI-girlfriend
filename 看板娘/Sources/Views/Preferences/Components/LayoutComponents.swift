@@ -100,10 +100,74 @@ struct HorizontalPositionSliderControl: View {
     }
 }
 
+/// 桌宠视觉大小的无级滑块控制。
+struct PetSizeSliderControl: View {
+    @Binding var contentScale: Double
+
+    private var percentage: Int {
+        Int((contentScale * 100).rounded())
+    }
+
+    private var isDefaultSize: Bool {
+        abs(contentScale - 1) < 0.001
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DesignSpacing.sm) {
+            HStack(alignment: .firstTextBaseline, spacing: DesignSpacing.md) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("桌宠大小")
+                        .font(.system(size: 13, weight: .medium))
+                    Text("调整角色在桌面上的显示尺寸")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    contentScale = 1
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                }
+                .buttonStyle(.borderless)
+                .disabled(isDefaultSize)
+                .help("恢复默认大小")
+                .accessibilityLabel("恢复默认大小")
+
+                Text("\(percentage)%")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(.quaternary, in: Capsule())
+                    .contentTransition(.numericText())
+            }
+
+            Slider(
+                value: $contentScale,
+                in: Double(PetWindowSizing.minimumContentScale)...Double(PetWindowSizing.maximumContentScale),
+                step: 0.05
+            )
+            .accessibilityLabel("桌宠大小")
+            .accessibilityValue("\(percentage)%")
+
+            HStack {
+                Text("50% · 小")
+                Spacer()
+                Text("200% · 大")
+            }
+            .font(.system(size: 10))
+            .foregroundStyle(.tertiary)
+        }
+    }
+}
+
 /// 当前桌宠界面的等比、实时布局预览。
 struct OverlapPreview: View {
     let overlapRatio: Double
     let horizontalPosition: Double
+    let contentScale: Double
     let character: PetCharacter
 
     private let layoutMetrics = PetLayoutMetrics.live.scaled(by: 0.95)
@@ -118,6 +182,10 @@ struct OverlapPreview: View {
 
     private var overlapSpacing: CGFloat {
         layoutMetrics.petStackSpacing(for: overlapRatio)
+    }
+
+    private var sizePercentage: Int {
+        Int((contentScale * 100).rounded())
     }
 
     var body: some View {
@@ -138,7 +206,7 @@ struct OverlapPreview: View {
         }
         .shadow(color: .black.opacity(0.07), radius: 16, y: 7)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("实时布局预览，角色距左侧 \(horizontalPercentage)%，界面重叠 \(percentage)%")
+        .accessibilityLabel("实时布局预览，桌宠大小 \(sizePercentage)%，角色距左侧 \(horizontalPercentage)%，界面重叠 \(percentage)%")
     }
 
     private var previewHeader: some View {
@@ -282,14 +350,14 @@ struct OverlapPreview: View {
                     x: character.displayOptions.horizontalOffset * 0.45,
                     y: character.displayOptions.verticalOffset * 0.45
                 )
-                .frame(height: 112)
+                .frame(height: 84 * contentScale)
                 .shadow(color: .black.opacity(0.12), radius: 7, y: 5)
                 .accessibilityHidden(true)
         } else {
             Image(systemName: "pawprint.fill")
-                .font(.system(size: 60, weight: .light))
+                .font(.system(size: 48 * contentScale, weight: .light))
                 .foregroundStyle(.secondary.opacity(0.65))
-                .frame(height: 112)
+                .frame(height: 84 * contentScale)
                 .accessibilityHidden(true)
         }
     }
