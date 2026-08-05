@@ -74,7 +74,7 @@
 
 ### 5. 通用 Agent Runtime
 
-Ctrl+T 完整对话由通用 Agent Runtime 编排，当前内置工具包括：
+主窗口对话、设置页提示词自动化和 Ctrl+T 完整对话均由通用 Agent Runtime 编排，当前内置工具包括：
 
 - `get_current_datetime`：读取本机日期、时间、星期和时区
 - `list_directory` / `read_file`：目录和文本文件读取
@@ -86,9 +86,9 @@ Ctrl+T 完整对话由通用 Agent Runtime 编排，当前内置工具包括：
 - 与主窗口共用 `APIManager` 配置（同一套模型参数）
 
 ### 6. 命令执行（受控）
-- 模型回复中出现命令标记后进入等待确认状态
+- 模型通过原生 `run_command` 工具请求执行命令，不解析回复文本中的命令标记
 - 可在设置中选择宠物附近确认卡片或系统确认弹窗
-- 用户确认后本地执行，并将执行结果回注给模型
+- 用户确认后本地执行，并将结构化工具结果以 `tool message` 回注给模型
 - 内置白名单前缀：`ls`、`pwd`、`cat`、`zip`、`tar`、`cp`、`mv`、`mkdir`、`rmdir`
 - 拦截危险/交互式命令（如 `rm -rf`、`sudo` 等）
 
@@ -200,19 +200,16 @@ APIManager.buildAugmentedSystemPrompt()
 ### 3. 命令执行闭环
 
 ```
-模型返回命令标记
-    │
-    ▼
-extractCommand + normalizeCommand
+模型返回原生 run_command tool_call
     │
     ▼
 显示确认弹窗
     │
-    ├─▶ 取消 ─▶ 输出 [完成] 已取消执行命令
+    ├─▶ 取消 ─▶ 回灌失败的 tool message
     └─▶ 执行 ─▶ runShell() 获取退出码和输出
                      │
                      ▼
-                 执行结果回注消息历史
+                 结构化 tool message 回注消息历史
                      │
                      ▼
                  再次请求模型总结
@@ -248,11 +245,15 @@ PetViewBackend 监听自动化变化
     │
     ├─▶ scheduleNextAutomationAction()
     ├─▶ 到期后筛选 dueAutomations()
-    ├─▶ submitAutomationPrompt()
+    ├─▶ submitAutomation()
+    ├─▶ 提示词任务进入 AgentRuntime
+    │      ├─▶ 原生 tool_calls
+    │      ├─▶ 高风险工具等待用户确认
+    │      └─▶ 工具结果回灌后继续推理
     └─▶ markCompleted() 更新 lastRunAt / nextRunAt
 ```
 
-自动化流程和随机自动行为是两套机制：随机自动行为只播放动作与静态提示；设置页自动化会按用户配置的频率把提示词提交给模型，并在主宠物输出框展示模型响应。
+自动化流程和随机自动行为是两套机制：随机自动行为只播放动作与静态提示；设置页的提示词自动化会按用户配置的频率创建一次独立 Agent 会话，并在主宠物输出框展示模型响应。绑定触发器的自动化仍直接走确定性触发器调度。
 
 ### 6. 结构化控制流程
 
