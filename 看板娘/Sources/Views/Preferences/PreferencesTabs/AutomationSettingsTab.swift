@@ -45,13 +45,8 @@ struct AutomationSettingsTab: View {
 
     private var header: some View {
         HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: DesignSpacing.xs) {
-                Text("自动化")
-                    .font(DesignFonts.title)
-                Text("把常用提示词按设定频率自动发送给模型，并显示在宠物输出框。")
-                    .font(DesignFonts.caption)
-                    .foregroundColor(DesignColors.textSecondary)
-            }
+            Text("自动化")
+                .font(DesignFonts.title)
 
             Spacer()
 
@@ -70,11 +65,6 @@ struct AutomationSettingsTab: View {
 
             Text("暂无自动化流程")
                 .font(DesignFonts.headline)
-
-            Text("添加后可以设置提示词、频率，并用开关快速启用或停用。")
-                .font(DesignFonts.caption)
-                .foregroundColor(DesignColors.textSecondary)
-                .multilineTextAlignment(.center)
 
             Button(action: addAutomation) {
                 Label("添加自动化", systemImage: "plus.circle.fill")

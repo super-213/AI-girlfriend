@@ -90,10 +90,6 @@ struct SystemPromptEditor: View {
             }
             
             HStack {
-                Text("用于约束 AI 的身份、语气与行为。")
-                    .font(DesignFonts.caption)
-                    .foregroundStyle(.secondary)
-
                 Spacer()
 
                 Button("恢复默认", action: resetToDefault)

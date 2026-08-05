@@ -215,13 +215,8 @@ struct CharacterImportSheet: View {
                     .foregroundStyle(Color.accentColor)
                     .frame(width: 36, height: 36)
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("导入新角色")
-                        .font(.title2.weight(.semibold))
-                    Text("添加名称和基础素材；更多状态可在导入后继续配置。")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
+                Text("导入新角色")
+                    .font(.title2.weight(.semibold))
                 Spacer()
             }
             .padding(DesignSpacing.xl)

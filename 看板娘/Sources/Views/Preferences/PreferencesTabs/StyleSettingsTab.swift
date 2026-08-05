@@ -26,8 +26,7 @@ struct StyleSettingsTab: View {
                     pageHeader
 
                     settingsSection(
-                        title: "角色风格",
-                        subtitle: "定义角色如何理解自己、组织回答以及与你交流。"
+                        title: "角色风格"
                     ) {
                         SystemPromptEditor(
                             text: $systemPrompt,
@@ -39,8 +38,7 @@ struct StyleSettingsTab: View {
                     Divider()
 
                     settingsSection(
-                        title: "主动互动",
-                        subtitle: "管理角色在没有对话时可以主动说的话。"
+                        title: "随机主动消息"
                     ) {
                         StaticMessagesEditor(messages: $staticMessages)
                     }
@@ -71,29 +69,17 @@ struct StyleSettingsTab: View {
     }
 
     private var pageHeader: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text("风格")
-                .font(.title2.weight(.semibold))
-            Text("调整角色的语气、行为与主动消息。更改会在保存后生效。")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
+        Text("风格")
+            .font(.title2.weight(.semibold))
     }
 
     private func settingsSection<Content: View>(
         title: String,
-        subtitle: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: DesignSpacing.lg) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.headline)
-                Text(subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text(title)
+                .font(.headline)
 
             content()
         }

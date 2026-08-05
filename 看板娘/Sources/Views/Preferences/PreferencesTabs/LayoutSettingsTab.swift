@@ -55,13 +55,8 @@ struct LayoutSettingsTab: View {
     }
 
     private var pageHeader: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("布局")
-                .font(.system(size: 22, weight: .semibold))
-            Text("直接在预览中拖动桌宠调整位置，捏合或使用按钮改变大小。")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-        }
+        Text("布局")
+            .font(.system(size: 22, weight: .semibold))
     }
 
     private var behaviorSection: some View {
@@ -78,13 +73,8 @@ struct LayoutSettingsTab: View {
             Divider()
 
             HStack(spacing: DesignSpacing.lg) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("命令确认")
-                        .font(.system(size: 13, weight: .medium))
-                    Text("需要执行系统命令时的确认位置")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
+                Text("系统命令确认位置")
+                    .font(.system(size: 13, weight: .medium))
 
                 Spacer()
 

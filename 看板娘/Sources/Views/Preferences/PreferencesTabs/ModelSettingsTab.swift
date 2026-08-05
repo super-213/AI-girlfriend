@@ -332,6 +332,7 @@ private struct ModelConfigurationEditor: View {
     let onDelete: () -> Void
 
     @State private var revealsAPIKey = false
+    @State private var showsProviderHelp = false
 
     var body: some View {
         ScrollView {
@@ -339,14 +340,29 @@ private struct ModelConfigurationEditor: View {
                 header
 
                 VStack(alignment: .leading, spacing: DesignSpacing.lg) {
-                    labeledField("配置名称", hint: "例如：通义千问云端、LM Studio 本地") {
-                        TextField("配置名称", text: $configuration.name)
+                    labeledField("配置名称") {
+                        TextField("如：通义千问云端", text: $configuration.name)
                             .textFieldStyle(.roundedBorder)
                     }
 
                     VStack(alignment: .leading, spacing: DesignSpacing.sm) {
-                        Text("服务类型")
-                            .font(.subheadline.weight(.semibold))
+                        HStack(spacing: DesignSpacing.xs) {
+                            Text("服务类型")
+                                .font(.subheadline.weight(.semibold))
+
+                            Button {
+                                showsProviderHelp.toggle()
+                            } label: {
+                                Image(systemName: "questionmark.circle")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("查看服务连接说明")
+                            .accessibilityLabel("查看服务连接说明")
+                            .popover(isPresented: $showsProviderHelp, arrowEdge: .top) {
+                                providerHelp
+                            }
+                        }
 
                         Picker("服务类型", selection: providerBinding) {
                             ForEach(ModelProvider.allCases) { provider in
@@ -358,14 +374,14 @@ private struct ModelConfigurationEditor: View {
                         .focused(focusedField, equals: .provider)
                     }
 
-                    labeledField("模型", hint: modelHint) {
-                        TextField(modelHint, text: $configuration.aiModel)
+                    labeledField("模型") {
+                        TextField(modelPlaceholder, text: $configuration.aiModel)
                             .textFieldStyle(.roundedBorder)
                             .focused(focusedField, equals: .model)
                     }
 
-                    labeledField("API 地址", hint: urlHint) {
-                        TextField(urlHint, text: $configuration.apiUrl)
+                    labeledField("API 地址") {
+                        TextField(urlPlaceholder, text: $configuration.apiUrl)
                             .textFieldStyle(.roundedBorder)
                             .focused(focusedField, equals: .apiUrl)
                     }
@@ -377,7 +393,6 @@ private struct ModelConfigurationEditor: View {
                             .foregroundStyle(.orange)
                             .accessibilityLabel("配置不完整")
                     }
-                    connectionHint
                 }
                 .padding(DesignSpacing.xl)
                 .background(
@@ -402,23 +417,18 @@ private struct ModelConfigurationEditor: View {
                 .frame(width: 40, height: 40)
                 .background(Circle().fill(Color.accentColor.opacity(0.12)))
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: DesignSpacing.sm) {
-                    Text(configuration.name.isEmpty ? "未命名配置" : configuration.name)
-                        .font(.title3.weight(.semibold))
-                        .lineLimit(1)
-                    if isActive {
-                        Text("正在使用")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.green)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(Color.green.opacity(0.11)))
-                    }
+            HStack(spacing: DesignSpacing.sm) {
+                Text(configuration.name.isEmpty ? "未命名配置" : configuration.name)
+                    .font(.title3.weight(.semibold))
+                    .lineLimit(1)
+                if isActive {
+                    Text("正在使用")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.green.opacity(0.11)))
                 }
-                Text(configuration.providerKind.displayName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Spacer()
@@ -448,32 +458,19 @@ private struct ModelConfigurationEditor: View {
 
     private func labeledField<Content: View>(
         _ title: String,
-        hint: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: DesignSpacing.sm) {
             Text(title)
                 .font(.subheadline.weight(.semibold))
             content()
-            Text(hint)
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
     }
 
     @ViewBuilder
     private var apiKeyField: some View {
-        if configuration.providerKind == .ollama {
-            HStack(spacing: DesignSpacing.sm) {
-                Image(systemName: "key.slash")
-                    .foregroundStyle(.secondary)
-                Text("Ollama 本地连接不需要 API Key")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.vertical, DesignSpacing.sm)
-        } else {
-            labeledField("API Key", hint: "本地服务如不校验密钥，可留空或填写任意值。") {
+        if configuration.providerKind != .ollama {
+            labeledField("API Key") {
                 HStack(spacing: DesignSpacing.sm) {
                     Group {
                         if revealsAPIKey {
@@ -484,6 +481,7 @@ private struct ModelConfigurationEditor: View {
                     }
                     .textFieldStyle(.roundedBorder)
                     .focused(focusedField, equals: .apiKey)
+                    .help("本地服务不校验密钥时可以留空")
 
                     Button {
                         revealsAPIKey.toggle()
@@ -497,21 +495,16 @@ private struct ModelConfigurationEditor: View {
         }
     }
 
-    private var connectionHint: some View {
-        HStack(alignment: .top, spacing: DesignSpacing.sm) {
-            Image(systemName: "info.circle.fill")
-                .foregroundStyle(Color.accentColor)
-                .padding(.top, 1)
-            Text(connectionHintText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    private var providerHelp: some View {
+        VStack(alignment: .leading, spacing: DesignSpacing.sm) {
+            Label(configuration.providerKind.displayName, systemImage: configuration.providerKind.systemImage)
+                .font(.headline)
+            Text(providerHelpText)
+                .font(.subheadline)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(DesignSpacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.accentColor.opacity(0.07))
-        )
+        .padding(DesignSpacing.lg)
+        .frame(width: 300, alignment: .leading)
     }
 
     private var providerBinding: Binding<ModelProvider> {
@@ -523,23 +516,23 @@ private struct ModelConfigurationEditor: View {
         )
     }
 
-    private var modelHint: String {
+    private var modelPlaceholder: String {
         switch configuration.providerKind {
-        case .zhipu: return "例如：glm-4v-flash"
-        case .openAICompatible: return "例如：qwen-plus 或 LM Studio 中的模型 ID"
-        case .ollama: return "例如：qwen2.5、llama3"
+        case .zhipu: return "glm-4v-flash"
+        case .openAICompatible: return "qwen-plus 或本地模型 ID"
+        case .ollama: return "qwen2.5 或 llama3"
         }
     }
 
-    private var urlHint: String {
+    private var urlPlaceholder: String {
         switch configuration.providerKind {
         case .zhipu: return "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-        case .openAICompatible: return "例如：http://localhost:1234/v1/chat/completions"
+        case .openAICompatible: return "http://localhost:1234/v1/chat/completions"
         case .ollama: return "http://localhost:11434/api/chat"
         }
     }
 
-    private var connectionHintText: String {
+    private var providerHelpText: String {
         switch configuration.providerKind {
         case .zhipu:
             return "使用智谱 Chat Completions 流式接口。"

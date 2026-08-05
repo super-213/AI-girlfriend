@@ -83,13 +83,8 @@ struct TriggerSettingsTab: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: DesignSpacing.xl) {
-            VStack(alignment: .leading, spacing: DesignSpacing.xs) {
-                Text("触发器")
-                    .font(DesignFonts.title)
-                Text("用模型识别用户输入意图，命中后执行已配置的本地动作。")
-                    .font(DesignFonts.caption)
-                    .foregroundColor(DesignColors.textSecondary)
-            }
+            Text("触发器")
+                .font(DesignFonts.title)
 
             Spacer()
 
@@ -110,11 +105,6 @@ struct TriggerSettingsTab: View {
 
             Text("暂无触发器")
                 .font(DesignFonts.headline)
-
-            Text("添加后可以配置输入识别、MP3 文件和终止识别。")
-                .font(DesignFonts.caption)
-                .foregroundColor(DesignColors.textSecondary)
-                .multilineTextAlignment(.center)
 
             Button(action: presentNewTrigger) {
                 Label("添加触发器", systemImage: "plus.circle.fill")

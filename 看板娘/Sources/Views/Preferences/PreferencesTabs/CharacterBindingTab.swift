@@ -98,13 +98,8 @@ struct CharacterBindingTab: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: DesignSpacing.lg) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("角色绑定")
-                    .font(.title2.weight(.semibold))
-                Text("浏览角色库，并选择显示在桌面上的角色。")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+            Text("角色绑定")
+                .font(.title2.weight(.semibold))
 
             Spacer()
 
@@ -137,15 +132,6 @@ struct CharacterBindingTab: View {
                 }
                 .padding(DesignSpacing.md)
             }
-
-            Divider()
-
-            Label("共 \(allCharacters.count) 个可用角色", systemImage: "person.2")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, DesignSpacing.lg)
-                .padding(.vertical, DesignSpacing.md)
         }
         .background {
             if reduceTransparency {

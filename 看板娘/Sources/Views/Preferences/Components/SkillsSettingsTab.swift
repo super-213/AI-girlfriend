@@ -729,13 +729,8 @@ private struct NewSkillFileSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignSpacing.xl) {
-            VStack(alignment: .leading, spacing: DesignSpacing.sm) {
-                Label("新建技能文件", systemImage: "doc.badge.plus")
-                    .font(.title2.weight(.semibold))
-                Text("创建后会立即在编辑器中打开。你可以随时修改模板内容。")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+            Label("新建技能文件", systemImage: "doc.badge.plus")
+                .font(.title2.weight(.semibold))
 
             VStack(alignment: .leading, spacing: DesignSpacing.sm) {
                 Text("文件名称")

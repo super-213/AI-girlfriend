@@ -25,7 +25,7 @@ struct StaticMessagesEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: LayoutConstants.fieldSpacing) {
             HStack(alignment: .firstTextBaseline) {
-                Text("自动消息")
+                Text("消息列表")
                     .font(.subheadline.weight(.semibold))
                 
                 Spacer()
@@ -43,10 +43,6 @@ struct StaticMessagesEditor: View {
             }
             
             addMessageField
-            
-            Text("角色会从这些消息中随机选取一条；留空则使用角色默认消息。")
-                .font(DesignFonts.caption)
-                .foregroundColor(.secondary)
         }
         .onExitCommand(perform: cancelEdit)
         .onChange(of: messages) { _, _ in
