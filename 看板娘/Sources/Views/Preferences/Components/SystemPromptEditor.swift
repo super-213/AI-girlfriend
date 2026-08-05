@@ -17,7 +17,7 @@ struct SystemPromptEditor: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private let editorCornerRadius: CGFloat = 12
+    private let editorCornerRadius: CGFloat = 8
     
     var characterCount: Int {
         text.count
@@ -52,7 +52,7 @@ struct SystemPromptEditor: View {
                 }
 
                 TextEditor(text: $text)
-                    .font(DesignFonts.input)
+                    .font(.body)
                     .padding(DesignSpacing.sm)
                     .scrollContentBackground(.hidden)
                     .focused(focusedField, equals: .systemPrompt)
@@ -60,7 +60,7 @@ struct SystemPromptEditor: View {
                     .accessibilityValue(text)
             }
             .frame(maxWidth: .infinity)
-            .frame(minHeight: 180, idealHeight: 220, maxHeight: 260)
+            .frame(minHeight: 180, idealHeight: 220, maxHeight: 280)
             .background(
                 RoundedRectangle(cornerRadius: editorCornerRadius, style: .continuous)
                     .fill(Color(nsColor: .textBackgroundColor))
@@ -70,9 +70,9 @@ struct SystemPromptEditor: View {
                 RoundedRectangle(cornerRadius: editorCornerRadius, style: .continuous)
                     .stroke(
                         focusedField.wrappedValue == .systemPrompt
-                            ? Color.accentColor.opacity(0.7)
-                            : Color.primary.opacity(0.1),
-                        lineWidth: focusedField.wrappedValue == .systemPrompt ? 2 : 1
+                            ? DesignColors.borderFocus
+                            : DesignColors.border,
+                        lineWidth: focusedField.wrappedValue == .systemPrompt ? 1.5 : 1
                     )
             )
             .animation(
@@ -82,15 +82,11 @@ struct SystemPromptEditor: View {
             
             // 超长警告
             if isOverLimit {
-                HStack(spacing: 4) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                    Text("提示词较长，建议精简以获得更好的响应")
-                        .font(DesignFonts.caption)
-                }
-                .foregroundColor(DesignColors.warning)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("警告：提示词较长，建议精简")
+                Label("提示词较长，建议精简以获得更好的响应", systemImage: "exclamationmark.triangle.fill")
+                    .font(DesignFonts.caption)
+                    .foregroundColor(DesignColors.warning)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("警告：提示词较长，建议精简")
             }
             
             HStack {

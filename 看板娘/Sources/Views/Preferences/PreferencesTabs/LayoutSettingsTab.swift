@@ -134,10 +134,10 @@ private struct SettingsCard<Content: View>: View {
             content
         }
         .padding(DesignSpacing.lg)
-        .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(.primary.opacity(0.065), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(DesignColors.border, lineWidth: 1)
         }
     }
 }

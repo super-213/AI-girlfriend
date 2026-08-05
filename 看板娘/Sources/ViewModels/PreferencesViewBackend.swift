@@ -612,13 +612,13 @@ extension PreferencesViewBackend {
         
         var icon: String {
             switch self {
-            case .style: return "person.crop.circle"
-            case .model: return "network"
-            case .layout: return "rectangle.stack"
-            case .skills: return "hammer.circle"
-            case .automation: return "clock.arrow.circlepath"
-            case .triggers: return "bolt.badge.clock"
-            case .characterBinding: return "person.2.crop.square.stack"
+            case .style: return "text.quote"
+            case .model: return "cpu"
+            case .layout: return "rectangle.3.group"
+            case .skills: return "puzzlepiece"
+            case .automation: return "clock"
+            case .triggers: return "bolt"
+            case .characterBinding: return "person.crop.square"
             case .about: return "info.circle"
             }
         }

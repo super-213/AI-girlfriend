@@ -79,14 +79,7 @@ extension StaticMessagesEditor {
         .foregroundStyle(.secondary)
         .frame(height: 64)
         .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.secondary.opacity(0.06))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
     
     private var addMessageField: some View {
@@ -111,8 +104,7 @@ extension StaticMessagesEditor {
             Text("\(index + 1)")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(width: 22, height: 22)
-                .background(Circle().fill(Color.secondary.opacity(0.09)))
+                .frame(width: 18, alignment: .trailing)
             
             if editingIndex == index {
                 TextField("编辑消息", text: $editingText)
@@ -133,13 +125,17 @@ extension StaticMessagesEditor {
         .padding(.horizontal, DesignSpacing.sm)
         .padding(.vertical, 7)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(editingIndex == index ? Color.accentColor.opacity(0.08) : Color.secondary.opacity(0.05))
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(
+                    editingIndex == index
+                        ? Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
+                        : Color(nsColor: .controlBackgroundColor)
+                )
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(
-                    editingIndex == index ? Color.accentColor.opacity(0.35) : Color.primary.opacity(0.07),
+                    editingIndex == index ? DesignColors.borderFocus.opacity(0.7) : DesignColors.border,
                     lineWidth: 1
                 )
         )

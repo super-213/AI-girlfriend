@@ -149,16 +149,9 @@ struct ModelSettingsTab: View {
         } label: {
             HStack(spacing: DesignSpacing.sm) {
                 Image(systemName: configuration.providerKind.systemImage)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
-                    .frame(width: 28, height: 28)
-                    .background(
-                        Circle().fill(
-                            isSelected
-                                ? Color.accentColor.opacity(0.14)
-                                : Color.secondary.opacity(0.09)
-                        )
-                    )
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+                    .frame(width: 22)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(configuration.name.isEmpty ? "未命名配置" : configuration.name)
@@ -191,10 +184,14 @@ struct ModelSettingsTab: View {
             }
             .padding(.horizontal, DesignSpacing.sm)
             .padding(.vertical, 7)
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
+                            : Color.clear
+                    )
             )
         }
         .buttonStyle(.plain)

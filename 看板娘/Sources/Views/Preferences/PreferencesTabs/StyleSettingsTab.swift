@@ -22,11 +22,10 @@ struct StyleSettingsTab: View {
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: DesignSpacing.xl) {
+                VStack(alignment: .leading, spacing: 28) {
                     pageHeader
 
                     settingsSection(
-                        icon: "person.text.rectangle",
                         title: "角色风格",
                         subtitle: "定义角色如何理解自己、组织回答以及与你交流。"
                     ) {
@@ -37,16 +36,19 @@ struct StyleSettingsTab: View {
                         )
                     }
 
+                    Divider()
+
                     settingsSection(
-                        icon: "bubble.left.and.bubble.right",
                         title: "主动互动",
                         subtitle: "管理角色在没有对话时可以主动说的话。"
                     ) {
                         StaticMessagesEditor(messages: $staticMessages)
                     }
                 }
-                .padding(DesignSpacing.xl)
-                .frame(maxWidth: 720, alignment: .leading)
+                .padding(.horizontal, 28)
+                .padding(.top, 24)
+                .padding(.bottom, 40)
+                .frame(maxWidth: 680, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
 
@@ -69,7 +71,7 @@ struct StyleSettingsTab: View {
     }
 
     private var pageHeader: some View {
-        VStack(alignment: .leading, spacing: DesignSpacing.xs) {
+        VStack(alignment: .leading, spacing: 5) {
             Text("风格")
                 .font(.title2.weight(.semibold))
             Text("调整角色的语气、行为与主动消息。更改会在保存后生效。")
@@ -79,39 +81,21 @@ struct StyleSettingsTab: View {
     }
 
     private func settingsSection<Content: View>(
-        icon: String,
         title: String,
         subtitle: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: DesignSpacing.lg) {
-            HStack(alignment: .top, spacing: DesignSpacing.md) {
-                Image(systemName: icon)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 34, height: 34)
-                    .background(Circle().fill(Color.accentColor.opacity(0.11)))
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(.headline)
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.headline)
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             content()
         }
-        .padding(DesignSpacing.xl)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
     }
 }

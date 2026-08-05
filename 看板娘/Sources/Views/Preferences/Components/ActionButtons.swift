@@ -7,8 +7,7 @@
 
 import SwiftUI
 
-/// 增强的操作按钮组组件
-/// 提供保存和取消按钮，包含未保存更改的脉动指示器
+/// 设置页的标准操作区，使用 macOS 原生按钮层级。
 struct EnhancedActionButtons: View {
     let onSave: () -> Void
     let onCancel: () -> Void
@@ -30,34 +29,34 @@ struct EnhancedActionButtons: View {
             Button(secondaryTitle) {
                 onCancel()
             }
-            .buttonStyle(PlainButtonStyle())
-            .enhancedButtonStyle(isPrimary: false, isDisabled: isCancelDisabled)
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
             .disabled(isCancelDisabled)
             
             Button("保存") {
                 onSave()
             }
-            .buttonStyle(PlainButtonStyle())
-            .enhancedButtonStyle(isPrimary: true, isDisabled: isSaveDisabled)
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
             .disabled(isSaveDisabled)
             .keyboardShortcut("s", modifiers: .command)
         }
         .animation(
-            reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1),
+            reduceMotion ? nil : .easeOut(duration: 0.15),
             value: hasUnsavedChanges
         )
     }
     
     private var unsavedChangesIndicator: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(DesignColors.warning)
-                .frame(width: 8, height: 8)
+        HStack(spacing: 5) {
+            Image(systemName: "circle.fill")
+                .font(.system(size: 6))
+                .foregroundStyle(.secondary)
             Text("未保存的更改")
                 .font(DesignFonts.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
         }
-        .transition(.opacity.combined(with: .scale))
+        .transition(.opacity)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("有未保存的更改")
     }

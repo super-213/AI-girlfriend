@@ -63,7 +63,6 @@ struct PreferencesView: View {
                 detailContent
             }
             .tint(DesignColors.primary)
-            .accentColor(DesignColors.primary)
             .navigationSplitViewStyle(.balanced)
             .frame(minWidth: 760, idealWidth: 860, maxWidth: 1_020, minHeight: 480, idealHeight: 560, maxHeight: 720)
             .onAppear(perform: handleAppear)
@@ -127,7 +126,7 @@ extension PreferencesView {
                 Label(section.rawValue, systemImage: section.icon)
             }
         }
-        .navigationSplitViewColumnWidth(min: 150, ideal: 180, max: 200)
+        .navigationSplitViewColumnWidth(min: 160, ideal: 176, max: 192)
         .listStyle(.sidebar)
         .toolbar(removing: .sidebarToggle)
     }
