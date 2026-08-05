@@ -27,14 +27,13 @@ struct LayoutSettingsTab: View {
                 pageHeader
 
                 OverlapPreview(
-                    overlapRatio: overlapRatio,
-                    horizontalPosition: petHorizontalPosition,
-                    contentScale: petContentScale,
+                    overlapRatio: $overlapRatio,
+                    horizontalPosition: $petHorizontalPosition,
+                    contentScale: $petContentScale,
                     character: character
                 )
-                .frame(height: 300)
+                .frame(height: 380)
 
-                interfaceLayoutSection
                 behaviorSection
 
                 EnhancedActionButtons(
@@ -59,23 +58,9 @@ struct LayoutSettingsTab: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("布局")
                 .font(.system(size: 22, weight: .semibold))
-            Text("预览桌宠与对话界面的空间关系，调整会即时显示。")
+            Text("直接在预览中拖动桌宠调整位置，捏合或使用按钮改变大小。")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
-        }
-    }
-
-    private var interfaceLayoutSection: some View {
-        SettingsCard(title: "界面排列", systemImage: "rectangle.3.group") {
-            OverlapSliderControl(overlapRatio: $overlapRatio)
-
-            Divider()
-
-            HorizontalPositionSliderControl(horizontalPosition: $petHorizontalPosition)
-
-            Divider()
-
-            PetSizeSliderControl(contentScale: $petContentScale)
         }
     }
 

@@ -8,169 +8,29 @@
 import AppKit
 import SwiftUI
 
-/// 重叠比例滑块控制
-struct OverlapSliderControl: View {
-    @Binding var overlapRatio: Double
+private struct CharacterLayoutWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 84
 
-    private var percentage: Int {
-        Int((overlapRatio * 100).rounded())
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: DesignSpacing.sm) {
-            HStack(alignment: .firstTextBaseline, spacing: DesignSpacing.md) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("界面重叠")
-                        .font(.system(size: 13, weight: .medium))
-                    Text("调整角色进入对话区域的程度")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Text("\(percentage)%")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4)
-                    .background(.quaternary, in: Capsule())
-                    .contentTransition(.numericText())
-            }
-
-            Slider(value: $overlapRatio, in: 0...1, step: 0.01)
-                .accessibilityLabel("界面重叠比例")
-                .accessibilityValue("\(percentage)%")
-
-            HStack {
-                Text("分离")
-                Spacer()
-                Text("紧凑")
-            }
-            .font(.system(size: 10))
-            .foregroundStyle(.tertiary)
-        }
-    }
-}
-
-/// 角色水平位置无级滑块控制。
-struct HorizontalPositionSliderControl: View {
-    @Binding var horizontalPosition: Double
-
-    private var percentage: Int {
-        PetHorizontalPosition.percentage(for: horizontalPosition)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: DesignSpacing.sm) {
-            HStack(alignment: .firstTextBaseline, spacing: DesignSpacing.md) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("角色水平位置")
-                        .font(.system(size: 13, weight: .medium))
-                    Text("连续调整角色在对话界面下方的位置")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Text("\(percentage)%")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4)
-                    .background(.quaternary, in: Capsule())
-                    .contentTransition(.numericText())
-            }
-
-            Slider(value: $horizontalPosition, in: PetHorizontalPosition.range)
-                .accessibilityLabel("角色水平位置")
-                .accessibilityValue("距左侧 \(percentage)%")
-
-            HStack {
-                Text("左侧")
-                Spacer()
-                Text("居中")
-                Spacer()
-                Text("右侧")
-            }
-            .font(.system(size: 10))
-            .foregroundStyle(.tertiary)
-        }
-    }
-}
-
-/// 桌宠视觉大小的无级滑块控制。
-struct PetSizeSliderControl: View {
-    @Binding var contentScale: Double
-
-    private var percentage: Int {
-        Int((contentScale * 100).rounded())
-    }
-
-    private var isDefaultSize: Bool {
-        abs(contentScale - 1) < 0.001
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: DesignSpacing.sm) {
-            HStack(alignment: .firstTextBaseline, spacing: DesignSpacing.md) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("桌宠大小")
-                        .font(.system(size: 13, weight: .medium))
-                    Text("调整角色在桌面上的显示尺寸")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Button {
-                    contentScale = 1
-                } label: {
-                    Image(systemName: "arrow.counterclockwise")
-                }
-                .buttonStyle(.borderless)
-                .disabled(isDefaultSize)
-                .help("恢复默认大小")
-                .accessibilityLabel("恢复默认大小")
-
-                Text("\(percentage)%")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4)
-                    .background(.quaternary, in: Capsule())
-                    .contentTransition(.numericText())
-            }
-
-            Slider(
-                value: $contentScale,
-                in: Double(PetWindowSizing.minimumContentScale)...Double(PetWindowSizing.maximumContentScale),
-                step: 0.05
-            )
-            .accessibilityLabel("桌宠大小")
-            .accessibilityValue("\(percentage)%")
-
-            HStack {
-                Text("50% · 小")
-                Spacer()
-                Text("200% · 大")
-            }
-            .font(.system(size: 10))
-            .foregroundStyle(.tertiary)
-        }
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 
 /// 当前桌宠界面的等比、实时布局预览。
 struct OverlapPreview: View {
-    let overlapRatio: Double
-    let horizontalPosition: Double
-    let contentScale: Double
+    @Binding var overlapRatio: Double
+    @Binding var horizontalPosition: Double
+    @Binding var contentScale: Double
     let character: PetCharacter
 
     private let layoutMetrics = PetLayoutMetrics.live.scaled(by: 0.95)
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var characterLayoutWidth: CGFloat = 84
+    @State private var previousDragTranslation: CGSize?
+    @State private var magnificationOrigin: Double?
+    @State private var isCharacterHovered = false
+    @State private var isDraggingCharacter = false
 
     private var percentage: Int {
         Int((overlapRatio * 100).rounded())
@@ -188,6 +48,12 @@ struct OverlapPreview: View {
         Int((contentScale * 100).rounded())
     }
 
+    private var isDefaultLayout: Bool {
+        abs(overlapRatio - 0.3) < 0.001
+            && abs(horizontalPosition - PetHorizontalPosition.defaultValue) < 0.001
+            && abs(contentScale - 1) < 0.001
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             previewHeader
@@ -196,8 +62,13 @@ struct OverlapPreview: View {
                 .opacity(0.55)
 
             GeometryReader { proxy in
-                previewScene(width: proxy.size.width)
+                previewScene(size: proxy.size)
             }
+
+            Divider()
+                .opacity(0.45)
+
+            previewToolbar
         }
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
@@ -205,25 +76,25 @@ struct OverlapPreview: View {
                 .strokeBorder(.primary.opacity(0.08), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.07), radius: 16, y: 7)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("实时布局预览，桌宠大小 \(sizePercentage)%，角色距左侧 \(horizontalPercentage)%，界面重叠 \(percentage)%")
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("可交互布局预览")
     }
 
     private var previewHeader: some View {
         HStack(spacing: DesignSpacing.sm) {
             ZStack {
                 Circle()
-                    .fill(Color.green.opacity(0.14))
+                    .fill(Color.accentColor.opacity(0.13))
                     .frame(width: 24, height: 24)
-                Circle()
-                    .fill(Color.green)
-                    .frame(width: 7, height: 7)
+                Image(systemName: "move.3d")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
             }
 
             VStack(alignment: .leading, spacing: 1) {
-                Text("实时预览")
+                Text("直接调整")
                     .font(.system(size: 12, weight: .semibold))
-                Text(character.name)
+                Text("拖动角色改变位置")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -231,25 +102,52 @@ struct OverlapPreview: View {
 
             Spacer()
 
-            Label("水平 \(horizontalPercentage)%", systemImage: "arrow.left.and.right")
-                .lineLimit(1)
-                .monospacedDigit()
+            previewValueBadge(
+                title: "横向",
+                value: horizontalPercentage,
+                systemImage: "arrow.left.and.right"
+            )
 
-            Text("·")
-                .foregroundStyle(.tertiary)
+            previewValueBadge(
+                title: "纵向",
+                value: percentage,
+                systemImage: "arrow.up.and.down"
+            )
 
-            Text("重叠 \(percentage)%")
-                .monospacedDigit()
-                .contentTransition(.numericText())
+            Button(action: restoreDefaultLayout) {
+                Image(systemName: "arrow.counterclockwise")
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.borderless)
+            .disabled(isDefaultLayout)
+            .help("恢复默认布局")
+            .accessibilityLabel("恢复默认布局")
         }
-        .font(.system(size: 11, weight: .medium))
-        .foregroundStyle(.secondary)
         .padding(.horizontal, DesignSpacing.lg)
-        .frame(height: 46)
+        .frame(height: 52)
     }
 
-    private func previewScene(width: CGFloat) -> some View {
-        ZStack(alignment: .bottom) {
+    private func previewValueBadge(title: String, value: Int, systemImage: String) -> some View {
+        Label {
+            Text("\(title) \(value)%")
+                .monospacedDigit()
+                .contentTransition(.numericText())
+        } icon: {
+            Image(systemName: systemImage)
+        }
+        .font(.system(size: 10.5, weight: .medium))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(.quaternary, in: Capsule())
+        .lineLimit(1)
+    }
+
+    private func previewScene(size: CGSize) -> some View {
+        let stageWidth = min(max(size.width * 0.54, 230), 320)
+        let horizontalTravel = max(stageWidth - characterLayoutWidth, 1)
+
+        return ZStack(alignment: .top) {
             LinearGradient(
                 colors: [
                     Color.accentColor.opacity(0.075),
@@ -264,12 +162,13 @@ struct OverlapPreview: View {
                 .fill(Color.accentColor.opacity(0.055))
                 .frame(width: 170, height: 170)
                 .blur(radius: 1)
-                .offset(x: -width * 0.33, y: 54)
+                .offset(x: -size.width * 0.33, y: 54)
 
             Capsule()
                 .fill(.primary.opacity(0.08))
-                .frame(width: min(width * 0.68, 380), height: 2)
-                .padding(.bottom, 11)
+                .frame(width: min(size.width * 0.68, 380), height: 2)
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, 10)
 
             VStack(spacing: overlapSpacing) {
                 VStack(spacing: 6) {
@@ -279,16 +178,57 @@ struct OverlapPreview: View {
                 .zIndex(2)
 
                 PetHorizontalPositionLayout(position: horizontalPosition) {
-                    characterArtwork
+                    interactiveCharacter(horizontalTravel: horizontalTravel)
                 }
                 .frame(maxWidth: .infinity)
                 .zIndex(1)
             }
-            .frame(width: min(max(width * 0.54, 230), 320))
+            .frame(width: stageWidth)
             .padding(.horizontal, 24)
-            .padding(.bottom, 12)
+            .padding(.top, 12)
         }
+        .coordinateSpace(.named("layoutPreviewScene"))
         .clipped()
+    }
+
+    private var previewToolbar: some View {
+        HStack(spacing: DesignSpacing.md) {
+            Label("拖动定位 · 双指捏合缩放", systemImage: "hand.draw")
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Spacer(minLength: DesignSpacing.sm)
+
+            HStack(spacing: 2) {
+                Button { adjustSize(by: -0.05) } label: {
+                    Image(systemName: "minus")
+                        .frame(width: 24, height: 24)
+                }
+                .disabled(contentScale <= minimumScale + 0.001)
+                .accessibilityLabel("缩小桌宠")
+
+                Text("\(sizePercentage)%")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 44)
+                    .contentTransition(.numericText())
+                    .accessibilityLabel("桌宠大小 \(sizePercentage)%")
+
+                Button { adjustSize(by: 0.05) } label: {
+                    Image(systemName: "plus")
+                        .frame(width: 24, height: 24)
+                }
+                .disabled(contentScale >= maximumScale - 0.001)
+                .accessibilityLabel("放大桌宠")
+            }
+            .buttonStyle(.borderless)
+            .padding(.horizontal, 3)
+            .padding(.vertical, 2)
+            .background(.quaternary, in: Capsule())
+        }
+        .padding(.horizontal, DesignSpacing.lg)
+        .frame(height: 48)
     }
 
     private var speechBubble: some View {
@@ -337,6 +277,120 @@ struct OverlapPreview: View {
         .background(.regularMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(.white.opacity(0.3), lineWidth: 0.7))
         .shadow(color: .black.opacity(0.09), radius: 7, y: 3)
+    }
+
+    private var minimumScale: Double {
+        Double(PetWindowSizing.minimumContentScale)
+    }
+
+    private var maximumScale: Double {
+        Double(PetWindowSizing.maximumContentScale)
+    }
+
+    private func interactiveCharacter(horizontalTravel: CGFloat) -> some View {
+        characterArtwork
+            .contentShape(Rectangle())
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: CharacterLayoutWidthKey.self,
+                        value: proxy.size.width
+                    )
+                }
+            }
+            .onPreferenceChange(CharacterLayoutWidthKey.self) { width in
+                characterLayoutWidth = width
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(
+                        Color.accentColor.opacity(
+                            isDraggingCharacter ? 0.8 : (isCharacterHovered ? 0.35 : 0)
+                        ),
+                        style: StrokeStyle(lineWidth: 1, dash: [4, 3])
+                    )
+                    .padding(-5)
+                    .allowsHitTesting(false)
+            }
+            .scaleEffect(isDraggingCharacter ? 0.98 : 1)
+            .animation(
+                reduceMotion ? nil : .spring(response: 0.2, dampingFraction: 1),
+                value: isDraggingCharacter
+            )
+            .onHover { hovering in
+                isCharacterHovered = hovering
+            }
+            .gesture(layoutDragGesture(horizontalTravel: horizontalTravel))
+            .simultaneousGesture(magnificationGesture)
+            .help("拖动调整横向和纵向位置，双指捏合调整大小")
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("桌宠位置")
+            .accessibilityValue("横向 \(horizontalPercentage)%，纵向 \(percentage)%，大小 \(sizePercentage)%")
+            .accessibilityHint("拖动调整位置，双指捏合调整大小")
+    }
+
+    private func layoutDragGesture(horizontalTravel: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 1, coordinateSpace: .named("layoutPreviewScene"))
+            .onChanged { value in
+                let previousDragTranslation = previousDragTranslation ?? .zero
+                if self.previousDragTranslation == nil {
+                    isDraggingCharacter = true
+                }
+
+                let deltaWidth = value.translation.width - previousDragTranslation.width
+                let deltaHeight = value.translation.height - previousDragTranslation.height
+                self.previousDragTranslation = value.translation
+
+                horizontalPosition = PetHorizontalPosition.clamped(
+                    horizontalPosition + Double(deltaWidth / horizontalTravel)
+                )
+
+                overlapRatio = clampedOverlap(
+                    overlapRatio - Double(deltaHeight / layoutMetrics.overlapTravel)
+                )
+            }
+            .onEnded { _ in
+                previousDragTranslation = nil
+                isDraggingCharacter = false
+            }
+    }
+
+    private var magnificationGesture: some Gesture {
+        MagnifyGesture(minimumScaleDelta: 0.005)
+            .onChanged { value in
+                if magnificationOrigin == nil {
+                    magnificationOrigin = contentScale
+                }
+                guard let magnificationOrigin else { return }
+                contentScale = clampedScale(
+                    magnificationOrigin * Double(value.magnification)
+                )
+            }
+            .onEnded { _ in
+                magnificationOrigin = nil
+            }
+    }
+
+    private func adjustSize(by delta: Double) {
+        withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1)) {
+            contentScale = clampedScale(contentScale + delta)
+        }
+    }
+
+    private func restoreDefaultLayout() {
+        withAnimation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 1)) {
+            overlapRatio = 0.3
+            horizontalPosition = PetHorizontalPosition.defaultValue
+            contentScale = 1
+        }
+    }
+
+    private func clampedOverlap(_ value: Double) -> Double {
+        min(max(value, 0), 1)
+    }
+
+    private func clampedScale(_ value: Double) -> Double {
+        min(max(value, minimumScale), maximumScale)
     }
 
     @ViewBuilder
