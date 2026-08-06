@@ -7,12 +7,10 @@ import SwiftUI
 
 struct PetStatusIndicatorView: View {
     let state: PetActivityState
-    @State private var isPulsing = false
 
     var body: some View {
         HStack(spacing: 7) {
             Image(systemName: state.systemImage)
-                .symbolEffect(.pulse, options: .repeating, isActive: isPulsing && isAnimated)
             Text(state.displayName)
         }
         .font(.system(size: 11, weight: .semibold))
@@ -22,11 +20,6 @@ struct PetStatusIndicatorView: View {
         .background(.regularMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(tint.opacity(0.3), lineWidth: 0.8))
         .petInteractiveRegion()
-        .onAppear { isPulsing = true }
-    }
-
-    private var isAnimated: Bool {
-        [.thinking, .talking, .working, .automation, .playingAudio].contains(state)
     }
 
     private var tint: Color {
