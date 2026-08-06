@@ -62,7 +62,7 @@ final class DialogWindowController {
     }
 
     private func makeWindow() -> DialogWindow {
-        let frame = NSRect(x: 0, y: 0, width: 560, height: 440)
+        let frame = NSRect(x: 0, y: 0, width: 600, height: 480)
         let window = DialogWindow(
             contentRect: frame,
             styleMask: [.borderless, .resizable],
@@ -78,7 +78,7 @@ final class DialogWindowController {
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.isMovableByWindowBackground = true
-        window.contentMinSize = NSSize(width: 420, height: 320)
+        window.contentMinSize = NSSize(width: 440, height: 340)
 
         let rootView = DialogChatView(
             viewModel: chatViewModel,
@@ -90,12 +90,12 @@ final class DialogWindowController {
         hostingView.frame = NSRect(origin: .zero, size: frame.size)
         hostingView.autoresizingMask = [.width, .height]
         hostingView.wantsLayer = true
-        hostingView.layer?.cornerRadius = 30
+        hostingView.layer?.cornerRadius = 24
         hostingView.layer?.masksToBounds = true
 
         let resizeOverlay = OptionWindowResizeNSView(frame: hostingView.bounds)
         resizeOverlay.minimumSize = window.contentMinSize
-        resizeOverlay.cornerRadius = 30
+        resizeOverlay.cornerRadius = 24
         resizeOverlay.autoresizingMask = [.width, .height]
 
         let containerView = NSView(frame: hostingView.frame)
