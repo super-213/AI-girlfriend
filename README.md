@@ -78,7 +78,7 @@
 
 - `get_current_datetime`：读取本机日期、时间、星期和时区
 - `list_directory` / `read_file`：目录和文本文件读取
-- `run_command`：经确认后执行非交互式 Shell 命令
+- `run_command`：按用户配置的命令权限策略执行非交互式 Shell 命令
 - `list_pet_characters` / `switch_pet_character`：桌宠角色查询与切换
 - `list_automations` / `run_automation`：自动化查询与执行
 
@@ -88,9 +88,11 @@
 ### 6. 命令执行（受控）
 - 模型通过原生 `run_command` 工具请求执行命令，不解析回复文本中的命令标记
 - 可在设置中选择宠物附近确认卡片或系统确认弹窗
-- 用户确认后本地执行，并将结构化工具结果以 `tool message` 回注给模型
-- 内置白名单前缀：`ls`、`pwd`、`cat`、`zip`、`tar`、`cp`、`mv`、`mkdir`、`rmdir`
-- 拦截危险/交互式命令（如 `rm -rf`、`sudo` 等）
+- “命令权限”提供四种策略：任何命令都询问、仅风险命令询问、任何命令都允许、黑名单模式
+- 风险模式仅自动放行明确的只读命令；写文件、联网、安装、进程与系统操作会请求确认
+- 黑名单模式按不区分大小写的文本规则拒绝命令，其余命令直接执行
+- 命令结果以结构化 `tool message` 回注给模型
+- 本地自用版本不启用 App Sandbox，因此 Shell 子进程可以访问 Homebrew 等外部可执行文件
 
 ### 7. 音乐搜索
 - 检测“我想听 / 播放 / 来一首”等关键词

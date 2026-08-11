@@ -178,7 +178,7 @@ final class AgentRuntime {
             return
         }
 
-        if tool.requiresConfirmation {
+        if tool.requiresConfirmation(arguments: arguments) {
             pendingApproval = (call, tool, arguments)
             onApprovalRequested?(
                 AgentPendingApproval(

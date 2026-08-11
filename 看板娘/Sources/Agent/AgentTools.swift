@@ -11,11 +11,18 @@ import Foundation
 protocol AgentTool: AnyObject {
     var definition: AgentToolDefinition { get }
     var requiresConfirmation: Bool { get }
+    func requiresConfirmation(arguments: [String: Any]) -> Bool
     func approvalSummary(arguments: [String: Any]) -> String
     func execute(
         arguments: [String: Any],
         completion: @escaping @MainActor (AgentToolExecutionResult) -> Void
     )
+}
+
+extension AgentTool {
+    func requiresConfirmation(arguments: [String: Any]) -> Bool {
+        requiresConfirmation
+    }
 }
 
 @MainActor
@@ -166,7 +173,7 @@ private final class ReadFileTool: AgentTool {
 private final class RunCommandTool: AgentTool {
     let definition = AgentToolDefinition(
         name: "run_command",
-        description: "在本机通过 /bin/zsh -lc 执行一条非交互式命令。执行前必须由用户确认。",
+        description: "在本机通过 /bin/zsh -lc 执行一条非交互式命令。是否需要确认由用户的命令权限设置决定。",
         parameters: [
             "type": "object",
             "properties": [
@@ -176,7 +183,12 @@ private final class RunCommandTool: AgentTool {
             "additionalProperties": false
         ]
     )
-    let requiresConfirmation = true
+    let requiresConfirmation = false
+
+    func requiresConfirmation(arguments: [String: Any]) -> Bool {
+        guard let command = arguments["command"] as? String else { return false }
+        return CommandExecutionSupport.permissionDecision(for: command) == .requireApproval
+    }
 
     func approvalSummary(arguments: [String: Any]) -> String {
         arguments["command"] as? String ?? "执行 Shell 命令"
@@ -191,8 +203,8 @@ private final class RunCommandTool: AgentTool {
             completion(.failure("缺少 command"))
             return
         }
-        guard CommandExecutionSupport.isCommandSafe(command) else {
-            completion(.failure("命令被本地安全策略阻止"))
+        if case .deny(let matchedRule) = CommandExecutionSupport.permissionDecision(for: command) {
+            completion(.failure("命令被黑名单规则“\(matchedRule)”阻止"))
             return
         }
 

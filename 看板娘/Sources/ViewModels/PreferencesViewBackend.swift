@@ -601,6 +601,7 @@ extension PreferencesViewBackend {
     enum PreferenceSection: String, CaseIterable, Identifiable {
         case style = "风格"
         case model = "模型设置"
+        case commandPermissions = "命令权限"
         case layout = "布局"
         case skills = "技能"
         case automation = "自动化"
@@ -614,6 +615,7 @@ extension PreferencesViewBackend {
             switch self {
             case .style: return "text.quote"
             case .model: return "cpu"
+            case .commandPermissions: return "checkmark.shield"
             case .layout: return "rectangle.3.group"
             case .skills: return "puzzlepiece"
             case .automation: return "clock"

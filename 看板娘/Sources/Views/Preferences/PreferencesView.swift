@@ -191,6 +191,9 @@ extension PreferencesView {
                 onCancel: cancelChanges,
                 hasUnsavedChanges: backend.hasUnsavedChanges || modelConfigurationsHaveUnsavedChanges
             )
+
+        case .commandPermissions:
+            CommandPermissionsSettingsTab()
             
         case .layout:
             LayoutSettingsTab(
