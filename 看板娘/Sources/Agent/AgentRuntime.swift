@@ -82,6 +82,13 @@ final class AgentRuntime {
         messages.removeAll()
     }
 
+    /// Restores a previously selected conversation so the next request keeps
+    /// its original model and tool context.
+    func restoreConversation(_ history: [AgentMessage]) {
+        cancel()
+        messages = history
+    }
+
     func cancel() {
         runToken = UUID()
         apiManager.cancelStreamRequest()

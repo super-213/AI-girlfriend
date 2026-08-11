@@ -2,7 +2,7 @@
 //  DialogChatView.swift
 //  看板娘
 //
-//  Ctrl + T 悬浮对话窗口
+//  Ctrl + T 原生双栏对话窗口
 //
 
 import AppKit
@@ -10,35 +10,39 @@ import SwiftUI
 
 struct DialogChatView: View {
     @ObservedObject var viewModel: DialogChatViewModel
-    let onClose: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @State private var isInputFocused = false
     @State private var inputEditorHeight: CGFloat = DialogTextEditor.minimumHeight
-    @State private var isCloseButtonHovered = false
-    @State private var isNewChatButtonHovered = false
-
-    private let windowCornerRadius: CGFloat = 24
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        ZStack {
-            windowSurface
-            messageArea
-
-            VStack(spacing: 0) {
-                toolbar
-                Spacer(minLength: 0)
-                inputArea
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebar
+                .navigationSplitViewColumnWidth(min: 220, ideal: 252, max: 340)
+        } detail: {
+            chatPane
+        }
+        .navigationSplitViewStyle(.balanced)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    viewModel.startNewConversation()
+                    isInputFocused = true
+                } label: {
+                    Label("新对话", systemImage: "square.and.pencil")
+                }
+                .disabled(viewModel.isBusy)
+                .help("新对话")
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: windowCornerRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: windowCornerRadius, style: .continuous)
-                .strokeBorder(windowBorderColor, lineWidth: colorSchemeContrast == .increased ? 1.5 : 1)
-        }
         .onAppear {
+            isInputFocused = true
+        }
+        .onChange(of: viewModel.selectedConversationID) { _, _ in
+            inputEditorHeight = DialogTextEditor.minimumHeight
             isInputFocused = true
         }
         .alert("工具调用确认", isPresented: $viewModel.showToolConfirmation) {
@@ -53,105 +57,78 @@ struct DialogChatView: View {
         }
     }
 
-    @ViewBuilder
-    private var windowSurface: some View {
-        let shape = RoundedRectangle(cornerRadius: windowCornerRadius, style: .continuous)
-
-        if reduceTransparency {
-            shape.fill(Color(nsColor: .windowBackgroundColor))
-        } else {
-            shape
-                .fill(.ultraThickMaterial)
-                .overlay {
-                    shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.38))
+    private var sidebar: some View {
+        List(selection: conversationSelection) {
+            Section {
+                Button {
+                    viewModel.startNewConversation()
+                    isInputFocused = true
+                } label: {
+                    Label("新对话", systemImage: "square.and.pencil")
                 }
+                .disabled(viewModel.isBusy)
+                .help("开始新对话")
+            }
+
+            Section("对话历史") {
+                ForEach(sortedConversations) { conversation in
+                    conversationRow(conversation)
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .navigationTitle("看板娘")
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Label("Control–T 随时唤起", systemImage: "keyboard")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .frame(height: 36)
+                .background(.bar)
         }
     }
 
-    private var toolbar: some View {
-        HStack(spacing: 12) {
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(isCloseButtonHovered ? Color.white : Color.secondary)
-                    .frame(width: 30, height: 30)
-                    .background {
-                        Circle()
-                            .fill(isCloseButtonHovered ? Color(nsColor: .systemRed) : Color.primary.opacity(0.055))
-                    }
-            }
-            .buttonStyle(DialogPressButtonStyle())
-            .onHover { hovering in
-                isCloseButtonHovered = hovering
-            }
-            .animation(hoverAnimation, value: isCloseButtonHovered)
-            .help("关闭对话")
-            .accessibilityLabel("关闭对话")
+    private func conversationRow(_ conversation: DialogConversation) -> some View {
+        let isSelected = conversation.id == viewModel.selectedConversationID
 
-            HStack(spacing: 10) {
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(DesignColors.primary)
-                    .frame(width: 30, height: 30)
-                    .background(DesignColors.primary.opacity(0.12), in: Circle())
+        return HStack(spacing: 8) {
+            Image(systemName: isSelected ? "bubble.left.fill" : "bubble.left")
+                .foregroundStyle(isSelected ? DesignColors.primary : Color.secondary)
+                .frame(width: 17)
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("对话")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.primary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(conversation.title)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .lineLimit(1)
 
-                    if let statusText {
-                        HStack(spacing: 5) {
-                            Circle()
-                                .fill(statusColor)
-                                .frame(width: 5, height: 5)
-
-                            Text(statusText)
-                                .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                }
+                Text(relativeTimestamp(for: conversation.updatedAt))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
 
-            Spacer(minLength: 12)
-
-            Button {
-                viewModel.startNewConversation()
-                isInputFocused = true
-            } label: {
-                Label("新对话", systemImage: "square.and.pencil")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(isNewChatButtonHovered ? DesignColors.textPrimary : Color.secondary)
-                    .padding(.horizontal, 11)
-                    .frame(height: 30)
-                    .background {
-                        Capsule(style: .continuous)
-                            .fill(Color.primary.opacity(isNewChatButtonHovered ? 0.10 : 0.055))
-                    }
-            }
-            .buttonStyle(DialogPressButtonStyle())
-            .onHover { hovering in
-                isNewChatButtonHovered = hovering
-            }
-            .animation(hoverAnimation, value: isNewChatButtonHovered)
-            .help("开始新对话")
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 18)
-        .background(alignment: .top) {
-            LinearGradient(
-                colors: [
-                    Color(nsColor: .windowBackgroundColor).opacity(reduceTransparency ? 1 : 0.88),
-                    Color(nsColor: .windowBackgroundColor).opacity(reduceTransparency ? 1 : 0)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .allowsHitTesting(false)
+        .tag(conversation.id)
+        .disabled(viewModel.isBusy && !isSelected)
+        .contextMenu {
+            Button("删除对话", systemImage: "trash", role: .destructive) {
+                viewModel.deleteConversation(conversation.id)
+            }
+            .disabled(viewModel.isBusy)
         }
+        .accessibilityLabel("对话：\(conversation.title)")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var chatPane: some View {
+        VStack(spacing: 0) {
+            messageArea
+            inputArea
+        }
+        .navigationTitle(viewModel.selectedConversationTitle)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var messageArea: some View {
@@ -161,28 +138,28 @@ struct DialogChatView: View {
                     if viewModel.messages.isEmpty {
                         emptyState
                             .frame(maxWidth: .infinity)
-                            .frame(minHeight: max(geometry.size.height - 176, 210))
+                            .frame(minHeight: max(geometry.size.height - 28, 260))
                             .padding(.horizontal, 28)
-                            .padding(.top, 70)
-                            .padding(.bottom, 106 + inputEditorHeight - DialogTextEditor.minimumHeight)
                     } else {
-                        LazyVStack(spacing: 18) {
+                        LazyVStack(spacing: 19) {
                             ForEach(viewModel.messages) { message in
                                 messageRow(for: message)
                                     .id(message.id)
                                     .transition(
                                         reduceMotion
-                                        ? .opacity
-                                        : .asymmetric(
-                                            insertion: .opacity.combined(with: .offset(y: 8)),
-                                            removal: .opacity
-                                        )
+                                            ? .opacity
+                                            : .asymmetric(
+                                                insertion: .opacity.combined(with: .offset(y: 7)),
+                                                removal: .opacity
+                                            )
                                     )
                             }
                         }
-                        .padding(.horizontal, 20)
-                        .padding(.top, 82)
-                        .padding(.bottom, 118 + inputEditorHeight - DialogTextEditor.minimumHeight)
+                        .frame(maxWidth: 760)
+                        .padding(.horizontal, 26)
+                        .padding(.top, 28)
+                        .padding(.bottom, 24)
+                        .frame(maxWidth: .infinity)
                     }
                 }
                 .scrollIndicators(.automatic)
@@ -205,24 +182,24 @@ struct DialogChatView: View {
     private var emptyState: some View {
         VStack(spacing: 0) {
             ZStack {
-                Circle()
-                    .fill(DesignColors.primary.opacity(0.10))
-                    .frame(width: 62, height: 62)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(DesignColors.primary.opacity(0.09))
+                    .frame(width: 64, height: 64)
 
-                Circle()
-                    .strokeBorder(DesignColors.primary.opacity(0.16), lineWidth: 1)
-                    .frame(width: 62, height: 62)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(DesignColors.primary.opacity(0.14), lineWidth: 1)
+                    .frame(width: 64, height: 64)
 
                 Image(systemName: "sparkles")
                     .font(.system(size: 23, weight: .medium))
                     .foregroundStyle(DesignColors.primary)
                     .symbolRenderingMode(.hierarchical)
             }
-            .padding(.bottom, 18)
+            .padding(.bottom, 20)
 
-            Text("想聊点什么？")
-                .font(.system(size: 22, weight: .semibold))
-                .tracking(-0.35)
+            Text("要和看板娘聊点什么？")
+                .font(.system(size: 24, weight: .semibold))
+                .tracking(-0.45)
                 .foregroundStyle(.primary)
 
             Text("问问题、整理想法，或让我帮你完成一个任务。")
@@ -230,8 +207,8 @@ struct DialogChatView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .lineSpacing(3)
-                .padding(.top, 8)
-                .frame(maxWidth: 340)
+                .padding(.top, 9)
+                .frame(maxWidth: 360)
         }
         .accessibilityElement(children: .combine)
     }
@@ -241,7 +218,7 @@ struct DialogChatView: View {
             HStack(alignment: .bottom, spacing: 10) {
                 ZStack(alignment: .topLeading) {
                     if viewModel.inputText.isEmpty {
-                        Text("输入消息…")
+                        Text("给看板娘发送消息…")
                             .font(.system(size: 14))
                             .foregroundStyle(Color(nsColor: .placeholderTextColor))
                             .padding(.top, 2)
@@ -252,7 +229,7 @@ struct DialogChatView: View {
                         text: $viewModel.inputText,
                         height: $inputEditorHeight,
                         isFocused: $isInputFocused,
-                        isEditable: !viewModel.isRequesting && !viewModel.isExecutingTool,
+                        isEditable: !viewModel.isBusy,
                         onSubmit: viewModel.sendCurrentInput
                     )
                     .frame(height: inputEditorHeight)
@@ -264,8 +241,6 @@ struct DialogChatView: View {
 
             HStack(spacing: 6) {
                 if viewModel.isExecutingTool {
-                    ProgressView()
-                        .controlSize(.mini)
                     Text("正在执行工具")
                 } else if viewModel.isRequesting {
                     Text("正在生成，可随时停止")
@@ -279,24 +254,38 @@ struct DialogChatView: View {
             .foregroundStyle(.tertiary)
             .frame(height: 13)
         }
-        .padding(.leading, 15)
+        .padding(.leading, 16)
         .padding(.trailing, 10)
-        .padding(.vertical, 10)
+        .padding(.vertical, 11)
         .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(composerBackgroundColor)
-                .shadow(color: Color.black.opacity(reduceTransparency ? 0.06 : 0.12), radius: 16, y: 7)
+                .shadow(color: Color.black.opacity(reduceTransparency ? 0.05 : 0.11), radius: 18, y: 7)
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(
-                    isInputFocused ? DesignColors.primary.opacity(0.62) : windowBorderColor,
+                    isInputFocused ? DesignColors.primary.opacity(0.58) : separatorColor,
                     lineWidth: isInputFocused ? 1.25 : 1
                 )
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 16)
-        .animation(reduceMotion ? nil : DesignAnimation.gentle, value: isInputFocused)
+        .frame(maxWidth: 760)
+        .padding(.horizontal, 26)
+        .padding(.top, 8)
+        .padding(.bottom, 20)
+        .frame(maxWidth: .infinity)
+        .background {
+            LinearGradient(
+                colors: [
+                    Color(nsColor: .windowBackgroundColor).opacity(0),
+                    Color(nsColor: .windowBackgroundColor).opacity(0.96)
+                ],
+                startPoint: .top,
+                endPoint: .center
+            )
+            .allowsHitTesting(false)
+        }
+        .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 1), value: isInputFocused)
     }
 
     @ViewBuilder
@@ -306,7 +295,7 @@ struct DialogChatView: View {
                 Image(systemName: "stop.fill")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.primary)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 32, height: 32)
                     .background(Color.primary.opacity(0.10), in: Circle())
             }
             .buttonStyle(DialogPressButtonStyle())
@@ -315,14 +304,14 @@ struct DialogChatView: View {
         } else if viewModel.isExecutingTool {
             ProgressView()
                 .controlSize(.small)
-                .frame(width: 30, height: 30)
+                .frame(width: 32, height: 32)
                 .accessibilityLabel("正在执行工具")
         } else {
             Button(action: viewModel.sendCurrentInput) {
                 Image(systemName: "arrow.up")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(canSend ? Color(nsColor: .alternateSelectedControlTextColor) : Color.secondary)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 32, height: 32)
                     .background(canSend ? DesignColors.primary : Color.primary.opacity(0.075), in: Circle())
             }
             .buttonStyle(DialogPressButtonStyle())
@@ -363,64 +352,65 @@ struct DialogChatView: View {
                 }
             }
             .font(.system(size: 14))
-            .lineSpacing(2)
-            .padding(.horizontal, 13)
-            .padding(.vertical, 10)
+            .lineSpacing(3)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
             .foregroundStyle(messageForeground(for: message.role))
             .background {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
                     .fill(messageBackground(for: message.role))
             }
             .overlay {
                 if !isUser {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(windowBorderColor.opacity(0.72), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        .strokeBorder(separatorColor.opacity(0.75), lineWidth: 1)
                 }
             }
-            .frame(maxWidth: 430, alignment: isUser ? .trailing : .leading)
+            .frame(maxWidth: 560, alignment: isUser ? .trailing : .leading)
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
     }
 
+    private var conversationSelection: Binding<UUID?> {
+        Binding(
+            get: { viewModel.selectedConversationID },
+            set: { selection in
+                guard let selection else { return }
+                viewModel.selectConversation(selection)
+                isInputFocused = true
+            }
+        )
+    }
+
+    private var sortedConversations: [DialogConversation] {
+        viewModel.conversations.sorted(by: { $0.updatedAt > $1.updatedAt })
+    }
+
     private var canSend: Bool {
         !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !viewModel.isRequesting
-            && !viewModel.isExecutingTool
-    }
-
-    private var statusText: String? {
-        if viewModel.isExecutingTool {
-            return "正在执行工具"
-        }
-        if viewModel.isRequesting {
-            return "正在生成回复"
-        }
-        return viewModel.messages.isEmpty ? "新的会话" : nil
-    }
-
-    private var statusColor: Color {
-        if viewModel.isExecutingTool {
-            return DesignColors.warning
-        }
-        if viewModel.isRequesting {
-            return DesignColors.primary
-        }
-        return DesignColors.success
+            && !viewModel.isBusy
     }
 
     private var composerBackgroundColor: Color {
-        Color(nsColor: .textBackgroundColor).opacity(reduceTransparency ? 1 : 0.86)
+        Color(nsColor: .textBackgroundColor).opacity(reduceTransparency ? 1 : 0.88)
     }
 
-    private var windowBorderColor: Color {
+    private var separatorColor: Color {
         if colorSchemeContrast == .increased {
             return Color(nsColor: .separatorColor)
         }
         return Color.primary.opacity(0.10)
     }
 
-    private var hoverAnimation: Animation? {
-        reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 1)
+    private func relativeTimestamp(for date: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) {
+            return date.formatted(date: .omitted, time: .shortened)
+        }
+        if calendar.isDateInYesterday(date) {
+            return "昨天"
+        }
+        return date.formatted(.dateTime.month(.abbreviated).day())
     }
 
     private func roleLabel(for role: DialogMessage.Role) -> String {
@@ -439,7 +429,7 @@ struct DialogChatView: View {
         case .user:
             return DesignColors.primary
         case .assistant:
-            return Color(nsColor: .controlBackgroundColor).opacity(reduceTransparency ? 1 : 0.72)
+            return Color(nsColor: .controlBackgroundColor).opacity(reduceTransparency ? 1 : 0.68)
         case .tool:
             return DesignColors.warning.opacity(0.11)
         }
@@ -620,8 +610,8 @@ private struct DialogPressButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .contentShape(Rectangle())
-            .scaleEffect(configuration.isPressed ? 0.96 : 1)
-            .opacity(configuration.isPressed ? 0.82 : 1)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .opacity(configuration.isPressed ? 0.84 : 1)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: configuration.isPressed)
     }
 }
