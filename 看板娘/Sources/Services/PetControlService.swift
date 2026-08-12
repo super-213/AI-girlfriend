@@ -137,6 +137,7 @@ struct SkillDTO: Codable, Identifiable, Equatable {
     var description: String
     var fileName: String
     var path: String
+    var packagePath: String?
     var isEnabled: Bool
     var validationError: String?
     var addedAt: Date
@@ -534,18 +535,30 @@ final class PetControlService: PetControlling {
     func importSkill(_ request: ImportSkillRequest) throws -> SkillDTO {
         do {
             let source = URL(fileURLWithPath: request.filePath)
-            guard FileManager.default.fileExists(atPath: source.path) else {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: source.path, isDirectory: &isDirectory) else {
                 throw PetControlError.notFound("skill 文件不存在")
             }
-            guard source.pathExtension.lowercased() == "md" else {
-                throw PetControlError.invalidInput("skill 文件必须是 .md")
+            guard isDirectory.boolValue || source.pathExtension.lowercased() == "md" else {
+                throw PetControlError.invalidInput("Skill 必须是包含 SKILL.md 的目录或 .md 文件")
             }
 
-            let destination = try copySkillFile(from: source, displayName: request.displayName)
+            let location = try SkillImporter.copyIntoLibrary(
+                from: source,
+                libraryDirectory: agentSkillsDirectory(),
+                displayName: request.displayName
+            )
             var saved = loadSkillFiles()
-            let content = try String(contentsOf: destination, encoding: .utf8)
+            let content: String
+            do {
+                content = try String(contentsOf: location.entryURL, encoding: .utf8)
+            } catch {
+                try? FileManager.default.removeItem(at: location.packageURL ?? location.entryURL)
+                throw error
+            }
             let skill = SkillLibrary.makeRecord(
-                fileURL: destination,
+                fileURL: location.entryURL,
+                packageURL: location.packageURL,
                 content: content
             )
             saved.append(skill)
@@ -626,24 +639,6 @@ final class PetControlService: PetControlling {
         )
     }
 
-    private func copySkillFile(from source: URL, displayName: String?) throws -> URL {
-        let agentDir = try agentSkillsDirectory()
-        let fileManager = FileManager.default
-        let rawBaseName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-            ? displayName!
-            : source.deletingPathExtension().lastPathComponent
-        let safeName = rawBaseName.isEmpty ? "skill" : rawBaseName
-        var destination = agentDir.appendingPathComponent("\(safeName).md")
-
-        if fileManager.fileExists(atPath: destination.path) {
-            let timestamp = Int(Date().timeIntervalSince1970)
-            destination = agentDir.appendingPathComponent("\(safeName)_\(timestamp).md")
-        }
-
-        try fileManager.copyItem(at: source, to: destination)
-        return destination
-    }
-
     private func agentSkillsDirectory() throws -> URL {
         let fileManager = FileManager.default
         guard let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
@@ -712,6 +707,7 @@ private extension SkillDTO {
             description: skill.description,
             fileName: skill.fileName,
             path: skill.path,
+            packagePath: skill.packagePath,
             isEnabled: skill.isEnabled,
             validationError: skill.validationError,
             addedAt: skill.addedAt,
@@ -728,6 +724,7 @@ private extension SkillFile {
             description: dto.description,
             fileName: dto.fileName,
             path: dto.path,
+            packagePath: dto.packagePath,
             isEnabled: dto.isEnabled,
             validationError: dto.validationError,
             addedAt: dto.addedAt,

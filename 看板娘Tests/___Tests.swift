@@ -423,6 +423,75 @@ struct SkillManifestTests {
         #expect(refreshed.allSatisfy { $0.validationError?.contains("重复") == true })
     }
 
+    @Test
+    func importsStandardSkillDirectoryWithScriptsAndPersistsPackagePath() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DirectorySkillImportTests-\(UUID().uuidString)", isDirectory: true)
+        let source = root.appendingPathComponent("weather", isDirectory: true)
+        let scripts = source.appendingPathComponent("scripts", isDirectory: true)
+        let library = root.appendingPathComponent("library", isDirectory: true)
+        try FileManager.default.createDirectory(at: scripts, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let content = """
+        ---
+        name: weather
+        description: 查询实时天气。
+        ---
+
+        运行 scripts/weather.sh。
+        """
+        try content.write(
+            to: source.appendingPathComponent("SKILL.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "#!/bin/sh\necho sunny\n".write(
+            to: scripts.appendingPathComponent("weather.sh"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let imported = try SkillImporter.copyIntoLibrary(from: source, libraryDirectory: library)
+        let packageURL = try #require(imported.packageURL)
+        #expect(imported.entryURL == packageURL.appendingPathComponent("SKILL.md"))
+        #expect(FileManager.default.fileExists(
+            atPath: packageURL.appendingPathComponent("scripts/weather.sh").path
+        ))
+
+        let record = SkillLibrary.makeRecord(
+            fileURL: imported.entryURL,
+            packageURL: packageURL,
+            content: try String(contentsOf: imported.entryURL, encoding: .utf8)
+        )
+        #expect(record.name == "weather")
+        #expect(record.packagePath == packageURL.path)
+        #expect(record.resourceBasePath == packageURL.path)
+
+        let restored = try JSONDecoder().decode(
+            SkillFile.self,
+            from: JSONEncoder().encode(record)
+        )
+        #expect(restored == record)
+    }
+
+    @Test
+    func rejectsDirectoryWithoutRootSkillManifest() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("InvalidDirectorySkillTests-\(UUID().uuidString)", isDirectory: true)
+        let source = root.appendingPathComponent("weather", isDirectory: true)
+        let library = root.appendingPathComponent("library", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        do {
+            _ = try SkillImporter.copyIntoLibrary(from: source, libraryDirectory: library)
+            Issue.record("缺少 SKILL.md 的目录不应导入成功")
+        } catch let error as SkillImportError {
+            #expect(error == .missingSkillManifest)
+        }
+    }
+
     @Test @MainActor
     func readSkillToolReturnsTheFullEnabledSkillInstructions() throws {
         let suiteName = "ReadSkillToolTests.\(UUID().uuidString)"
@@ -453,7 +522,8 @@ struct SkillManifestTests {
         }
 
         #expect(result?.isError == false)
-        #expect(result?.content == content)
+        #expect(result?.content.contains("Skill 资源根目录：\(directory.path)") == true)
+        #expect(result?.content.contains(content) == true)
     }
 }
 

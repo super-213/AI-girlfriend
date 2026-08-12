@@ -2,7 +2,7 @@
 //  SkillsSettingsTab.swift
 //  看板娘
 //
-//  Agent 和 Skill Markdown 文件工作台
+//  Agent 和标准目录 Skill 工作台
 //
 
 import AppKit
@@ -108,6 +108,7 @@ struct SkillsSettingsTab: View {
                     summary: skill.description,
                     fileName: skill.fileName,
                     path: skill.path,
+                    isDirectorySkill: skill.isDirectorySkill,
                     kind: .skill,
                     isEnabled: skill.isEnabled,
                     validationError: skill.validationError,
@@ -128,7 +129,7 @@ struct SkillsSettingsTab: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("技能文件")
                         .font(.headline)
-                    Text("\(documents.count) 个 Markdown 文件")
+                    Text("\(documents.count) 个 Agent / Skill")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -175,13 +176,13 @@ struct SkillsSettingsTab: View {
                     Label("新建", systemImage: "plus")
                         .frame(maxWidth: .infinity)
                 }
-                .help("新建一个可直接编辑的 skill.md")
+                .help("新建一个包含 SKILL.md 的标准技能目录")
 
                 Button(action: onImportSkills) {
                     Label("导入", systemImage: "square.and.arrow.down")
                         .frame(maxWidth: .infinity)
                 }
-                .help("导入一个或多个 Markdown 技能文件")
+                .help("导入标准技能目录或兼容的 Markdown 文件")
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
@@ -198,10 +199,10 @@ struct SkillsSettingsTab: View {
 
     private var addMenu: some View {
         Menu {
-            Button("新建 skill.md", systemImage: "doc.badge.plus") {
+            Button("新建标准 Skill", systemImage: "folder.badge.plus") {
                 isShowingCreateSheet = true
             }
-            Button("导入 skill.md…", systemImage: "square.and.arrow.down") {
+            Button("导入 Skill…", systemImage: "square.and.arrow.down") {
                 onImportSkills()
             }
 
@@ -344,7 +345,7 @@ struct SkillsSettingsTab: View {
         VStack(alignment: .leading, spacing: DesignSpacing.sm) {
             Text("还没有扩展技能")
                 .font(.subheadline.weight(.medium))
-            Text("新建一个模板，或导入已有的 Markdown 文件。")
+            Text("新建标准目录，或导入已有的技能目录与 Markdown 文件。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -407,7 +408,7 @@ struct SkillsSettingsTab: View {
                     .lineLimit(2)
 
                 if document.kind == .skill {
-                    Text("\(document.fileName) · \(document.isEnabled ? "已启用" : "已停用")")
+                    Text("\(document.fileName) · \(document.isDirectorySkill ? "目录 Skill" : "单文件 Skill") · \(document.isEnabled ? "已启用" : "已停用")")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -565,6 +566,7 @@ struct SkillsSettingsTab: View {
             summary: "决定模型如何回答、调用工具和选择技能",
             fileName: agentFile.name,
             path: agentFile.path,
+            isDirectorySkill: false,
             kind: .agent,
             isEnabled: true,
             validationError: nil,
@@ -580,6 +582,7 @@ struct SkillsSettingsTab: View {
                 summary: skill.description,
                 fileName: skill.fileName,
                 path: skill.path,
+                isDirectorySkill: skill.isDirectorySkill,
                 kind: .skill,
                 isEnabled: skill.isEnabled,
                 validationError: skill.validationError,
@@ -670,6 +673,7 @@ struct SkillsSettingsTab: View {
             summary: "决定模型如何回答、调用工具和选择技能",
             fileName: agent.name,
             path: agent.path,
+            isDirectorySkill: false,
             kind: .agent,
             isEnabled: true,
             validationError: nil,
@@ -744,6 +748,7 @@ private struct SkillDocument: Identifiable {
     let summary: String
     let fileName: String
     let path: String
+    let isDirectorySkill: Bool
     let kind: Kind
     let isEnabled: Bool
     let validationError: String?
@@ -793,16 +798,17 @@ private struct NewSkillFileSheet: View {
 
     private var normalizedName: String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.lowercased().hasSuffix(".md") ? trimmed : "\(trimmed).md"
+        let directoryName = trimmed.lowercased().hasSuffix(".md") ? String(trimmed.dropLast(3)) : trimmed
+        return "\(directoryName)/SKILL.md"
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignSpacing.xl) {
-            Label("新建技能文件", systemImage: "doc.badge.plus")
+            Label("新建标准 Skill", systemImage: "folder.badge.plus")
                 .font(.title2.weight(.semibold))
 
             VStack(alignment: .leading, spacing: DesignSpacing.sm) {
-                Text("文件名称")
+                Text("技能目录名称")
                     .font(.subheadline.weight(.medium))
                 TextField("例如：weather", text: $name)
                     .textFieldStyle(.roundedBorder)

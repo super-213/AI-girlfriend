@@ -96,7 +96,13 @@ final class ReadSkillTool: AgentTool {
         }
         do {
             let content = try String(contentsOfFile: skill.path, encoding: .utf8)
-            completion(.success(content))
+            let contextualized = """
+            Skill 资源根目录：\(skill.resourceBasePath)
+            请以该目录为基准解析 SKILL.md 中的 scripts/、references/ 和 assets/ 相对路径。
+
+            \(content)
+            """
+            completion(.success(contextualized))
         } catch {
             completion(.failure("读取 Skill 失败：\(error.localizedDescription)"))
         }

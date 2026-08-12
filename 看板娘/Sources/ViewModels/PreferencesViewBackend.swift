@@ -55,7 +55,7 @@ final class PreferencesViewBackend: ObservableObject {
     /// 当前 agent.md 文件
     @Published var agentFile: AgentFile? = nil
     
-    /// 已添加的 skill.md 文件列表
+    /// 已添加的 Skill 列表（标准目录或兼容的单 Markdown）
     @Published var skillFiles: [SkillFile] = []
     
     /// 技能文件操作错误提示
@@ -368,6 +368,7 @@ extension PreferencesViewBackend {
             skillFiles[index] = SkillLibrary.makeRecord(
                 id: skill.id,
                 fileURL: URL(fileURLWithPath: skill.path),
+                packageURL: skill.packagePath.map { URL(fileURLWithPath: $0, isDirectory: true) },
                 content: content,
                 isEnabled: skill.isEnabled,
                 addedAt: skill.addedAt
@@ -386,7 +387,7 @@ extension PreferencesViewBackend {
         }
     }
 
-    /// 在应用的技能目录中新建一个可立即编辑的 skill.md。
+    /// 在应用的技能目录中新建一个标准的 <name>/SKILL.md。
     @discardableResult
     func createSkillFile(named requestedName: String) -> SkillFile? {
         let trimmedName = requestedName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -407,14 +408,17 @@ extension PreferencesViewBackend {
         do {
             let directory = try agentSkillsDirectory()
             let fileManager = FileManager.default
-            var destination = directory.appendingPathComponent("\(safeName).md")
+            var packageURL = directory.appendingPathComponent(safeName, isDirectory: true)
             var suffix = 2
-            while fileManager.fileExists(atPath: destination.path) {
-                destination = directory.appendingPathComponent("\(safeName)-\(suffix).md")
+            while fileManager.fileExists(atPath: packageURL.path)
+                    || skillFiles.contains(where: { $0.name.caseInsensitiveCompare(packageURL.lastPathComponent) == .orderedSame }) {
+                packageURL = directory.appendingPathComponent("\(safeName)-\(suffix)", isDirectory: true)
                 suffix += 1
             }
+            try fileManager.createDirectory(at: packageURL, withIntermediateDirectories: false)
+            let destination = packageURL.appendingPathComponent("SKILL.md")
 
-            let displayName = destination.deletingPathExtension().lastPathComponent
+            let displayName = packageURL.lastPathComponent
             let content = """
             ---
             name: \(displayName)
@@ -429,6 +433,7 @@ extension PreferencesViewBackend {
 
             let skill = SkillLibrary.makeRecord(
                 fileURL: destination,
+                packageURL: packageURL,
                 content: content
             )
             skillFiles.append(skill)
@@ -575,6 +580,7 @@ extension PreferencesViewBackend {
                     description: dto.description,
                     fileName: dto.fileName,
                     path: dto.path,
+                    packagePath: dto.packagePath,
                     isEnabled: dto.isEnabled,
                     validationError: dto.validationError,
                     addedAt: dto.addedAt,
@@ -608,7 +614,7 @@ extension PreferencesViewBackend {
         guard skillFiles.indices.contains(index) else { return false }
         let skill = skillFiles[index]
         do {
-            try FileManager.default.removeItem(at: URL(fileURLWithPath: skill.path))
+            try FileManager.default.removeItem(at: URL(fileURLWithPath: skill.storagePath))
             skillFiles.remove(at: index)
             saveSkillFiles()
             return true

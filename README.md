@@ -28,7 +28,7 @@
 - 🖱️ **桌面级交互**：透明区域整窗穿透、Alpha 命中拖拽、位置恢复、动态窗口尺寸和屏幕边界约束
 - 🤖 **AI 对话**：支持智谱清言、OpenAI-Compatible、Ollama（流式输出）
 - 🪟 **悬浮对话窗**：`Ctrl + T` 呼出独立无边框聊天窗口
-- 🧠 **技能注入**：支持导入 `agent.md` 与多个 `skill.md`
+- 🧠 **技能注入**：支持 Codex Agent Skill 标准目录（`SKILL.md` + 可选 `scripts/` 等资源），并兼容旧版单 `.md` 技能
 - ⏱️ **自动化流程**：在偏好设置中创建常用提示词，按一次、15 分钟、小时、天、周、月、年等频率自动发送给模型
 - 🧾 **命令执行管道**：模型可生成命令，客户端二次确认并执行安全命令
 - 🧩 **结构化控制 API**：通过 `PetControlService` 提供 sendMessage、switchCharacter、runAutomation、updateSettings、importSkill 等稳定 Swift API
@@ -53,7 +53,7 @@
 - **风格**：按桌宠绑定系统提示词、临时输入框提示语和随机主动消息，切换桌宠时自动切换
 - **模型设置**：Provider、Model、API URL、API Key
 - **布局**：休息阈值、气泡时长、命令确认方式和原布局参数
-- **技能**：导入或生成 `agent.md`，导入多个 `skill.md`
+- **技能**：导入或生成 `agent.md`，新建/导入标准目录 Skill，并兼容旧版单 `.md` 技能
 - **自动化**：新增、编辑、启停和删除自动化流程，设置名称、提示词和运行频率
 - **角色绑定**：切换角色，导入 GIF/PNG/JPEG，并为每个业务状态配置多份素材与预览
 - **关于**：应用信息与当前角色显示
@@ -192,11 +192,13 @@ PetViewBackend.submitInput()
 systemPrompt
     │
     ├─▶ 读取 agent.md（可选）
-    ├─▶ 读取 skill.md 列表（可选）
+    ├─▶ 读取已启用 Skill 的 name/description 目录（可选）
     ▼
 APIManager.buildAugmentedSystemPrompt()
     ▼
 合并后 system message 发送给模型
+    │
+    └─▶ 匹配 Skill 时调用 read_skill，读取对应 SKILL.md 与资源根目录
 ```
 
 ### 3. 命令执行闭环
@@ -430,6 +432,9 @@ apiKey: "ollama" // 本地模式通常不会校验
 ~/Library/Application Support/{BundleID}/AgentSkills/
 ```
 
+新建或按目录导入的 Skill 会保留标准结构，例如 `weather/SKILL.md` 与
+`weather/scripts/weather.sh`；旧版单 Markdown 技能仍可继续使用。
+
 ### 控制服务审计日志
 
 ```text
@@ -510,8 +515,9 @@ apiKey: "ollama" // 本地模式通常不会校验
 
 ### 扩展 skill 能力
 1. 准备 `agent.md`（可导入或在设置页生成示例）
-2. 导入一个或多个 `skill.md`
-3. 在提示词里通过技能约束模型的输出与行为
+2. 准备包含 `name`、`description` frontmatter 的 `<skill-name>/SKILL.md`
+3. 可在同一目录附带 `scripts/`、`references/`、`assets/` 等资源后整体导入
+4. 也可以继续导入旧版单 `.md` 技能
 
 ### 接入外部 Agent
 1. 优先把新能力补到 `PetControlService`，定义 Codable 请求、DTO 返回值和错误码

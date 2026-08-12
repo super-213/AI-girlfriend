@@ -511,10 +511,10 @@ extension PreferencesView {
     private func showSkillImportDialog() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
+        panel.canChooseDirectories = true
         panel.canChooseFiles = true
         panel.allowedContentTypes = [.markdown]
-        panel.message = "选择一个或多个 skill.md 文件"
+        panel.message = "选择一个或多个技能目录（根层级包含 SKILL.md），也兼容单个 .md 文件"
         
         panel.begin { response in
             guard response == .OK else { return }

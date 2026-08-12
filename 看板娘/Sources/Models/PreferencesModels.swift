@@ -24,13 +24,14 @@ struct AgentFile: Codable, Equatable {
     var updatedAt: Date
 }
 
-/// skill.md 文件记录（可多个）
+/// Skill 记录。`path` 始终指向入口 Markdown；目录型 Skill 还会保存整个包的路径。
 struct SkillFile: Codable, Identifiable, Equatable {
     let id: UUID
     var name: String
     var description: String
     var fileName: String
     var path: String
+    var packagePath: String?
     var isEnabled: Bool
     var validationError: String?
     var addedAt: Date
@@ -44,6 +45,7 @@ struct SkillFile: Codable, Identifiable, Equatable {
         description: String,
         fileName: String,
         path: String,
+        packagePath: String? = nil,
         isEnabled: Bool = true,
         validationError: String? = nil,
         addedAt: Date,
@@ -54,6 +56,7 @@ struct SkillFile: Codable, Identifiable, Equatable {
         self.description = description
         self.fileName = fileName
         self.path = path
+        self.packagePath = packagePath
         self.isEnabled = isEnabled
         self.validationError = validationError
         self.addedAt = addedAt
@@ -61,7 +64,7 @@ struct SkillFile: Codable, Identifiable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, description, fileName, path, isEnabled, validationError, addedAt, updatedAt
+        case id, name, description, fileName, path, packagePath, isEnabled, validationError, addedAt, updatedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -73,10 +76,138 @@ struct SkillFile: Codable, Identifiable, Equatable {
         description = try values.decodeIfPresent(String.self, forKey: .description) ?? ""
         fileName = try values.decodeIfPresent(String.self, forKey: .fileName)
             ?? URL(fileURLWithPath: path).lastPathComponent
+        packagePath = try values.decodeIfPresent(String.self, forKey: .packagePath)
         isEnabled = try values.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
         validationError = try values.decodeIfPresent(String.self, forKey: .validationError)
         addedAt = try values.decode(Date.self, forKey: .addedAt)
         updatedAt = try values.decodeIfPresent(Date.self, forKey: .updatedAt) ?? addedAt
+    }
+
+    /// scripts/、references/ 等相对路径应以此目录为基准解析。
+    var resourceBasePath: String {
+        packagePath ?? URL(fileURLWithPath: path).deletingLastPathComponent().path
+    }
+
+    /// 删除目录型 Skill 时必须删除整个包，而不是只删除 SKILL.md。
+    var storagePath: String { packagePath ?? path }
+
+    var isDirectorySkill: Bool { packagePath != nil }
+}
+
+struct ImportedSkillLocation: Equatable {
+    let entryURL: URL
+    let packageURL: URL?
+}
+
+enum SkillImportError: LocalizedError, Equatable {
+    case missingSkillManifest
+    case unsupportedFileType
+
+    var errorDescription: String? {
+        switch self {
+        case .missingSkillManifest:
+            return "技能目录根层级必须包含 SKILL.md"
+        case .unsupportedFileType:
+            return "请选择包含 SKILL.md 的技能目录，或兼容的 .md 技能文件"
+        }
+    }
+}
+
+/// 将外部 Skill 复制到应用技能库。目录输入会连同 scripts/、references/、assets/ 等完整复制。
+enum SkillImporter {
+    static func copyIntoLibrary(
+        from source: URL,
+        libraryDirectory: URL,
+        displayName: String? = nil,
+        fileManager: FileManager = .default
+    ) throws -> ImportedSkillLocation {
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: source.path, isDirectory: &isDirectory) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+
+        try fileManager.createDirectory(at: libraryDirectory, withIntermediateDirectories: true)
+
+        if isDirectory.boolValue {
+            let entries = try fileManager.contentsOfDirectory(
+                at: source,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+            guard let manifestURL = entries.first(where: { $0.lastPathComponent == "SKILL.md" }),
+                  try manifestURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else {
+                throw SkillImportError.missingSkillManifest
+            }
+
+            let baseName = safeBaseName(displayName ?? source.lastPathComponent)
+            let destination = availableDestination(
+                in: libraryDirectory,
+                baseName: baseName,
+                pathExtension: nil,
+                fileManager: fileManager
+            )
+            do {
+                try fileManager.copyItem(at: source, to: destination)
+            } catch {
+                try? fileManager.removeItem(at: destination)
+                throw error
+            }
+            return ImportedSkillLocation(
+                entryURL: destination.appendingPathComponent(manifestURL.lastPathComponent),
+                packageURL: destination
+            )
+        }
+
+        guard source.pathExtension.lowercased() == "md" else {
+            throw SkillImportError.unsupportedFileType
+        }
+        let requestedName = displayName ?? source.deletingPathExtension().lastPathComponent
+        let destination = availableDestination(
+            in: libraryDirectory,
+            baseName: safeBaseName(requestedName),
+            pathExtension: "md",
+            fileManager: fileManager
+        )
+        do {
+            try fileManager.copyItem(at: source, to: destination)
+        } catch {
+            try? fileManager.removeItem(at: destination)
+            throw error
+        }
+        return ImportedSkillLocation(entryURL: destination, packageURL: nil)
+    }
+
+    private static func safeBaseName(_ rawName: String) -> String {
+        let cleaned = rawName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: CharacterSet(charactersIn: "/\\:"))
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+        return cleaned.isEmpty || cleaned == "." || cleaned == ".." ? "skill" : cleaned
+    }
+
+    private static func availableDestination(
+        in directory: URL,
+        baseName: String,
+        pathExtension: String?,
+        fileManager: FileManager
+    ) -> URL {
+        func destination(suffix: Int?) -> URL {
+            let suffixText = suffix.map { "-\($0)" } ?? ""
+            let name = baseName + suffixText
+            if let pathExtension {
+                return directory.appendingPathComponent(name).appendingPathExtension(pathExtension)
+            }
+            return directory.appendingPathComponent(name, isDirectory: true)
+        }
+
+        var candidate = destination(suffix: nil)
+        var suffix = 2
+        while fileManager.fileExists(atPath: candidate.path) {
+            candidate = destination(suffix: suffix)
+            suffix += 1
+        }
+        return candidate
     }
 }
 
@@ -204,6 +335,7 @@ enum SkillLibrary {
     static func makeRecord(
         id: UUID = UUID(),
         fileURL: URL,
+        packageURL: URL? = nil,
         content: String,
         isEnabled: Bool = true,
         addedAt: Date = .now,
@@ -217,6 +349,7 @@ enum SkillLibrary {
                 description: manifest.description,
                 fileName: fileURL.lastPathComponent,
                 path: fileURL.path,
+                packagePath: packageURL?.path,
                 isEnabled: isEnabled,
                 addedAt: addedAt,
                 updatedAt: updatedAt
@@ -224,10 +357,11 @@ enum SkillLibrary {
         } catch {
             return SkillFile(
                 id: id,
-                name: fileURL.deletingPathExtension().lastPathComponent,
+                name: packageURL?.lastPathComponent ?? fileURL.deletingPathExtension().lastPathComponent,
                 description: "",
                 fileName: fileURL.lastPathComponent,
                 path: fileURL.path,
+                packagePath: packageURL?.path,
                 isEnabled: false,
                 validationError: error.localizedDescription,
                 addedAt: addedAt,
@@ -252,6 +386,7 @@ enum SkillLibrary {
             var current = makeRecord(
                 id: skill.id,
                 fileURL: url,
+                packageURL: skill.packagePath.map { URL(fileURLWithPath: $0, isDirectory: true) },
                 content: content,
                 isEnabled: skill.isEnabled,
                 addedAt: skill.addedAt,
