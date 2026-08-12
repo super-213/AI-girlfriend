@@ -37,8 +37,9 @@ struct PreferencesView: View {
     @State private var selectedModelConfigurationID = ""
     @State private var activeModelConfigurationID = ""
     @State private var originalActiveModelConfigurationID = ""
-    @State private var styleDraftSystemPrompt = ""
-    @State private var styleDraftMessages: [String] = []
+    @State private var selectedStyleCharacterID = ""
+    @State private var styleDraftProfiles: [String: PetConversationStyle] = [:]
+    @State private var originalStyleProfiles: [String: PetConversationStyle] = [:]
     @FocusState private var focusedField: FocusableField?
     
     /// 可聚焦字段枚举
@@ -76,6 +77,9 @@ struct PreferencesView: View {
             }
             .onChange(of: petContentScale) { _, newValue in
                 PetWindowController.shared.setContentScale(CGFloat(newValue), persist: false)
+            }
+            .onChange(of: selectedStyleCharacterID) { _, _ in
+                focusedField = nil
             }
             
             if backend.showSuccessMessage {
@@ -173,8 +177,11 @@ extension PreferencesView {
         switch section {
         case .style:
             StyleSettingsTab(
-                systemPrompt: $styleDraftSystemPrompt,
-                staticMessages: $styleDraftMessages,
+                characters: allCharacters,
+                selectedCharacterID: $selectedStyleCharacterID,
+                systemPrompt: selectedStyleSystemPrompt,
+                inputPlaceholder: selectedStyleInputPlaceholder,
+                staticMessages: selectedStyleStaticMessages,
                 focusedField: $focusedField,
                 onSave: saveStyleSettings,
                 onCancel: restoreStyleDraft,
@@ -242,7 +249,7 @@ extension PreferencesView {
                 onImport: { idleURL, interactionURL, name in
                     backend.importGIF(normalGif: idleURL, clickGif: interactionURL, name: name)
                 },
-                onDelete: backend.deleteCustomCharacter,
+                onDelete: deleteCustomCharacter,
                 onConfigure: { editingCharacterIndex = $0 },
                 showImportError: $backend.showImportError,
                 importErrorMessage: $backend.importErrorMessage
@@ -276,15 +283,20 @@ extension PreferencesView {
 
     private func saveStyleSettings() {
         focusedField = nil
-        systemPrompt = styleDraftSystemPrompt
-        backend.staticMessages = styleDraftMessages
+        PetConversationStyleStore.save(styleDraftProfiles)
+        originalStyleProfiles = styleDraftProfiles
+
+        let activeStyle = styleDraftProfiles[petViewBackend.currentCharacter.id]
+            ?? PetConversationStyleStore.style(for: petViewBackend.currentCharacter.id)
+        // 同步旧的全局键，保证旧版控制接口及升级路径仍能读取当前桌宠风格。
+        systemPrompt = activeStyle.systemPrompt
+        backend.staticMessages = activeStyle.staticMessages
         saveSettings(dismissAfterSave: false)
     }
 
     private func restoreStyleDraft() {
         focusedField = nil
-        styleDraftSystemPrompt = systemPrompt
-        styleDraftMessages = backend.staticMessages
+        styleDraftProfiles = originalStyleProfiles
     }
 
     private func saveSettings(dismissAfterSave: Bool) {
@@ -376,8 +388,13 @@ extension PreferencesView {
             overlapRatio: overlapRatio,
             petHorizontalPosition: petHorizontalPosition
         )
-        styleDraftSystemPrompt = systemPrompt
-        styleDraftMessages = backend.staticMessages
+        let characterIDs = allCharacters.map(\.id)
+        let styles = PetConversationStyleStore.styles(for: characterIDs)
+        styleDraftProfiles = styles
+        originalStyleProfiles = styles
+        selectedStyleCharacterID = characterIDs.contains(petViewBackend.currentCharacter.id)
+            ? petViewBackend.currentCharacter.id
+            : characterIDs.first ?? ""
     }
     
     private func checkChanges() {
@@ -402,11 +419,57 @@ extension PreferencesView {
     }
 
     private var styleHasUnsavedChanges: Bool {
-        styleDraftSystemPrompt != systemPrompt || styleDraftMessages != backend.staticMessages
+        styleDraftProfiles != originalStyleProfiles
     }
     
     private func handleCharacterChange(_ newIndex: Int) {
         backend.switchCharacter(to: newIndex)
+    }
+
+    private func deleteCustomCharacter(at index: Int) {
+        guard backend.customCharacters.indices.contains(index) else { return }
+        let characterID = backend.customCharacters[index].id
+        backend.deleteCustomCharacter(at: index)
+        PetConversationStyleStore.removeStyle(for: characterID)
+        styleDraftProfiles.removeValue(forKey: characterID)
+        originalStyleProfiles.removeValue(forKey: characterID)
+        if selectedStyleCharacterID == characterID {
+            selectedStyleCharacterID = petViewBackend.currentCharacter.id
+        }
+    }
+}
+
+// MARK: - 风格草稿绑定
+
+extension PreferencesView {
+    private var selectedStyleSystemPrompt: Binding<String> {
+        styleBinding(for: \.systemPrompt)
+    }
+
+    private var selectedStyleInputPlaceholder: Binding<String> {
+        styleBinding(for: \.inputPlaceholder)
+    }
+
+    private var selectedStyleStaticMessages: Binding<[String]> {
+        styleBinding(for: \.staticMessages)
+    }
+
+    private func styleBinding<Value>(
+        for keyPath: WritableKeyPath<PetConversationStyle, Value>
+    ) -> Binding<Value> {
+        Binding(
+            get: {
+                let style = styleDraftProfiles[selectedStyleCharacterID]
+                    ?? PetConversationStyleStore.style(for: selectedStyleCharacterID)
+                return style[keyPath: keyPath]
+            },
+            set: { newValue in
+                var style = styleDraftProfiles[selectedStyleCharacterID]
+                    ?? PetConversationStyleStore.style(for: selectedStyleCharacterID)
+                style[keyPath: keyPath] = newValue
+                styleDraftProfiles[selectedStyleCharacterID] = style
+            }
+        )
     }
 }
 

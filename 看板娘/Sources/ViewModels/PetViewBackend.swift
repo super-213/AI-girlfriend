@@ -14,9 +14,11 @@ final class PetViewBackend: ObservableObject {
     @Published var currentCharacter: PetCharacter = puppetBear {
         didSet {
             UserDefaults.standard.set(currentCharacter.id, forKey: "selectedPetCharacterID")
+            refreshConversationStyle()
             refreshCurrentAsset()
         }
     }
+    @Published private(set) var conversationStyle: PetConversationStyle = .default
     @Published private(set) var currentResolvedAsset: PetResolvedAsset?
     @Published private(set) var currentGif: String = puppetBear.normalGif
     @Published var userInput = ""
@@ -53,8 +55,8 @@ final class PetViewBackend: ObservableObject {
     }
 
     private let apiManager: APIManager
-    private lazy var agentRuntime = AgentRuntime(apiManager: apiManager) { [apiManager] in
-        apiManager.systemPromptContent()
+    private lazy var agentRuntime = AgentRuntime(apiManager: apiManager) { [weak self, apiManager] in
+        apiManager.systemPromptContent(basePrompt: self?.conversationStyle.systemPrompt)
     }
     private let automationStore: AutomationStore
     private let triggerDispatcher: TriggerDispatcher
@@ -87,6 +89,7 @@ final class PetViewBackend: ObservableObject {
         self.stateCoordinator = stateCoordinator ?? PetStateCoordinator()
 
         currentCharacter = Self.initialCharacter()
+        refreshConversationStyle()
         configureAgentRuntime()
         bindState()
         registerNotifications()
@@ -496,10 +499,8 @@ final class PetViewBackend: ObservableObject {
         guard state == .idle || state == .sleeping else { return }
         stateCoordinator.send(.resetToIdle)
         stateCoordinator.send(.interaction(.greet, interactionDuration))
-        if let data = UserDefaults.standard.data(forKey: "staticMessages"),
-           let messages = try? JSONDecoder().decode([String].self, from: data),
-           !messages.isEmpty {
-            streamedResponse = messages.randomElement() ?? ""
+        if !conversationStyle.staticMessages.isEmpty {
+            streamedResponse = conversationStyle.staticMessages.randomElement() ?? ""
         } else {
             streamedResponse = currentCharacter.autoMessages.randomElement() ?? ""
         }
@@ -585,8 +586,15 @@ final class PetViewBackend: ObservableObject {
             }
         })
         notificationObservers.append(center.addObserver(forName: Notification.Name("SettingsChanged"), object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.scheduleIdleSleepIfNeeded() }
+            Task { @MainActor in
+                self?.refreshConversationStyle()
+                self?.scheduleIdleSleepIfNeeded()
+            }
         })
+    }
+
+    private func refreshConversationStyle() {
+        conversationStyle = PetConversationStyleStore.style(for: currentCharacter.id)
     }
 
     private static func initialCharacter() -> PetCharacter {

@@ -135,6 +135,7 @@ struct PetRootView: View {
                         PetInputView(
                             text: $petViewBackend.userInput,
                             isFocused: $isInputFocused,
+                            placeholder: petViewBackend.conversationStyle.inputPlaceholder,
                             isDisabled: coordinator.snapshot.activityState == .waitingForConfirmation,
                             onHover: { isHoveringInput = $0 },
                             onSubmit: submitInput,

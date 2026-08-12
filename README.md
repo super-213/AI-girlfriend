@@ -50,7 +50,7 @@
 - 透明像素和窗口空白区域不阻挡后方应用
 
 ### 2. 偏好设置
-- **风格**：系统提示词、静态提示词
+- **风格**：按桌宠绑定系统提示词、临时输入框提示语和随机主动消息，切换桌宠时自动切换
 - **模型设置**：Provider、Model、API URL、API Key
 - **布局**：休息阈值、气泡时长、命令确认方式和原布局参数
 - **技能**：导入或生成 `agent.md`，导入多个 `skill.md`
@@ -453,7 +453,8 @@ apiKey: "ollama" // 本地模式通常不会校验
 | `bubbleAutoHideDuration` | Double | 回复气泡自动收起秒数 |
 | `petWindowPlacement.v2` | Data | 显示器标识和相对窗口位置 |
 | `selectedPetCharacterID` | String | 当前角色稳定 ID |
-| `staticMessages` | Data | 静态提示词列表（JSON） |
+| `petConversationStyles.v1` | Data | 按角色 ID 保存的对话风格（系统提示词、输入框提示语、主动消息） |
+| `staticMessages` | Data | 旧版全局静态提示词列表（JSON，兼容迁移） |
 | `customCharacters` | Data | 自定义角色列表（JSON） |
 | `agentFile` | Data | 已导入 agent 文件信息（JSON） |
 | `skillFiles` | Data | 已导入 skill 文件列表（JSON） |

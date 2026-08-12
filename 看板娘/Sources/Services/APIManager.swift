@@ -365,7 +365,8 @@ final class APIManager: NSObject, URLSessionDataDelegate {
 
     // MARK: - Agent/Skill 注入
     
-    private func buildAugmentedSystemPrompt() -> String {
+    private func buildAugmentedSystemPrompt(basePrompt: String? = nil) -> String {
+        let resolvedPrompt = basePrompt ?? systemPrompt
         var attachments: [String] = []
         
         if let agentContent = loadAgentContent() {
@@ -376,19 +377,19 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         attachments.append(contentsOf: skillContents)
         
         guard !attachments.isEmpty else {
-            return systemPrompt
+            return resolvedPrompt
         }
         
         let appendix = "\n\n工具/技能说明段:\n" + attachments.joined(separator: "\n\n")
-        return systemPrompt + appendix
+        return resolvedPrompt + appendix
     }
     
     private func systemMessage() -> [String: String] {
         ["role": "system", "content": buildAugmentedSystemPrompt()]
     }
 
-    func systemPromptContent() -> String {
-        buildAugmentedSystemPrompt()
+    func systemPromptContent(basePrompt: String? = nil) -> String {
+        buildAugmentedSystemPrompt(basePrompt: basePrompt)
     }
     
     private func loadAgentContent() -> String? {

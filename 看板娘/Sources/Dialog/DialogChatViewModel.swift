@@ -67,8 +67,9 @@ final class DialogChatViewModel: ObservableObject {
 
     private let defaults: UserDefaults
     private let apiManager = APIManager()
-    private lazy var agentRuntime = AgentRuntime(apiManager: apiManager) { [apiManager] in
-        apiManager.systemPromptContent()
+    private lazy var agentRuntime = AgentRuntime(apiManager: apiManager) { [weak self, apiManager] in
+        let style = PetConversationStyleStore.activeStyle(defaults: self?.defaults ?? .standard)
+        return apiManager.systemPromptContent(basePrompt: style.systemPrompt)
     }
     private var activeAssistantID: UUID?
     private lazy var streamTextCoalescer = StreamingTextCoalescer { [weak self] text in

@@ -459,6 +459,8 @@ final class PetControlService: PetControlling {
 
     func updateSettings(_ patch: SettingsPatch) throws -> SettingsSnapshot {
         do {
+            let activeCharacterID = defaults.string(forKey: "selectedPetCharacterID") ?? puppetBear.id
+            var activeStyle = PetConversationStyleStore.style(for: activeCharacterID, defaults: defaults)
             if let apiKey = patch.apiKey {
                 defaults.set(apiKey, forKey: "apiKey")
             }
@@ -484,6 +486,7 @@ final class PetControlService: PetControlling {
             }
             if let systemPrompt = patch.systemPrompt {
                 defaults.set(systemPrompt, forKey: "systemPrompt")
+                activeStyle.systemPrompt = systemPrompt
             }
             if let overlapRatio = patch.overlapRatio {
                 guard (0...1).contains(overlapRatio) else {
@@ -494,6 +497,10 @@ final class PetControlService: PetControlling {
             if let staticMessages = patch.staticMessages {
                 let data = try JSONEncoder().encode(staticMessages)
                 defaults.set(data, forKey: "staticMessages")
+                activeStyle.staticMessages = staticMessages
+            }
+            if patch.systemPrompt != nil || patch.staticMessages != nil {
+                PetConversationStyleStore.update(activeStyle, for: activeCharacterID, defaults: defaults)
             }
 
             if patch.apiKey != nil || patch.apiUrl != nil || patch.aiModel != nil || patch.provider != nil {
@@ -601,19 +608,15 @@ final class PetControlService: PetControlling {
     }
 
     private func settingsSnapshot() -> SettingsSnapshot {
-        var staticMessages: [String] = []
-        if let data = defaults.data(forKey: "staticMessages"),
-           let decoded = try? JSONDecoder().decode([String].self, from: data) {
-            staticMessages = decoded
-        }
+        let activeStyle = PetConversationStyleStore.activeStyle(defaults: defaults)
 
         return SettingsSnapshot(
             apiUrl: defaults.string(forKey: "apiUrl") ?? "https://open.bigmodel.cn/api/paas/v4/chat/completions",
             aiModel: defaults.string(forKey: "aiModel") ?? "glm-4v-flash",
             provider: defaults.string(forKey: "provider") ?? "zhipu",
-            systemPrompt: defaults.string(forKey: "systemPrompt") ?? "",
+            systemPrompt: activeStyle.systemPrompt,
             overlapRatio: defaults.object(forKey: "overlapRatio") == nil ? 0.3 : defaults.double(forKey: "overlapRatio"),
-            staticMessages: staticMessages
+            staticMessages: activeStyle.staticMessages
         )
     }
 

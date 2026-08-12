@@ -8,6 +8,7 @@ import SwiftUI
 struct PetInputView: View {
     @Binding var text: String
     var isFocused: FocusState<Bool>.Binding
+    let placeholder: String
     let isDisabled: Bool
     let onHover: (Bool) -> Void
     let onSubmit: () -> Void
@@ -17,7 +18,7 @@ struct PetInputView: View {
         HStack(spacing: 9) {
             Image(systemName: "sparkles")
                 .foregroundStyle(.secondary)
-            TextField("我会帮助指挥官解决问题！", text: $text)
+            TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
                 .focused(isFocused)
                 .onSubmit(onSubmit)

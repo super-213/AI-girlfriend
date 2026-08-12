@@ -9,7 +9,10 @@ import SwiftUI
 
 /// 风格设置标签页
 struct StyleSettingsTab: View {
+    let characters: [PetCharacter]
+    @Binding var selectedCharacterID: String
     @Binding var systemPrompt: String
+    @Binding var inputPlaceholder: String
     @Binding var staticMessages: [String]
     var focusedField: FocusState<PreferencesView.FocusableField?>.Binding
     
@@ -24,6 +27,22 @@ struct StyleSettingsTab: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     pageHeader
+
+                    settingsSection(
+                        title: "绑定桌宠"
+                    ) {
+                        characterBindingPicker
+                    }
+
+                    Divider()
+
+                    settingsSection(
+                        title: "临时对话框"
+                    ) {
+                        inputPlaceholderEditor
+                    }
+
+                    Divider()
 
                     settingsSection(
                         title: "角色风格"
@@ -69,8 +88,56 @@ struct StyleSettingsTab: View {
     }
 
     private var pageHeader: some View {
-        Text("风格")
-            .font(.title2.weight(.semibold))
+        VStack(alignment: .leading, spacing: DesignSpacing.xs) {
+            Text("风格")
+                .font(.title2.weight(.semibold))
+            Text("为每个桌宠设置独立的对话语气与提示文案，切换桌宠时自动生效。")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var characterBindingPicker: some View {
+        VStack(alignment: .leading, spacing: DesignSpacing.sm) {
+            Picker("桌宠", selection: $selectedCharacterID) {
+                ForEach(characters) { character in
+                    Text(character.name).tag(character.id)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: 360, alignment: .leading)
+            .accessibilityHint("选择要编辑和绑定风格的桌宠")
+
+            Label("当前页面的全部设置都会绑定到所选桌宠。", systemImage: "link")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var inputPlaceholderEditor: some View {
+        VStack(alignment: .leading, spacing: LayoutConstants.fieldSpacing) {
+            Text("输入框提示语")
+                .font(.subheadline.weight(.semibold))
+
+            TextField("留空则不显示提示语", text: $inputPlaceholder)
+                .textFieldStyle(.roundedBorder)
+                .font(DesignFonts.input)
+                .accessibilityLabel("临时对话框输入提示语")
+
+            Text("鼠标移到桌宠上时，临时输入框中显示的灰色文字。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Spacer()
+                Button("恢复默认") {
+                    inputPlaceholder = PetConversationStyle.defaultInputPlaceholder
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+                .disabled(inputPlaceholder == PetConversationStyle.defaultInputPlaceholder)
+            }
+        }
     }
 
     private func settingsSection<Content: View>(
