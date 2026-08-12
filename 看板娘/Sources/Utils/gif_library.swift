@@ -46,6 +46,38 @@ let puppetCat = PetCharacter(
     ]
 )
 
-/// 所有可用的内置角色列表
-let availableCharacters: [PetCharacter] = [puppetBear, puppetCat]
+/// 内置角色：抹茶旦旦
+let matchaDandan = PetCharacter(
+    id: "builtin.matcha-dandan",
+    name: "抹茶旦旦",
+    assetsByState: [
+        .idle: [PetAnimationAsset(id: "matcha-dandan.idle", location: "matcha-dandan-idle.gif")],
+        .thinking: [PetAnimationAsset(id: "matcha-dandan.thinking", location: "matcha-dandan-thinking.gif")],
+        .talking: [PetAnimationAsset(id: "matcha-dandan.talking", location: "matcha-dandan-talking.gif")],
+        .working: [PetAnimationAsset(id: "matcha-dandan.working", location: "matcha-dandan-working.gif")],
+        .waitingForConfirmation: [PetAnimationAsset(id: "matcha-dandan.waiting-for-confirmation", location: "matcha-dandan-waiting-for-confirmation.gif")],
+        .success: [PetAnimationAsset(id: "matcha-dandan.success", location: "matcha-dandan-success.gif")],
+        .error: [PetAnimationAsset(id: "matcha-dandan.error", location: "matcha-dandan-error.gif")],
+        .sleeping: [PetAnimationAsset(id: "matcha-dandan.sleeping", location: "matcha-dandan-sleeping.gif")],
+        .needsInput: [PetAnimationAsset(id: "matcha-dandan.needs-input", location: "matcha-dandan-needs-input.gif")],
+        .listening: [PetAnimationAsset(id: "matcha-dandan.listening", location: "matcha-dandan-listening.gif")],
+        .playingAudio: [PetAnimationAsset(id: "matcha-dandan.playing-audio", location: "matcha-dandan-playing-audio.gif")],
+        .automation: [PetAnimationAsset(id: "matcha-dandan.automation", location: "matcha-dandan-automation.gif")],
+        .triggered: [PetAnimationAsset(id: "matcha-dandan.triggered", location: "matcha-dandan-triggered.gif")]
+    ],
+    interactionAssets: [
+        PetAnimationAsset(
+            id: "matcha-dandan.interaction",
+            location: "matcha-dandan-interaction.gif",
+            loop: false
+        )
+    ],
+    autoMessages: [
+        "旦旦一直在这里，随时可以开始。",
+        "要不要歇一会儿？旦旦会乖乖等你回来。",
+        "今天也一起把事情做好吧。"
+    ]
+)
 
+/// 所有可用的内置角色列表
+let availableCharacters: [PetCharacter] = [puppetBear, puppetCat, matchaDandan]
