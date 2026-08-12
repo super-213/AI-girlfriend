@@ -42,6 +42,7 @@ final class AgentRuntime {
     private let apiManager: any AgentModelClient
     private let registry: AgentToolRegistry
     private let systemPromptProvider: () -> String
+    private let enabledSkillNameResolver: (String) -> String?
     private let maxIterations: Int
     private var iterationCount = 0
     private var pendingCalls: [AgentToolCall] = []
@@ -52,11 +53,15 @@ final class AgentRuntime {
         apiManager: any AgentModelClient = APIManager(),
         registry: AgentToolRegistry = .standard(),
         maxIterations: Int = 8,
+        enabledSkillNameResolver: @escaping (String) -> String? = {
+            SkillLibrary.enabledSkill(named: $0)?.name
+        },
         systemPromptProvider: @escaping () -> String
     ) {
         self.apiManager = apiManager
         self.registry = registry
         self.maxIterations = maxIterations
+        self.enabledSkillNameResolver = enabledSkillNameResolver
         self.systemPromptProvider = systemPromptProvider
     }
 
@@ -142,19 +147,38 @@ final class AgentRuntime {
     }
 
     private func handle(_ response: AgentModelResponse) {
+        let toolCalls = response.toolCalls.map(normalizeSkillToolCall)
         messages.append(.assistant(
             content: response.content.isEmpty ? nil : response.content,
-            toolCalls: response.toolCalls
+            toolCalls: toolCalls
         ))
 
-        guard !response.toolCalls.isEmpty else {
+        guard !toolCalls.isEmpty else {
             isRunning = false
             onCompleted?()
             return
         }
 
-        pendingCalls = response.toolCalls
+        pendingCalls = toolCalls
         executeNextToolCall()
+    }
+
+    /// Some models confuse a Skill catalog entry with a native function and
+    /// emit `weather(...)` instead of `read_skill({"name":"weather"})`.
+    /// Rewrite only exact enabled Skill names so the assistant/tool message
+    /// pair remains protocol-valid and the model can continue the workflow.
+    private func normalizeSkillToolCall(_ call: AgentToolCall) -> AgentToolCall {
+        guard registry.tool(named: call.name) == nil,
+              registry.tool(named: "read_skill") != nil,
+              let canonicalName = enabledSkillNameResolver(call.name),
+              let data = try? JSONSerialization.data(
+                withJSONObject: ["name": canonicalName],
+                options: [.sortedKeys]
+              ),
+              let arguments = String(data: data, encoding: .utf8) else {
+            return call
+        }
+        return AgentToolCall(id: call.id, name: "read_skill", arguments: arguments)
     }
 
     private func executeNextToolCall() {
@@ -238,6 +262,8 @@ final class AgentRuntime {
 
         ## 工具调用规则
         你拥有客户端提供的结构化工具。需要实时信息或外部操作时必须调用合适的工具，不要声称自己没有权限。
+        “可用 Skills”中的 name 只是工作流标识，不是工具名称；禁止直接调用 Skill name。
+        用户任务匹配 Skill 时，只能先调用 read_skill，并将 Skill name 放入 name 参数。
         工具结果会作为 tool message 返回；根据结果继续处理，直到给出最终答复。
         不要在普通文本中伪造工具调用，不要输出“命令:”或“[命令]”协议。
         """

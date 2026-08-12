@@ -377,8 +377,9 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             attachments.append("## agent.md\n\(agentContent)")
         }
         
-        let skillContents = loadSkillContents()
-        attachments.append(contentsOf: skillContents)
+        if let catalog = loadSkillCatalog() {
+            attachments.append(catalog)
+        }
         
         guard !attachments.isEmpty else {
             return resolvedPrompt
@@ -407,22 +408,22 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         return try? String(contentsOf: url, encoding: .utf8)
     }
     
-    private func loadSkillContents() -> [String] {
-        guard let data = UserDefaults.standard.data(forKey: AgentSkillStorageKeys.skillFiles),
-              let saved = try? JSONDecoder().decode([SkillFile].self, from: data) else {
-            return []
+    private func loadSkillCatalog() -> String? {
+        let catalog = SkillLibrary.enabledCatalog()
+        guard !catalog.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: catalog, options: [.sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else {
+            return nil
         }
-        
-        var contents: [String] = []
-        for skill in saved {
-            let url = URL(fileURLWithPath: skill.path)
-            guard FileManager.default.fileExists(atPath: url.path),
-                  let text = try? String(contentsOf: url, encoding: .utf8) else {
-                continue
-            }
-            contents.append("## \(skill.name)\n\(text)")
-        }
-        return contents
+        return """
+        ## 可用 Skills
+        \(json)
+
+        根据 name 和 description 判断用户任务是否匹配某项 Skill。
+        匹配时必须先调用 read_skill 读取完整指令，再按指令继续处理。
+        Skills 目录中的 name 不是可调用工具名，禁止直接调用名为 weather 等 Skill name 的函数。
+        Skill 是工作流指令，不代表客户端必然提供了其中提到的执行能力。
+        """
     }
 
     // MARK: - 清理旧任务

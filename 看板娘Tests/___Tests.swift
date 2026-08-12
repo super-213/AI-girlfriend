@@ -43,6 +43,23 @@ struct AgentFoundationTests {
         }
     }
 
+    @MainActor
+    private final class TestReadSkillTool: AgentTool {
+        let definition = AgentToolDefinition(
+            name: "read_skill",
+            description: "read skill test",
+            parameters: ["type": "object", "properties": [:]]
+        )
+        let requiresConfirmation = false
+        func approvalSummary(arguments: [String: Any]) -> String { "read skill" }
+        func execute(
+            arguments: [String: Any],
+            completion: @escaping @MainActor (AgentToolExecutionResult) -> Void
+        ) {
+            completion(.success("skill:\(arguments["name"] as? String ?? "")"))
+        }
+    }
+
     @Test
     func toolCallArgumentsAndOpenAIMessageEncodingRoundTrip() throws {
         let call = AgentToolCall(
@@ -74,6 +91,7 @@ struct AgentFoundationTests {
     func standardRegistryExposesCoreAndAppTools() {
         let names = Set(AgentToolRegistry.standard().definitions.map(\.name))
         #expect(names.contains("get_current_datetime"))
+        #expect(names.contains("read_skill"))
         #expect(names.contains("read_file"))
         #expect(names.contains("run_command"))
         #expect(names.contains("switch_pet_character"))
@@ -112,6 +130,65 @@ struct AgentFoundationTests {
         #expect(client.requests[1].last?.role == .tool)
         #expect(client.requests[1].last?.content?.contains("ok") == true)
         #expect(runtime.messages.last?.content == "完成")
+    }
+
+    @Test @MainActor
+    func runtimeRewritesAnEnabledSkillNameMistakenForATool() {
+        let client = FakeModelClient()
+        client.responses = [
+            AgentModelResponse(
+                content: "",
+                toolCalls: [
+                    AgentToolCall(id: "call-weather", name: "weather", arguments: #"{"location":"上海"}"#)
+                ]
+            ),
+            AgentModelResponse(content: "上海天气结果", toolCalls: [])
+        ]
+        let registry = AgentToolRegistry()
+        registry.register(TestReadSkillTool())
+        let runtime = AgentRuntime(
+            apiManager: client,
+            registry: registry,
+            enabledSkillNameResolver: { $0.caseInsensitiveCompare("weather") == .orderedSame ? "weather" : nil },
+            systemPromptProvider: { "system" }
+        )
+        var exposedToolNames: [String] = []
+        runtime.onToolStarted = { exposedToolNames.append($0) }
+
+        runtime.send("上海今天天气怎么样")
+
+        #expect(client.requests.count == 2)
+        #expect(exposedToolNames == ["read_skill"])
+        #expect(runtime.messages[2].toolCalls?.first?.name == "read_skill")
+        #expect(runtime.messages[3].name == "read_skill")
+        #expect(runtime.messages[3].content?.contains("skill:weather") == true)
+        #expect(runtime.messages.last?.content == "上海天气结果")
+    }
+
+    @Test @MainActor
+    func runtimeDoesNotRewriteAnUnknownUnregisteredTool() {
+        let client = FakeModelClient()
+        client.responses = [
+            AgentModelResponse(
+                content: "",
+                toolCalls: [AgentToolCall(id: "call-unknown", name: "weather", arguments: "{}")]
+            ),
+            AgentModelResponse(content: "已根据错误恢复", toolCalls: [])
+        ]
+        let registry = AgentToolRegistry()
+        registry.register(TestReadSkillTool())
+        let runtime = AgentRuntime(
+            apiManager: client,
+            registry: registry,
+            enabledSkillNameResolver: { _ in nil },
+            systemPromptProvider: { "system" }
+        )
+
+        runtime.send("test")
+
+        #expect(runtime.messages[2].toolCalls?.first?.name == "weather")
+        #expect(runtime.messages[3].name == "weather")
+        #expect(runtime.messages[3].content?.contains("未注册的工具") == true)
     }
 
     @Test @MainActor
@@ -205,6 +282,178 @@ struct AgentFoundationTests {
         #expect(
             AgentCacheMetricsStore.load(defaults: defaults)["qwen|qwen-plus"] == metrics
         )
+    }
+}
+
+struct SkillManifestTests {
+    @Test
+    func parsesInlineAndFoldedFrontMatterValues() throws {
+        let inline = try SkillManifestParser.parse("""
+        ---
+        name: weather
+        description: 查询实时天气和降雨概率。
+        ---
+
+        # Weather
+        """)
+        #expect(inline == SkillManifest(name: "weather", description: "查询实时天气和降雨概率。"))
+
+        let folded = try SkillManifestParser.parse("""
+        ---
+        name: travel-weather
+        description: >
+          查询天气、温度和降雨。
+          用户询问出行或穿衣建议时使用。
+        ---
+        """)
+        #expect(folded.description == "查询天气、温度和降雨。 用户询问出行或穿衣建议时使用。")
+    }
+
+    @Test
+    func invalidManifestIsDisabledWithAValidationReason() {
+        let record = SkillLibrary.makeRecord(
+            fileURL: URL(fileURLWithPath: "/tmp/weather.md"),
+            content: "# Weather"
+        )
+
+        #expect(!record.isEnabled)
+        #expect(!record.isValid)
+        #expect(record.validationError?.contains("front matter") == true)
+    }
+
+    @Test
+    func oversizedCatalogDescriptionIsRejected() {
+        let record = SkillLibrary.makeRecord(
+            fileURL: URL(fileURLWithPath: "/tmp/weather.md"),
+            content: """
+            ---
+            name: weather
+            description: \(String(repeating: "天", count: 1_025))
+            ---
+            """
+        )
+
+        #expect(!record.isEnabled)
+        #expect(record.validationError?.contains("1024") == true)
+    }
+
+    @Test
+    func migratesLegacyRecordsAndBuildsOnlyEnabledValidCatalog() throws {
+        let suiteName = "SkillManifestTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SkillManifestTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let weatherURL = directory.appendingPathComponent("legacy-weather.md")
+        let musicURL = directory.appendingPathComponent("music.md")
+        try """
+        ---
+        name: weather
+        description: 查询实时天气。
+        ---
+        天气工作流。
+        """.write(to: weatherURL, atomically: true, encoding: .utf8)
+        try """
+        ---
+        name: music
+        description: 播放音乐。
+        ---
+        音乐工作流。
+        """.write(to: musicURL, atomically: true, encoding: .utf8)
+
+        let legacyJSON: [[String: Any]] = [[
+            "id": UUID().uuidString,
+            "name": "legacy-weather.md",
+            "path": weatherURL.path,
+            "addedAt": Date().timeIntervalSinceReferenceDate
+        ]]
+        let legacyData = try JSONSerialization.data(withJSONObject: legacyJSON)
+        // JSONDecoder's default Date strategy expects seconds since reference date.
+        defaults.set(legacyData, forKey: AgentSkillStorageKeys.skillFiles)
+
+        let migrated = SkillLibrary.load(defaults: defaults)
+        #expect(migrated.first?.name == "weather")
+        #expect(migrated.first?.description == "查询实时天气。")
+        #expect(migrated.first?.fileName == "legacy-weather.md")
+
+        var disabled = SkillLibrary.makeRecord(
+            fileURL: musicURL,
+            content: try String(contentsOf: musicURL, encoding: .utf8)
+        )
+        disabled.isEnabled = false
+        let records = migrated + [disabled]
+        defaults.set(try JSONEncoder().encode(records), forKey: AgentSkillStorageKeys.skillFiles)
+
+        #expect(SkillLibrary.enabledCatalog(defaults: defaults) == [[
+            "name": "weather",
+            "description": "查询实时天气。"
+        ]])
+        #expect(SkillLibrary.enabledSkill(named: "WEATHER", defaults: defaults)?.path == weatherURL.path)
+        #expect(SkillLibrary.enabledSkill(named: "music", defaults: defaults) == nil)
+    }
+
+    @Test
+    func duplicateManifestNamesAreDisabled() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DuplicateSkillTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let content = """
+        ---
+        name: weather
+        description: 查询天气。
+        ---
+        """
+        let firstURL = directory.appendingPathComponent("first.md")
+        let secondURL = directory.appendingPathComponent("second.md")
+        try content.write(to: firstURL, atomically: true, encoding: .utf8)
+        try content.write(to: secondURL, atomically: true, encoding: .utf8)
+
+        let refreshed = SkillLibrary.refresh([
+            SkillLibrary.makeRecord(fileURL: firstURL, content: content),
+            SkillLibrary.makeRecord(fileURL: secondURL, content: content)
+        ])
+
+        #expect(refreshed.allSatisfy { !$0.isEnabled })
+        #expect(refreshed.allSatisfy { $0.validationError?.contains("重复") == true })
+    }
+
+    @Test @MainActor
+    func readSkillToolReturnsTheFullEnabledSkillInstructions() throws {
+        let suiteName = "ReadSkillToolTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ReadSkillToolTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let skillURL = directory.appendingPathComponent("weather.md")
+        let content = """
+        ---
+        name: weather
+        description: 查询实时天气。
+        ---
+
+        必须先使用实时天气工具，再根据结果回答。
+        """
+        try content.write(to: skillURL, atomically: true, encoding: .utf8)
+        let skill = SkillLibrary.makeRecord(fileURL: skillURL, content: content)
+        defaults.set(try JSONEncoder().encode([skill]), forKey: AgentSkillStorageKeys.skillFiles)
+
+        var result: AgentToolExecutionResult?
+        ReadSkillTool(defaults: defaults).execute(arguments: ["name": "weather"]) {
+            result = $0
+        }
+
+        #expect(result?.isError == false)
+        #expect(result?.content == content)
     }
 }
 

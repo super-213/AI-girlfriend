@@ -308,11 +308,10 @@ extension PreferencesViewBackend {
             return
         }
         
-        let fileManager = FileManager.default
-        let filtered = saved.filter { fileManager.fileExists(atPath: $0.path) }
-        skillFiles = filtered
+        let refreshed = SkillLibrary.refresh(saved)
+        skillFiles = refreshed
         
-        if filtered.count != saved.count {
+        if refreshed != saved {
             saveSkillFiles()
         }
     }
@@ -357,7 +356,8 @@ extension PreferencesViewBackend {
 
     /// 保存指定 skill.md 的正文。
     func saveSkillFileContent(id: UUID, content: String) -> Bool {
-        guard let skill = skillFiles.first(where: { $0.id == id }) else { return false }
+        guard let index = skillFiles.firstIndex(where: { $0.id == id }) else { return false }
+        let skill = skillFiles[index]
 
         do {
             try content.write(
@@ -365,6 +365,19 @@ extension PreferencesViewBackend {
                 atomically: true,
                 encoding: .utf8
             )
+            skillFiles[index] = SkillLibrary.makeRecord(
+                id: skill.id,
+                fileURL: URL(fileURLWithPath: skill.path),
+                content: content,
+                isEnabled: skill.isEnabled,
+                addedAt: skill.addedAt
+            )
+            skillFiles = SkillLibrary.refresh(skillFiles)
+            saveSkillFiles()
+            if let validationError = skillFiles.first(where: { $0.id == id })?.validationError {
+                skillFileErrorMessage = "已保存，但该技能已停用：\(validationError)"
+                showSkillFileError = true
+            }
             return true
         } catch {
             skillFileErrorMessage = "保存 \(skill.name) 失败：\(error.localizedDescription)"
@@ -414,11 +427,9 @@ extension PreferencesViewBackend {
             """
             try content.write(to: destination, atomically: true, encoding: .utf8)
 
-            let skill = SkillFile(
-                id: UUID(),
-                name: destination.lastPathComponent,
-                path: destination.path,
-                addedAt: Date()
+            let skill = SkillLibrary.makeRecord(
+                fileURL: destination,
+                content: content
             )
             skillFiles.append(skill)
             saveSkillFiles()
@@ -473,6 +484,7 @@ extension PreferencesViewBackend {
         ## 工具选择规则
         
         - “今天、现在、日期、时间、星期”必须调用 get_current_datetime。
+        - 系统提供“可用 Skills”目录时，只根据名称和描述匹配；Skill 名称不是工具名称，禁止直接调用；匹配后只能先调用 read_skill 获取完整工作流。
         - 读取文件使用 read_file；列出目录使用 list_directory。
         - 只有其他专用工具无法完成时才使用 run_command。
         - 桌宠角色和自动化操作使用对应的 pet/automation 工具。
@@ -560,8 +572,13 @@ extension PreferencesViewBackend {
                 let newSkill = SkillFile(
                     id: dto.id,
                     name: dto.name,
+                    description: dto.description,
+                    fileName: dto.fileName,
                     path: dto.path,
-                    addedAt: dto.addedAt
+                    isEnabled: dto.isEnabled,
+                    validationError: dto.validationError,
+                    addedAt: dto.addedAt,
+                    updatedAt: dto.updatedAt
                 )
                 skillFiles.append(newSkill)
                 imported += 1
@@ -573,6 +590,17 @@ extension PreferencesViewBackend {
 
         loadSkillFiles()
         return imported
+    }
+
+    func setSkillEnabled(id: UUID, isEnabled: Bool) {
+        guard let index = skillFiles.firstIndex(where: { $0.id == id }) else { return }
+        guard skillFiles[index].isValid else {
+            skillFileErrorMessage = skillFiles[index].validationError ?? "该技能配置无效"
+            showSkillFileError = true
+            return
+        }
+        skillFiles[index].isEnabled = isEnabled
+        saveSkillFiles()
     }
     
     @discardableResult

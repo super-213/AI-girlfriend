@@ -134,8 +134,13 @@ struct SwitchCharacterRequest: Codable {
 struct SkillDTO: Codable, Identifiable, Equatable {
     var id: UUID
     var name: String
+    var description: String
+    var fileName: String
     var path: String
+    var isEnabled: Bool
+    var validationError: String?
     var addedAt: Date
+    var updatedAt: Date
 }
 
 struct ImportSkillRequest: Codable {
@@ -538,16 +543,17 @@ final class PetControlService: PetControlling {
 
             let destination = try copySkillFile(from: source, displayName: request.displayName)
             var saved = loadSkillFiles()
-            let skill = SkillFile(
-                id: UUID(),
-                name: destination.lastPathComponent,
-                path: destination.path,
-                addedAt: Date()
+            let content = try String(contentsOf: destination, encoding: .utf8)
+            let skill = SkillLibrary.makeRecord(
+                fileURL: destination,
+                content: content
             )
             saved.append(skill)
+            saved = SkillLibrary.refresh(saved)
             saveSkillFiles(saved)
 
-            let dto = SkillDTO(skill: skill)
+            let importedSkill = saved.first(where: { $0.id == skill.id }) ?? skill
+            let dto = SkillDTO(skill: importedSkill)
             audit("importSkill", context: request.context, status: "accepted", message: dto.name)
             return dto
         } catch {
@@ -561,7 +567,7 @@ final class PetControlService: PetControlling {
         for url in urls {
             do {
                 let dto = try importSkill(ImportSkillRequest(filePath: url.path, context: context))
-                imported.append(SkillFile(id: dto.id, name: dto.name, path: dto.path, addedAt: dto.addedAt))
+                imported.append(SkillFile(dto: dto))
             } catch {
                 audit("importSkill", context: context, status: "failed", message: error.localizedDescription)
             }
@@ -700,7 +706,33 @@ private extension AutomationDTO {
 
 private extension SkillDTO {
     init(skill: SkillFile) {
-        self.init(id: skill.id, name: skill.name, path: skill.path, addedAt: skill.addedAt)
+        self.init(
+            id: skill.id,
+            name: skill.name,
+            description: skill.description,
+            fileName: skill.fileName,
+            path: skill.path,
+            isEnabled: skill.isEnabled,
+            validationError: skill.validationError,
+            addedAt: skill.addedAt,
+            updatedAt: skill.updatedAt
+        )
+    }
+}
+
+private extension SkillFile {
+    init(dto: SkillDTO) {
+        self.init(
+            id: dto.id,
+            name: dto.name,
+            description: dto.description,
+            fileName: dto.fileName,
+            path: dto.path,
+            isEnabled: dto.isEnabled,
+            validationError: dto.validationError,
+            addedAt: dto.addedAt,
+            updatedAt: dto.updatedAt
+        )
     }
 }
 

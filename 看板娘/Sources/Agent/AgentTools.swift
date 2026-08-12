@@ -44,6 +44,7 @@ final class AgentToolRegistry {
     static func standard() -> AgentToolRegistry {
         let registry = AgentToolRegistry()
         registry.register(CurrentDateTimeTool())
+        registry.register(ReadSkillTool())
         registry.register(ListDirectoryTool())
         registry.register(ReadFileTool())
         registry.register(RunCommandTool())
@@ -52,6 +53,53 @@ final class AgentToolRegistry {
         registry.register(ListAutomationsTool())
         registry.register(RunAutomationTool())
         return registry
+    }
+}
+
+@MainActor
+final class ReadSkillTool: AgentTool {
+    let definition = AgentToolDefinition(
+        name: "read_skill",
+        description: "按可用 Skills 目录中的 name 读取已启用 Skill 的完整 SKILL.md 指令。当用户任务匹配某项 Skill 时调用。",
+        parameters: [
+            "type": "object",
+            "properties": [
+                "name": ["type": "string", "description": "Skills 目录中的精确技能名称"]
+            ],
+            "required": ["name"],
+            "additionalProperties": false
+        ]
+    )
+    let requiresConfirmation = false
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    func approvalSummary(arguments: [String: Any]) -> String {
+        "读取 Skill：\(arguments["name"] as? String ?? "")"
+    }
+
+    func execute(
+        arguments: [String: Any],
+        completion: @escaping @MainActor (AgentToolExecutionResult) -> Void
+    ) {
+        guard let rawName = arguments["name"] as? String else {
+            completion(.failure("缺少 name"))
+            return
+        }
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let skill = SkillLibrary.enabledSkill(named: name, defaults: defaults) else {
+            completion(.failure("未找到已启用且有效的 Skill：\(name)"))
+            return
+        }
+        do {
+            let content = try String(contentsOfFile: skill.path, encoding: .utf8)
+            completion(.success(content))
+        } catch {
+            completion(.failure("读取 Skill 失败：\(error.localizedDescription)"))
+        }
     }
 }
 

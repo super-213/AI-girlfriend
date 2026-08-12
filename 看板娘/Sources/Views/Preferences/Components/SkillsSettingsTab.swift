@@ -16,6 +16,7 @@ struct SkillsSettingsTab: View {
     let onRemoveAgent: () -> Bool
     let onImportSkills: () -> Void
     let onDeleteSkill: (Int) -> Bool
+    let onSetSkillEnabled: (UUID, Bool) -> Void
     let onReadFile: (String) -> String?
     let onSaveAgent: (String) -> Bool
     let onSaveSkill: (UUID, String) -> Bool
@@ -104,9 +105,13 @@ struct SkillsSettingsTab: View {
                 let document = SkillDocument(
                     id: .skill(skill.id),
                     name: skill.name,
+                    summary: skill.description,
+                    fileName: skill.fileName,
                     path: skill.path,
                     kind: .skill,
-                    fallbackDate: skill.addedAt
+                    isEnabled: skill.isEnabled,
+                    validationError: skill.validationError,
+                    fallbackDate: skill.updatedAt
                 )
                 selection = document.id
                 load(document)
@@ -234,49 +239,17 @@ struct SkillsSettingsTab: View {
         return Button {
             requestSelection(document.id)
         } label: {
-            HStack(spacing: DesignSpacing.sm) {
-                Image(systemName: document.kind.icon)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
-                    .frame(width: 30, height: 30)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(isSelected
-                                  ? Color.accentColor.opacity(0.14)
-                                  : Color.secondary.opacity(0.09))
-                    )
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(document.name)
-                        .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-
-                    Text(document.kind.subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 0)
-
-                if isSelected && hasUnsavedChanges {
-                    Circle()
-                        .fill(.orange)
-                        .frame(width: 7, height: 7)
-                        .accessibilityLabel("有未保存的修改")
-                }
-            }
-            .padding(.horizontal, DesignSpacing.sm)
-            .padding(.vertical, 7)
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
-            )
+            documentRowContent(document, isSelected: isSelected)
         }
         .buttonStyle(.plain)
         .contextMenu {
+            if case let .skill(id) = document.id {
+                Button(document.isEnabled ? "停用技能" : "启用技能") {
+                    onSetSkillEnabled(id, !document.isEnabled)
+                }
+                .disabled(document.validationError != nil)
+                Divider()
+            }
             Button("在访达中显示", systemImage: "folder") {
                 reveal(document)
             }
@@ -286,11 +259,62 @@ struct SkillsSettingsTab: View {
             }
         }
         .accessibilityLabel(document.name)
-        .accessibilityValue(isSelected ? "已选择" : document.kind.subtitle)
+        .accessibilityValue(isSelected ? "已选择" : document.listSubtitle)
         .animation(
             reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1),
             value: isSelected
         )
+    }
+
+    private func documentRowContent(_ document: SkillDocument, isSelected: Bool) -> some View {
+        HStack(spacing: DesignSpacing.sm) {
+            Image(systemName: document.kind.icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                .frame(width: 30, height: 30)
+                .background(documentIconBackground(isSelected: isSelected))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(document.name)
+                    .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(1)
+
+                Text(document.listSubtitle)
+                    .font(.caption2)
+                    .foregroundStyle(document.validationError == nil ? Color.secondary : Color.red)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+            documentStatus(document, isSelected: isSelected)
+        }
+        .padding(.horizontal, DesignSpacing.sm)
+        .padding(.vertical, 7)
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+        )
+    }
+
+    private func documentIconBackground(isSelected: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(isSelected ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.09))
+    }
+
+    @ViewBuilder
+    private func documentStatus(_ document: SkillDocument, isSelected: Bool) -> some View {
+        if document.kind == .skill {
+            Image(systemName: document.isEnabled ? "checkmark.circle.fill" : "pause.circle")
+                .foregroundStyle(document.isEnabled ? Color.green : Color.secondary)
+                .help(document.isEnabled ? "已启用" : "已停用")
+        } else if isSelected && hasUnsavedChanges {
+            Circle()
+                .fill(Color.orange)
+                .frame(width: 7, height: 7)
+                .accessibilityLabel("有未保存的修改")
+        }
     }
 
     private var missingAgentRow: some View {
@@ -377,10 +401,23 @@ struct SkillsSettingsTab: View {
                     }
                 }
 
-                Text(document.kind.description)
+                Text(document.headerDescription)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
+
+                if document.kind == .skill {
+                    Text("\(document.fileName) · \(document.isEnabled ? "已启用" : "已停用")")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                if let validationError = document.validationError {
+                    Label(validationError, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                }
             }
 
             Spacer(minLength: DesignSpacing.md)
@@ -409,6 +446,12 @@ struct SkillsSettingsTab: View {
                         isShowingGenerateConfirmation = true
                     }
                     .disabled(hasUnsavedChanges)
+                } else if case let .skill(id) = document.id {
+                    Button(document.isEnabled ? "停用技能" : "启用技能",
+                           systemImage: document.isEnabled ? "pause.circle" : "play.circle") {
+                        onSetSkillEnabled(id, !document.isEnabled)
+                    }
+                    .disabled(document.validationError != nil || hasUnsavedChanges)
                 }
 
                 Divider()
@@ -519,8 +562,12 @@ struct SkillsSettingsTab: View {
         return SkillDocument(
             id: .agent,
             name: agentFile.name,
+            summary: "决定模型如何回答、调用工具和选择技能",
+            fileName: agentFile.name,
             path: agentFile.path,
             kind: .agent,
+            isEnabled: true,
+            validationError: nil,
             fallbackDate: agentFile.updatedAt
         )
     }
@@ -530,9 +577,13 @@ struct SkillsSettingsTab: View {
             SkillDocument(
                 id: .skill(skill.id),
                 name: skill.name,
+                summary: skill.description,
+                fileName: skill.fileName,
                 path: skill.path,
                 kind: .skill,
-                fallbackDate: skill.addedAt
+                isEnabled: skill.isEnabled,
+                validationError: skill.validationError,
+                fallbackDate: skill.updatedAt
             )
         }
     }
@@ -616,8 +667,12 @@ struct SkillsSettingsTab: View {
         let document = SkillDocument(
             id: .agent,
             name: agent.name,
+            summary: "决定模型如何回答、调用工具和选择技能",
+            fileName: agent.name,
             path: agent.path,
             kind: .agent,
+            isEnabled: true,
+            validationError: nil,
             fallbackDate: agent.updatedAt
         )
         selection = .agent
@@ -686,9 +741,23 @@ private struct SkillDocument: Identifiable {
 
     let id: ID
     let name: String
+    let summary: String
+    let fileName: String
     let path: String
     let kind: Kind
+    let isEnabled: Bool
+    let validationError: String?
     let fallbackDate: Date
+
+    var listSubtitle: String {
+        if let validationError { return validationError }
+        if kind == .skill, !summary.isEmpty { return summary }
+        return kind.subtitle
+    }
+
+    var headerDescription: String {
+        kind == .skill && !summary.isEmpty ? summary : kind.description
+    }
 
     var modifiedAt: Date {
         let attributes = try? FileManager.default.attributesOfItem(atPath: path)

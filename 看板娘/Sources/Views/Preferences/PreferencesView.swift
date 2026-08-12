@@ -227,6 +227,7 @@ extension PreferencesView {
                 onRemoveAgent: backend.removeAgentFile,
                 onImportSkills: showSkillImportDialog,
                 onDeleteSkill: backend.deleteSkillFile(at:),
+                onSetSkillEnabled: backend.setSkillEnabled(id:isEnabled:),
                 onReadFile: backend.readMarkdownFile(at:),
                 onSaveAgent: backend.saveAgentFileContent(_:),
                 onSaveSkill: backend.saveSkillFileContent(id:content:),
