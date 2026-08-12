@@ -11,45 +11,15 @@ import AppKit
 
 // MARK: - Alpha 点击检测 NSView
 
-/// 自定义 NSView，通过渲染窗口 contentView 的 layer 来采样位置的 alpha 值，
-/// 判断是否命中非透明区域（用于点击和悬停检测）
+/// 通过后台预计算的素材 Alpha mask 判断是否命中角色。
+/// 命中路径只做坐标换算和一次字节访问，不再同步渲染 SwiftUI 图层树。
 class AlphaHitTestNSView: NSView, PetInteractiveRegion {
-    private struct AlphaMask {
-        let contentRect: NSRect
-        let backingScale: CGFloat
-        let pixelWidth: Int
-        let pixelHeight: Int
-        let bytesPerRow: Int
-        let pixels: [UInt8]
+    override var isFlipped: Bool { true }
 
-        func isOpaque(at pointInContent: NSPoint) -> Bool {
-            guard contentRect.contains(pointInContent) else { return false }
-
-            let pixelX = min(
-                max(Int((pointInContent.x - contentRect.minX) * backingScale), 0),
-                pixelWidth - 1
-            )
-            // NSHostingView is flipped, while the bitmap context is bottom-up.
-            // This is the cached equivalent of the previous per-pixel Y flip.
-            let pixelY = min(
-                max(Int((contentRect.maxY - pointInContent.y) * backingScale), 0),
-                pixelHeight - 1
-            )
-            let alphaOffset = pixelY * bytesPerRow + pixelX * 2 + 1
-            return pixels[alphaOffset] > 30
-        }
-    }
-
-    private struct AlphaMaskGeometry: Equatable {
-        let contentRect: NSRect
-        let contentBounds: NSRect
-        let backingScale: CGFloat
-    }
-
-    /// The window policy is refreshed at 30 Hz. Reusing the mask for the same
-    /// interval lets policy, hover and click hit tests sample one animation-frame
-    /// snapshot instead of independently rendering the full layer tree.
-    private static let alphaMaskLifetime: TimeInterval = 1.0 / 30.0
+    var alphaMask: PetImageAlphaMask?
+    var displayScale: CGFloat = 1
+    var displayOffset: CGSize = .zero
+    var artworkAlignmentOffset: CGFloat = 0
 
     /// 点击命中非透明区域时的回调
     var onTap: (() -> Void)?
@@ -76,13 +46,9 @@ class AlphaHitTestNSView: NSView, PetInteractiveRegion {
     private var initialMouseLocation: NSPoint?
     private var initialWindowOrigin: NSPoint?
     private var didDrag = false
-    private var cachedAlphaMask: AlphaMask?
-    private var cachedAlphaMaskGeometry: AlphaMaskGeometry?
-    private var cachedAlphaMaskCreationTime: TimeInterval = -.infinity
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        invalidateAlphaMask()
         guard window != nil else { return }
         Task { @MainActor in
             PetWindowHitTestCoordinator.shared.register(self)
@@ -90,7 +56,6 @@ class AlphaHitTestNSView: NSView, PetInteractiveRegion {
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
-        invalidateAlphaMask()
         if window != nil, newWindow == nil {
             Task { @MainActor in
                 PetWindowHitTestCoordinator.shared.unregister(self)
@@ -195,94 +160,15 @@ class AlphaHitTestNSView: NSView, PetInteractiveRegion {
     
     /// 判断指定本地坐标点是否为非透明像素
     private func isPointOpaque(_ localPoint: NSPoint) -> Bool {
-        // First reject points outside the clipped visible region. Most desktop
-        // mouse movement never reaches the more expensive alpha path.
         guard visibleRect.contains(localPoint) else { return false }
-
-        guard let contentView = window?.contentView, let layer = contentView.layer else {
-            return fallbackHitTest(localPoint)
-        }
-
-        let pointInContent = convert(localPoint, to: contentView)
-        let backingScale = window?.backingScaleFactor ?? 1.0
-        let visibleContentRect = convert(visibleRect, to: contentView).standardized
-            .intersection(contentView.bounds)
-        guard !visibleContentRect.isEmpty else { return false }
-
-        let geometry = AlphaMaskGeometry(
-            contentRect: visibleContentRect,
-            contentBounds: contentView.bounds,
-            backingScale: backingScale
+        guard let alphaMask else { return fallbackHitTest(localPoint) }
+        return alphaMask.isOpaque(
+            at: localPoint,
+            in: bounds,
+            displayScale: displayScale,
+            displayOffset: displayOffset,
+            artworkAlignmentOffset: artworkAlignmentOffset
         )
-        let now = ProcessInfo.processInfo.systemUptime
-        if let cachedAlphaMask,
-           cachedAlphaMaskGeometry == geometry,
-           now - cachedAlphaMaskCreationTime < Self.alphaMaskLifetime {
-            return cachedAlphaMask.isOpaque(at: pointInContent)
-        }
-
-        guard let mask = makeAlphaMask(
-            layer: layer,
-            contentRect: visibleContentRect,
-            backingScale: backingScale
-        ) else {
-            invalidateAlphaMask()
-            return fallbackHitTest(localPoint)
-        }
-
-        cachedAlphaMask = mask
-        cachedAlphaMaskGeometry = geometry
-        cachedAlphaMaskCreationTime = now
-        return mask.isOpaque(at: pointInContent)
-    }
-
-    private func makeAlphaMask(
-        layer: CALayer,
-        contentRect: NSRect,
-        backingScale: CGFloat
-    ) -> AlphaMask? {
-        let pixelWidth = max(Int(ceil(contentRect.width * backingScale)), 1)
-        let pixelHeight = max(Int(ceil(contentRect.height * backingScale)), 1)
-        let bytesPerPixel = 2 // grayscale + alpha
-        let bytesPerRow = pixelWidth * bytesPerPixel
-        var pixels = [UInt8](repeating: 0, count: bytesPerRow * pixelHeight)
-
-        let rendered = pixels.withUnsafeMutableBytes { buffer -> Bool in
-            guard let context = CGContext(
-                data: buffer.baseAddress,
-                width: pixelWidth,
-                height: pixelHeight,
-                bitsPerComponent: 8,
-                bytesPerRow: bytesPerRow,
-                space: CGColorSpaceCreateDeviceGray(),
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-            ) else {
-                return false
-            }
-
-            let scaledMinX = contentRect.minX * backingScale
-            let scaledMinY = contentRect.minY * backingScale
-            context.translateBy(x: -scaledMinX, y: -scaledMinY)
-            context.scaleBy(x: backingScale, y: backingScale)
-            layer.render(in: context)
-            return true
-        }
-        guard rendered else { return nil }
-
-        return AlphaMask(
-            contentRect: contentRect,
-            backingScale: backingScale,
-            pixelWidth: pixelWidth,
-            pixelHeight: pixelHeight,
-            bytesPerRow: bytesPerRow,
-            pixels: pixels
-        )
-    }
-
-    private func invalidateAlphaMask() {
-        cachedAlphaMask = nil
-        cachedAlphaMaskGeometry = nil
-        cachedAlphaMaskCreationTime = -.infinity
     }
 
     func containsPetInteraction(at screenPoint: NSPoint) -> Bool {
@@ -300,7 +186,7 @@ class AlphaHitTestNSView: NSView, PetInteractiveRegion {
         return window.convertToScreen(convert(visibleRect, to: nil))
     }
 
-    /// 兜底命中测试：如果 layer 渲染失败，使用中心 60% 区域
+    /// 素材遮罩尚未在后台生成时，临时使用中心 60% 区域。
     private func fallbackHitTest(_ localPoint: NSPoint) -> Bool {
         let insetX = bounds.width * 0.2
         let insetY = bounds.height * 0.2
@@ -326,6 +212,11 @@ class AlphaHitTestNSView: NSView, PetInteractiveRegion {
 
 /// 将 AlphaHitTestNSView 桥接到 SwiftUI 的 NSViewRepresentable
 struct AlphaHitTestOverlay: NSViewRepresentable {
+    var alphaMask: PetImageAlphaMask?
+    var displayScale: CGFloat
+    var displayOffset: CGSize
+    var artworkAlignmentOffset: CGFloat
+
     /// 点击非透明区域时的回调
     var onTap: () -> Void
     
@@ -344,6 +235,10 @@ struct AlphaHitTestOverlay: NSViewRepresentable {
 
     func makeNSView(context: Context) -> AlphaHitTestNSView {
         let view = AlphaHitTestNSView()
+        view.alphaMask = alphaMask
+        view.displayScale = displayScale
+        view.displayOffset = displayOffset
+        view.artworkAlignmentOffset = artworkAlignmentOffset
         view.onTap = onTap
         view.onHover = onHover
         view.onDoubleTap = onDoubleTap
@@ -355,6 +250,14 @@ struct AlphaHitTestOverlay: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: AlphaHitTestNSView, context: Context) {
+        let hitGeometryChanged = nsView.alphaMask !== alphaMask
+            || nsView.displayScale != displayScale
+            || nsView.displayOffset != displayOffset
+            || nsView.artworkAlignmentOffset != artworkAlignmentOffset
+        nsView.alphaMask = alphaMask
+        nsView.displayScale = displayScale
+        nsView.displayOffset = displayOffset
+        nsView.artworkAlignmentOffset = artworkAlignmentOffset
         nsView.onTap = onTap
         nsView.onHover = onHover
         nsView.onDoubleTap = onDoubleTap
@@ -362,5 +265,10 @@ struct AlphaHitTestOverlay: NSViewRepresentable {
         nsView.onDragBegan = onDragBegan
         nsView.onDragChanged = onDragChanged
         nsView.onDragEnded = onDragEnded
+        if hitGeometryChanged {
+            Task { @MainActor in
+                PetWindowHitTestCoordinator.shared.refreshMousePolicy()
+            }
+        }
     }
 }

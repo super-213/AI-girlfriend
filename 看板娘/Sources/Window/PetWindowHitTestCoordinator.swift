@@ -146,7 +146,21 @@ final class PetWindowHitTestCoordinator {
 }
 
 final class PetInteractionRegionNSView: NSView, PetInteractiveRegion {
+    private var policyRefreshScheduled = false
+
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        let changed = frame.size != newSize
+        super.setFrameSize(newSize)
+        if changed { schedulePolicyRefresh() }
+    }
+
+    override func setFrameOrigin(_ newOrigin: NSPoint) {
+        let changed = frame.origin != newOrigin
+        super.setFrameOrigin(newOrigin)
+        if changed { schedulePolicyRefresh() }
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -179,6 +193,16 @@ final class PetInteractionRegionNSView: NSView, PetInteractiveRegion {
               !visibleRect.isEmpty else { return nil }
         return window.convertToScreen(convert(visibleRect, to: nil))
     }
+
+    private func schedulePolicyRefresh() {
+        guard window != nil, !policyRefreshScheduled else { return }
+        policyRefreshScheduled = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.policyRefreshScheduled = false
+            PetWindowHitTestCoordinator.shared.refreshMousePolicy()
+        }
+    }
 }
 
 struct PetInteractiveRegionView: NSViewRepresentable {
@@ -186,11 +210,7 @@ struct PetInteractiveRegionView: NSViewRepresentable {
         PetInteractionRegionNSView(frame: .zero)
     }
 
-    func updateNSView(_ nsView: PetInteractionRegionNSView, context: Context) {
-        Task { @MainActor in
-            PetWindowHitTestCoordinator.shared.refreshMousePolicy()
-        }
-    }
+    func updateNSView(_ nsView: PetInteractionRegionNSView, context: Context) {}
 }
 
 extension View {

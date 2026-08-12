@@ -504,24 +504,25 @@ private extension NSRect {
     var area: CGFloat { max(width, 0) * max(height, 0) }
 }
 
+private final class PetWindowAttachmentNSView: NSView {
+    private weak var attachedWindow: NSWindow?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window, attachedWindow !== window else { return }
+        attachedWindow = window
+        Task { @MainActor in
+            PetWindowController.shared.attach(window: window)
+        }
+    }
+}
+
 struct PetWindowAccessor: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        DispatchQueue.main.async {
-            if let window = view.window {
-                PetWindowController.shared.attach(window: window)
-            }
-        }
-        return view
+        PetWindowAttachmentNSView(frame: .zero)
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            if let window = nsView.window {
-                PetWindowController.shared.attach(window: window)
-            }
-        }
-    }
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
 struct PetContentSizePreferenceKey: PreferenceKey {

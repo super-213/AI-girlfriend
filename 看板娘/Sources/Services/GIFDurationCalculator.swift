@@ -11,50 +11,55 @@ import AppKit
 
 /// GIF动画时长计算器
 struct GIFDurationCalculator {
+    private final class DurationCache: @unchecked Sendable {
+        let values = NSCache<NSString, NSNumber>()
+    }
+
+    private static let cache = DurationCache()
+
+    /// Returns a previously calculated duration without touching the GIF file.
+    /// Interaction handlers use this method so pointer feedback never waits for
+    /// ImageIO metadata parsing.
+    static func cachedDuration(for gifName: String) -> TimeInterval? {
+        cache.values.object(forKey: gifName as NSString)?.doubleValue
+    }
+
+    /// Warms the duration cache away from the main actor. The original GIF is
+    /// left untouched and remains the source used by the animated image view.
+    static func prefetchDuration(for gifName: String) {
+        guard cachedDuration(for: gifName) == nil else { return }
+        DispatchQueue.global(qos: .utility).async {
+            _ = getDuration(for: gifName)
+        }
+    }
     
     /// 计算GIF动画的实际播放时长
     /// - Parameter gifName: GIF文件名或路径
     /// - Returns: GIF的总播放时长（秒）
     static func getDuration(for gifName: String) -> TimeInterval {
+        if let cached = cachedDuration(for: gifName) {
+            return cached
+        }
+
         guard let gifUrl = getGifUrl(gifName: gifName) else {
-            #if DEBUG
-            print("无法获取GIF URL: \(gifName)")
-            #endif
             return 2.0
         }
-        
-        #if DEBUG
-        print("GIF路径: \(gifUrl.path)")
-        #endif
-        
+
         guard let imageSource = CGImageSourceCreateWithURL(gifUrl as CFURL, nil) else {
-            #if DEBUG
-            print("无法创建ImageSource")
-            #endif
             return 2.0
         }
-        
+
         let frameCount = CGImageSourceGetCount(imageSource)
-        #if DEBUG
-        print("总帧数: \(frameCount)")
-        #endif
-        
         var totalDuration: TimeInterval = 0
-        
+
         for i in 0..<frameCount {
             let frameDuration = getFrameDuration(from: imageSource, at: i)
             totalDuration += frameDuration
-            
-            #if DEBUG
-            print("第\(i)帧延迟: \(frameDuration)秒")
-            #endif
         }
-        
-        #if DEBUG
-        print("总时长: \(totalDuration)秒")
-        #endif
-        
-        return totalDuration >= 0.5 ? totalDuration : 2.0
+
+        let resolvedDuration = totalDuration >= 0.5 ? totalDuration : 2.0
+        cache.values.setObject(NSNumber(value: resolvedDuration), forKey: gifName as NSString)
+        return resolvedDuration
     }
 
     
@@ -62,9 +67,6 @@ struct GIFDurationCalculator {
     private static func getFrameDuration(from imageSource: CGImageSource, at index: Int) -> TimeInterval {
         guard let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, index, nil) as? [String: Any],
               let gifInfo = properties[kCGImagePropertyGIFDictionary as String] as? [String: Any] else {
-            #if DEBUG
-            print("第\(index)帧无法读取属性")
-            #endif
             return 0.1
         }
         
@@ -109,9 +111,6 @@ struct GIFDurationCalculator {
                 return url
             }
             
-            #if DEBUG
-            print("尝试了所有路径都找不到: \(gifName)")
-            #endif
             return nil
         }
     }

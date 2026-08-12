@@ -6,12 +6,13 @@
 import SwiftUI
 
 struct PetInputView: View {
-    @Binding var text: String
+    @State private var text = ""
     var isFocused: FocusState<Bool>.Binding
     let placeholder: String
     let isDisabled: Bool
     let onHover: (Bool) -> Void
-    let onSubmit: () -> Void
+    let onTextPresenceChanged: (Bool) -> Void
+    let onSubmit: (String) -> Void
     let onCancel: () -> Void
 
     var body: some View {
@@ -21,16 +22,16 @@ struct PetInputView: View {
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
                 .focused(isFocused)
-                .onSubmit(onSubmit)
+                .onSubmit(submit)
             if !text.isEmpty {
-                Button(action: onSubmit) {
+                Button(action: submit) {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 19))
                 }
                 .buttonStyle(.plain)
                 .help("发送")
             }
-            Button(action: onCancel) {
+            Button(action: cancel) {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 17))
                     .foregroundStyle(.secondary)
@@ -47,6 +48,22 @@ struct PetInputView: View {
         .shadow(color: .black.opacity(0.12), radius: 12, y: 5)
         .disabled(isDisabled)
         .onHover(perform: onHover)
+        .onChange(of: text.isEmpty) { oldValue, newValue in
+            guard oldValue != newValue else { return }
+            onTextPresenceChanged(!newValue)
+        }
         .petInteractiveRegion()
+    }
+
+    private func submit() {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let submittedText = text
+        text = ""
+        onSubmit(submittedText)
+    }
+
+    private func cancel() {
+        text = ""
+        onCancel()
     }
 }

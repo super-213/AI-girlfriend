@@ -65,6 +65,7 @@ struct PetRootView: View {
     @State private var isHoveringPet = false
     @State private var isHoveringInput = false
     @State private var keepInputVisible = false
+    @State private var hasInputText = false
     @State private var showQuickMenu = false
     @State private var hasAppeared = false
     @FocusState private var isInputFocused: Bool
@@ -78,7 +79,7 @@ struct PetRootView: View {
     }
 
     private var shouldShowInput: Bool {
-        isHoveringPet || isHoveringInput || isInputFocused || keepInputVisible || !petViewBackend.userInput.isEmpty
+        isHoveringPet || isHoveringInput || isInputFocused || keepInputVisible || hasInputText
     }
 
     private var usesNearbyConfirmation: Bool {
@@ -109,9 +110,9 @@ struct PetRootView: View {
                     .transition(.scale(scale: 0.94, anchor: .bottom).combined(with: .opacity))
                 }
 
-                if petViewBackend.showOutputBox && !petViewBackend.streamedResponse.isEmpty {
-                    PetSpeechBubbleView(
-                        text: petViewBackend.streamedResponse,
+                if petViewBackend.showOutputBox {
+                    PetSpeechBubbleContainer(
+                        responseStore: petViewBackend.streamedResponseStore,
                         state: coordinator.snapshot.renderedState,
                         canCancel: canCancelCurrentRequest,
                         onCancel: petViewBackend.cancelActiveRequest,
@@ -133,11 +134,11 @@ struct PetRootView: View {
                 ZStack(alignment: .bottom) {
                     if shouldShowInput {
                         PetInputView(
-                            text: $petViewBackend.userInput,
                             isFocused: $isInputFocused,
                             placeholder: petViewBackend.conversationStyle.inputPlaceholder,
                             isDisabled: coordinator.snapshot.activityState == .waitingForConfirmation,
                             onHover: { isHoveringInput = $0 },
+                            onTextPresenceChanged: { hasInputText = $0 },
                             onSubmit: submitInput,
                             onCancel: cancelInput
                         )
@@ -224,17 +225,17 @@ struct PetRootView: View {
         )
     }
 
-    private func submitInput() {
-        petViewBackend.submitInput()
+    private func submitInput(_ text: String) {
+        petViewBackend.submitExternalInput(text)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
             isInputFocused = false
         }
     }
 
     private func cancelInput() {
-        petViewBackend.userInput = ""
         isInputFocused = false
         isHoveringInput = false
+        hasInputText = false
         keepInputVisible = false
     }
 

@@ -5,6 +5,32 @@
 
 import SwiftUI
 
+/// Observes only the high-frequency streamed text. Keeping this observation out
+/// of `PetRootView` prevents every token batch from rebuilding the character,
+/// input composer and window attachment bridge.
+struct PetSpeechBubbleContainer: View {
+    @ObservedObject var responseStore: PetStreamedResponseStore
+    let state: PetActivityState
+    let canCancel: Bool
+    let onCancel: () -> Void
+    let onDismiss: () -> Void
+    let onOpenDialog: () -> Void
+
+    @ViewBuilder
+    var body: some View {
+        if !responseStore.text.isEmpty {
+            PetSpeechBubbleView(
+                text: responseStore.text,
+                state: state,
+                canCancel: canCancel,
+                onCancel: onCancel,
+                onDismiss: onDismiss,
+                onOpenDialog: onOpenDialog
+            )
+        }
+    }
+}
+
 struct PetSpeechBubbleView: View {
     let text: String
     let state: PetActivityState

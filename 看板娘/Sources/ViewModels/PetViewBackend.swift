@@ -10,6 +10,22 @@ import Combine
 import Foundation
 
 @MainActor
+final class PetStreamedResponseStore: ObservableObject {
+    @Published fileprivate(set) var text = ""
+
+    fileprivate func replace(with text: String) {
+        self.text = text
+    }
+
+    fileprivate func append(_ text: String, limit: Int) {
+        self.text += text
+        if self.text.count > limit {
+            self.text = String(self.text.suffix(limit))
+        }
+    }
+}
+
+@MainActor
 final class PetViewBackend: ObservableObject {
     @Published var currentCharacter: PetCharacter = puppetBear {
         didSet {
@@ -21,8 +37,6 @@ final class PetViewBackend: ObservableObject {
     @Published private(set) var conversationStyle: PetConversationStyle = .default
     @Published private(set) var currentResolvedAsset: PetResolvedAsset?
     @Published private(set) var currentGif: String = puppetBear.normalGif
-    @Published var userInput = ""
-    @Published var streamedResponse = ""
     @Published var showCommandConfirm = false
     @Published var pendingCommand = ""
     @Published private(set) var isExecutingCommand = false
@@ -31,6 +45,12 @@ final class PetViewBackend: ObservableObject {
     @Published var showOutputBox = false
 
     let stateCoordinator: PetStateCoordinator
+    let streamedResponseStore = PetStreamedResponseStore()
+
+    var streamedResponse: String {
+        get { streamedResponseStore.text }
+        set { streamedResponseStore.replace(with: newValue) }
+    }
 
     var isThinking: Bool {
         if isRecognizingTrigger || isCompactingContext { return true }
@@ -90,6 +110,7 @@ final class PetViewBackend: ObservableObject {
         self.stateCoordinator = stateCoordinator ?? PetStateCoordinator()
 
         currentCharacter = Self.initialCharacter()
+        prefetchInteractionDurations()
         refreshConversationStyle()
         configureAgentRuntime()
         bindState()
@@ -121,13 +142,6 @@ final class PetViewBackend: ObservableObject {
 
     func onDisappear() {
         cancelAutoActionLoop()
-    }
-
-    func submitInput() {
-        let submittedInput = userInput
-        guard !submittedInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        submitExternalInput(submittedInput)
-        userInput = ""
     }
 
     func submitExternalInput(_ input: String) {
@@ -259,6 +273,7 @@ final class PetViewBackend: ObservableObject {
 
     func switchToCharacter(_ character: PetCharacter) {
         currentCharacter = character
+        prefetchInteractionDurations()
         stateCoordinator.send(.interaction(.greet, interactionDuration))
     }
 
@@ -424,10 +439,7 @@ final class PetViewBackend: ObservableObject {
     }
 
     private func appendStreamedResponse(_ text: String) {
-        streamedResponse += text
-        if streamedResponse.count > 5_000 {
-            streamedResponse = String(streamedResponse.suffix(5_000))
-        }
+        streamedResponseStore.append(text, limit: 5_000)
     }
 
     private func tryLegacyAppleMusicFallback(_ input: String, runID: UUID) -> Bool {
@@ -576,7 +588,18 @@ final class PetViewBackend: ObservableObject {
         guard let asset = currentCharacter.interactionAssets.first else { return nil }
         if let preferredDuration = asset.preferredDuration { return preferredDuration }
         guard asset.type == .gif, !asset.loop else { return nil }
-        return max(GIFDurationCalculator.getDuration(for: asset.location) * 0.9, 0.5)
+        guard let cachedDuration = GIFDurationCalculator.cachedDuration(for: asset.location) else {
+            GIFDurationCalculator.prefetchDuration(for: asset.location)
+            return nil
+        }
+        return max(cachedDuration * 0.9, 0.5)
+    }
+
+    private func prefetchInteractionDurations() {
+        for asset in currentCharacter.interactionAssets
+        where asset.preferredDuration == nil && asset.type == .gif && !asset.loop {
+            GIFDurationCalculator.prefetchDuration(for: asset.location)
+        }
     }
 
     private func registerNotifications() {
