@@ -93,6 +93,7 @@ final class DialogChatViewModel: ObservableObject {
     @Published var showToolConfirmation: Bool = false
     @Published var pendingToolSummary: String = ""
     @Published var isExecutingTool: Bool = false
+    @Published private(set) var isCompactingContext: Bool = false
     @Published private(set) var cacheStatus: DialogCacheStatus
 
     private static let conversationsStorageKey = "dialog.conversations.v1"
@@ -233,6 +234,7 @@ final class DialogChatViewModel: ObservableObject {
         agentRuntime.cancel()
         isRequesting = false
         isExecutingTool = false
+        isCompactingContext = false
         showToolConfirmation = false
         pendingToolSummary = ""
         if let last = messages.last, last.role == .assistant, last.content.isEmpty {
@@ -273,6 +275,13 @@ final class DialogChatViewModel: ObservableObject {
     }
 
     private func configureAgentRuntime() {
+        agentRuntime.onContextCompactionStarted = { [weak self] in
+            guard let self else { return }
+            self.streamTextCoalescer.flush()
+            self.isRequesting = true
+            self.isExecutingTool = false
+            self.isCompactingContext = true
+        }
         agentRuntime.onAssistantResponseStarted = { [weak self] in
             guard let self else { return }
             self.streamTextCoalescer.flush()
@@ -280,6 +289,7 @@ final class DialogChatViewModel: ObservableObject {
             self.activeAssistantID = id
             self.isRequesting = true
             self.isExecutingTool = false
+            self.isCompactingContext = false
             self.messages.append(DialogMessage(id: id, role: .assistant, content: ""))
         }
         agentRuntime.onAssistantText = { [weak self] chunk in
@@ -314,6 +324,7 @@ final class DialogChatViewModel: ObservableObject {
             self.streamTextCoalescer.flush()
             self.isRequesting = false
             self.isExecutingTool = false
+            self.isCompactingContext = false
             self.fillEmptyAssistantMessage("（模型没有返回文本）")
             self.refreshCacheStatus()
             self.synchronizeSelectedConversation(persist: true)
@@ -324,6 +335,7 @@ final class DialogChatViewModel: ObservableObject {
             self.streamTextCoalescer.flush()
             self.isRequesting = false
             self.isExecutingTool = false
+            self.isCompactingContext = false
             self.showToolConfirmation = false
             self.pendingToolSummary = ""
             self.fillEmptyAssistantMessage("请求失败：\(error.localizedDescription)")

@@ -14,6 +14,15 @@ enum AgentMessageRole: String, Codable {
     case tool
 }
 
+enum AgentMessageContextKind: String, Codable {
+    case compactionSummary
+}
+
+enum AgentRequestPurpose: String {
+    case conversation
+    case contextCompaction
+}
+
 struct AgentToolCall: Codable, Equatable, Identifiable {
     let id: String
     let name: String
@@ -34,6 +43,7 @@ struct AgentMessage: Codable, Equatable {
     var toolCalls: [AgentToolCall]?
     var toolCallID: String?
     var name: String?
+    var contextKind: AgentMessageContextKind?
 
     static func system(_ content: String) -> AgentMessage {
         AgentMessage(role: .system, content: content)
@@ -57,6 +67,14 @@ struct AgentMessage: Codable, Equatable {
             content: content,
             toolCallID: call.id,
             name: call.name
+        )
+    }
+
+    static func contextSummary(_ content: String) -> AgentMessage {
+        AgentMessage(
+            role: .system,
+            content: content,
+            contextKind: .compactionSummary
         )
     }
 

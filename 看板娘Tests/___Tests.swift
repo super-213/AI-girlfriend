@@ -9,15 +9,18 @@ struct AgentFoundationTests {
     private final class FakeModelClient: AgentModelClient {
         var responses: [AgentModelResponse] = []
         private(set) var requests: [[AgentMessage]] = []
+        private(set) var requestPurposes: [AgentRequestPurpose] = []
 
         func sendAgentStreamRequest(
             messages: [AgentMessage],
             tools: [AgentToolDefinition],
+            purpose: AgentRequestPurpose,
             onReceive: @escaping @MainActor @Sendable (String) -> Void,
             onComplete: @escaping @MainActor @Sendable (AgentModelResponse) -> Void,
             onError: @escaping @MainActor @Sendable (Error) -> Void
         ) {
             requests.append(messages)
+            requestPurposes.append(purpose)
             let response = responses.removeFirst()
             if !response.content.isEmpty { onReceive(response.content) }
             onComplete(response)
@@ -212,6 +215,97 @@ struct AgentFoundationTests {
         #expect(client.requests[1].count == 2)
         #expect(client.requests[1][0].role == .system)
         #expect(client.requests[1][1] == .user("two"))
+    }
+
+    @Test @MainActor
+    func runtimeCompactsOlderTurnsIntoAStructuredSummary() {
+        let client = FakeModelClient()
+        client.responses = [
+            AgentModelResponse(content: String(repeating: "旧回复", count: 160), toolCalls: []),
+            AgentModelResponse(
+                content: "## 用户目标与约束\n- 继续测试\n\n## 当前状态与未完成项\n- 等待新问题",
+                toolCalls: []
+            ),
+            AgentModelResponse(content: "新回复", toolCalls: [])
+        ]
+        let runtime = AgentRuntime(
+            apiManager: client,
+            registry: AgentToolRegistry(),
+            contextCompactionPolicy: AgentContextCompactionPolicy(
+                triggerTokenCount: 120,
+                targetTokenCount: 80,
+                summaryTokenReserve: 20,
+                maximumToolResultCharacters: 200,
+                maximumSummaryInputCharacters: 4_000
+            ),
+            systemPromptProvider: { "system" }
+        )
+        var events: [AgentContextCompactionEvent] = []
+        runtime.onContextCompacted = { events.append($0) }
+
+        runtime.send("第一个问题")
+        runtime.send("第二个问题")
+
+        #expect(client.requestPurposes == [.conversation, .contextCompaction, .conversation])
+        #expect(events.count == 1)
+        #expect(client.requests[1].first?.content?.contains("Agent 会话压缩器") == true)
+        #expect(client.requests[2].contains(where: { $0.contextKind == .compactionSummary }))
+        #expect(client.requests[2].last == .user("第二个问题"))
+        #expect(client.requests[2].contains(where: { $0.content?.contains("第一个问题") == true }) == false)
+        #expect(runtime.messages.last?.content == "新回复")
+    }
+
+    @Test
+    func compactionPlannerKeepsToolCallAndResultInTheSameRecentTurn() throws {
+        let manager = AgentContextManager(policy: AgentContextCompactionPolicy(
+            triggerTokenCount: 1,
+            targetTokenCount: 1,
+            summaryTokenReserve: 1,
+            maximumToolResultCharacters: 200,
+            maximumSummaryInputCharacters: 4_000
+        ))
+        let call = AgentToolCall(id: "call-1", name: "read_file", arguments: "{}")
+        let messages: [AgentMessage] = [
+            .system("system"),
+            .user("旧问题"),
+            .assistant(content: "旧回复"),
+            .user("新问题"),
+            .assistant(content: nil, toolCalls: [call]),
+            .tool(call: call, content: "工具结果")
+        ]
+
+        let plan = try #require(manager.makePlan(messages: messages, tools: []))
+
+        #expect(plan.messagesToSummarize == Array(messages[1...2]))
+        #expect(plan.recentMessages == Array(messages[3...5]))
+    }
+
+    @Test
+    func compactionSummaryMetadataSurvivesPersistence() throws {
+        let original = AgentMessage.contextSummary("## 当前状态与未完成项\n- 继续实现")
+
+        let encoded = try JSONEncoder().encode(original)
+        let restored = try JSONDecoder().decode(AgentMessage.self, from: encoded)
+
+        #expect(restored == original)
+        #expect(restored.contextKind == .compactionSummary)
+    }
+
+    @Test
+    func longToolResultsKeepTheirBeginningAndEndWithinTheContextLimit() {
+        let manager = AgentContextManager(policy: AgentContextCompactionPolicy(
+            triggerTokenCount: 100,
+            targetTokenCount: 50,
+            summaryTokenReserve: 10,
+            maximumToolResultCharacters: 20,
+            maximumSummaryInputCharacters: 100
+        ))
+        let bounded = manager.boundedToolResult("BEGIN-1234567890-abcdefghij-END")
+
+        #expect(bounded.hasPrefix("BEGIN"))
+        #expect(bounded.hasSuffix("j-END"))
+        #expect(bounded.contains("中部内容已省略"))
+        #expect(bounded.count < 80)
     }
 
     @Test

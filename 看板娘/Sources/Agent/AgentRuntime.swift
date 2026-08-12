@@ -12,6 +12,7 @@ protocol AgentModelClient: AnyObject {
     func sendAgentStreamRequest(
         messages: [AgentMessage],
         tools: [AgentToolDefinition],
+        purpose: AgentRequestPurpose,
         onReceive: @escaping @MainActor @Sendable (String) -> Void,
         onComplete: @escaping @MainActor @Sendable (AgentModelResponse) -> Void,
         onError: @escaping @MainActor @Sendable (Error) -> Void
@@ -33,6 +34,8 @@ final class AgentRuntime {
     var onToolStarted: ((String) -> Void)?
     var onToolFinished: ((String, AgentToolExecutionResult) -> Void)?
     var onApprovalRequested: ((AgentPendingApproval) -> Void)?
+    var onContextCompactionStarted: (() -> Void)?
+    var onContextCompacted: ((AgentContextCompactionEvent) -> Void)?
     var onCompleted: (() -> Void)?
     var onError: ((Error) -> Void)?
 
@@ -43,16 +46,22 @@ final class AgentRuntime {
     private let registry: AgentToolRegistry
     private let systemPromptProvider: () -> String
     private let enabledSkillNameResolver: (String) -> String?
+    private let contextManager: AgentContextManager
     private let maxIterations: Int
     private var iterationCount = 0
     private var pendingCalls: [AgentToolCall] = []
     private var pendingApproval: (call: AgentToolCall, tool: any AgentTool, arguments: [String: Any])?
+    private var previousContextMeasurement: AgentContextMeasurement?
+    private var inFlightEstimatedTokens: Int?
+    private var lastCompactionAttemptMessageCount: Int?
+    private var isCompacting = false
     private var runToken = UUID()
 
     init(
         apiManager: any AgentModelClient = APIManager(),
         registry: AgentToolRegistry = .standard(),
         maxIterations: Int = 8,
+        contextCompactionPolicy: AgentContextCompactionPolicy = .standard,
         enabledSkillNameResolver: @escaping (String) -> String? = {
             SkillLibrary.enabledSkill(named: $0)?.name
         },
@@ -61,6 +70,7 @@ final class AgentRuntime {
         self.apiManager = apiManager
         self.registry = registry
         self.maxIterations = maxIterations
+        contextManager = AgentContextManager(policy: contextCompactionPolicy)
         self.enabledSkillNameResolver = enabledSkillNameResolver
         self.systemPromptProvider = systemPromptProvider
     }
@@ -99,6 +109,10 @@ final class AgentRuntime {
         apiManager.cancelStreamRequest()
         pendingCalls.removeAll()
         pendingApproval = nil
+        previousContextMeasurement = nil
+        inFlightEstimatedTokens = nil
+        lastCompactionAttemptMessageCount = nil
+        isCompacting = false
         isRunning = false
     }
 
@@ -112,7 +126,10 @@ final class AgentRuntime {
         guard let pendingApproval else { return }
         self.pendingApproval = nil
         let result = AgentToolExecutionResult.failure("用户拒绝执行该工具")
-        messages.append(.tool(call: pendingApproval.call, content: result.modelContent))
+        messages.append(.tool(
+            call: pendingApproval.call,
+            content: contextManager.boundedToolResult(result.modelContent)
+        ))
         onToolFinished?(pendingApproval.call.name, result)
         executeNextToolCall()
     }
@@ -123,14 +140,32 @@ final class AgentRuntime {
             finishWithError(AgentRuntimeError.iterationLimit)
             return
         }
-        iterationCount += 1
         refreshSystemPrompt()
 
+        if startContextCompactionIfNeeded() {
+            return
+        }
+        performModelRequest()
+    }
+
+    private func performModelRequest() {
+        guard isRunning else { return }
+        guard iterationCount < maxIterations else {
+            finishWithError(AgentRuntimeError.iterationLimit)
+            return
+        }
+        iterationCount += 1
+
         let token = runToken
+        inFlightEstimatedTokens = contextManager.estimatedTokenCount(
+            messages: messages,
+            tools: registry.definitions
+        )
         onAssistantResponseStarted?()
         apiManager.sendAgentStreamRequest(
             messages: messages,
             tools: registry.definitions,
+            purpose: .conversation,
             onReceive: { [weak self] text in
                 guard let self, self.runToken == token else { return }
                 self.onAssistantText?(text)
@@ -147,6 +182,14 @@ final class AgentRuntime {
     }
 
     private func handle(_ response: AgentModelResponse) {
+        if let measuredTokens = response.usage?.promptTokens,
+           let estimatedTokens = inFlightEstimatedTokens {
+            previousContextMeasurement = AgentContextMeasurement(
+                estimatedTokens: estimatedTokens,
+                measuredTokens: measuredTokens
+            )
+        }
+        inFlightEstimatedTokens = nil
         let toolCalls = response.toolCalls.map(normalizeSkillToolCall)
         messages.append(.assistant(
             content: response.content.isEmpty ? nil : response.content,
@@ -192,7 +235,10 @@ final class AgentRuntime {
         guard let tool = registry.tool(named: call.name) else {
             let error = AgentRuntimeError.toolUnavailable(call.name)
             let result = AgentToolExecutionResult.failure(error.localizedDescription)
-            messages.append(.tool(call: call, content: result.modelContent))
+            messages.append(.tool(
+                call: call,
+                content: contextManager.boundedToolResult(result.modelContent)
+            ))
             onToolFinished?(call.name, result)
             executeNextToolCall()
             return
@@ -203,7 +249,10 @@ final class AgentRuntime {
             arguments = try call.decodedArguments()
         } catch {
             let result = AgentToolExecutionResult.failure(error.localizedDescription)
-            messages.append(.tool(call: call, content: result.modelContent))
+            messages.append(.tool(
+                call: call,
+                content: contextManager.boundedToolResult(result.modelContent)
+            ))
             onToolFinished?(call.name, result)
             executeNextToolCall()
             return
@@ -231,7 +280,10 @@ final class AgentRuntime {
         onToolStarted?(call.name)
         tool.execute(arguments: arguments) { [weak self] result in
             guard let self, self.runToken == token, self.isRunning else { return }
-            self.messages.append(.tool(call: call, content: result.modelContent))
+            self.messages.append(.tool(
+                call: call,
+                content: self.contextManager.boundedToolResult(result.modelContent)
+            ))
             self.onToolFinished?(call.name, result)
             self.executeNextToolCall()
         }
@@ -241,7 +293,64 @@ final class AgentRuntime {
         isRunning = false
         pendingCalls.removeAll()
         pendingApproval = nil
+        isCompacting = false
         onError?(error)
+    }
+
+    private func startContextCompactionIfNeeded() -> Bool {
+        guard !isCompacting,
+              lastCompactionAttemptMessageCount != messages.count,
+              let plan = contextManager.makePlan(
+                messages: messages,
+                tools: registry.definitions,
+                previousMeasurement: previousContextMeasurement
+              ),
+              let systemMessage = messages.first(where: {
+                $0.role == .system && $0.contextKind == nil
+              }) else {
+            return false
+        }
+
+        isCompacting = true
+        lastCompactionAttemptMessageCount = messages.count
+        onContextCompactionStarted?()
+        let token = runToken
+        apiManager.sendAgentStreamRequest(
+            messages: contextManager.summaryRequestMessages(for: plan),
+            tools: [],
+            purpose: .contextCompaction,
+            onReceive: { _ in },
+            onComplete: { [weak self] response in
+                guard let self, self.runToken == token, self.isRunning else { return }
+                self.isCompacting = false
+                let summary = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !summary.isEmpty {
+                    self.messages = self.contextManager.compactedMessages(
+                        systemMessage: systemMessage,
+                        summary: summary,
+                        plan: plan
+                    )
+                    self.previousContextMeasurement = nil
+                    self.lastCompactionAttemptMessageCount = nil
+                    self.onContextCompacted?(
+                        AgentContextCompactionEvent(
+                            summarizedMessageCount: plan.messagesToSummarize.count,
+                            retainedMessageCount: plan.recentMessages.count,
+                            estimatedTokensBeforeCompaction: plan.estimatedTokensBeforeCompaction
+                        )
+                    )
+                }
+                self.performModelRequest()
+            },
+            onError: { [weak self] _ in
+                guard let self, self.runToken == token, self.isRunning else { return }
+                self.isCompacting = false
+                // Compaction is an optimization. A transient summarization failure
+                // must not discard history or block the user's actual request.
+                self.performModelRequest()
+            }
+        )
+        return true
     }
 
     private func refreshSystemPrompt() {

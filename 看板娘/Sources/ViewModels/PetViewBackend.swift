@@ -27,12 +27,13 @@ final class PetViewBackend: ObservableObject {
     @Published var pendingCommand = ""
     @Published private(set) var isExecutingCommand = false
     @Published private(set) var isRecognizingTrigger = false
+    @Published private(set) var isCompactingContext = false
     @Published var showOutputBox = false
 
     let stateCoordinator: PetStateCoordinator
 
     var isThinking: Bool {
-        if isRecognizingTrigger { return true }
+        if isRecognizingTrigger || isCompactingContext { return true }
         switch stateCoordinator.snapshot.activityState {
         case .thinking, .talking, .automation, .triggered:
             return true
@@ -42,7 +43,7 @@ final class PetViewBackend: ObservableObject {
     }
 
     var isBusy: Bool {
-        isRecognizingTrigger || isExecutingCommand || stateCoordinator.isBusy
+        isRecognizingTrigger || isExecutingCommand || isCompactingContext || stateCoordinator.isBusy
     }
 
     var isReacting: Bool {
@@ -228,13 +229,14 @@ final class PetViewBackend: ObservableObject {
     }
 
     func cancelActiveRequest() {
-        guard activeRequestID != nil || isRecognizingTrigger || isExecutingCommand else { return }
+        guard activeRequestID != nil || isRecognizingTrigger || isExecutingCommand || isCompactingContext else { return }
         streamTextCoalescer.reset()
         agentRuntime.cancel()
         apiManager.cancelStreamRequest()
         activeRequestID = nil
         activeRequestKind = nil
         isRecognizingTrigger = false
+        isCompactingContext = false
         isExecutingCommand = false
         showCommandConfirm = false
         pendingCommand = ""
@@ -304,8 +306,15 @@ final class PetViewBackend: ObservableObject {
     }
 
     private func configureAgentRuntime() {
+        agentRuntime.onContextCompactionStarted = { [weak self] in
+            guard let self else { return }
+            self.isCompactingContext = true
+            self.streamedResponse = "正在压缩较早的会话上下文…"
+            self.revealOutputBox(autoHideAfter: 30)
+        }
         agentRuntime.onAssistantResponseStarted = { [weak self] in
             guard let self, let runID = self.activeRequestID else { return }
+            self.isCompactingContext = false
             self.streamTextCoalescer.reset()
             self.streamedResponse = ""
             self.hasReceivedStreamContent = false
@@ -345,6 +354,7 @@ final class PetViewBackend: ObservableObject {
         agentRuntime.onToolFinished = { [weak self] name, result in
             guard let self else { return }
             self.isExecutingCommand = false
+            self.isCompactingContext = false
             if result.isError {
                 self.streamedResponse = "工具 \(name) 执行失败：\(result.content)"
                 self.revealOutputBox(autoHideAfter: 15)
@@ -364,6 +374,7 @@ final class PetViewBackend: ObservableObject {
             guard let self, let runID = self.activeRequestID else { return }
             self.streamTextCoalescer.flush()
             self.isExecutingCommand = false
+            self.isCompactingContext = false
             let kind = self.activeRequestKind
             if self.streamedResponse.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 self.streamedResponse = "模型没有返回内容，需要你补充说明或重试。"
@@ -394,6 +405,7 @@ final class PetViewBackend: ObservableObject {
             self.streamTextCoalescer.reset()
             let message = error.localizedDescription
             self.isExecutingCommand = false
+            self.isCompactingContext = false
             self.showCommandConfirm = false
             self.pendingCommand = ""
             self.streamedResponse = "请求失败：\(message)"

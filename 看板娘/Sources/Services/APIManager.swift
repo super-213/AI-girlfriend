@@ -84,6 +84,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     private var agentText = ""
     private var agentToolCallParts: [Int: StreamingToolCallPart] = [:]
     private var agentUsage: AgentTokenUsage?
+    private var agentRequestPurpose: AgentRequestPurpose = .conversation
     private(set) var latestAgentTokenUsage: AgentTokenUsage?
 
     // MARK: - 外部接口
@@ -146,6 +147,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     func sendAgentStreamRequest(
         messages: [AgentMessage],
         tools: [AgentToolDefinition],
+        purpose: AgentRequestPurpose,
         onReceive: @escaping @MainActor @Sendable (String) -> Void,
         onComplete: @escaping @MainActor @Sendable (AgentModelResponse) -> Void,
         onError: @escaping @MainActor @Sendable (Error) -> Void
@@ -160,6 +162,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         agentText = ""
         agentToolCallParts = [:]
         agentUsage = nil
+        agentRequestPurpose = purpose
 
         guard let request = buildAgentRequest(messages: messages, tools: tools) else {
             finishAgentStream(with: APIStreamError.invalidConfiguration)
@@ -295,8 +298,6 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             payload = [
                 "model": aiModel,
                 "messages": messageObjects,
-                "tools": toolObjects,
-                "tool_choice": "auto",
                 "top_p": 0.7,
                 "temperature": 0.7,
                 "stream": true
@@ -305,8 +306,6 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             payload = [
                 "model": aiModel,
                 "messages": messageObjects,
-                "tools": toolObjects,
-                "tool_choice": "auto",
                 "temperature": 0.7,
                 "stream": true,
                 "stream_options": ["include_usage": true]
@@ -315,12 +314,18 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             payload = [
                 "model": aiModel,
                 "messages": messageObjects,
-                "tools": toolObjects,
                 "stream": true,
                 "options": ["temperature": 0.7, "top_p": 0.7]
             ]
         default:
             return nil
+        }
+
+        if !toolObjects.isEmpty {
+            payload["tools"] = toolObjects
+            if provider.lowercased() != "ollama" {
+                payload["tool_choice"] = "auto"
+            }
         }
 
         var finalApiUrl = apiUrl
@@ -444,6 +449,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         agentText = ""
         agentToolCallParts = [:]
         agentUsage = nil
+        agentRequestPurpose = .conversation
     }
 
     func cancelStreamRequest() {
@@ -617,6 +623,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         guard isAgentRequest else { return }
         let completion = agentOnComplete
         let errorHandler = agentOnError
+        let requestPurpose = agentRequestPurpose
         let response = AgentModelResponse(
             content: agentText,
             toolCalls: agentToolCallParts
@@ -632,7 +639,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             usage: agentUsage
         )
 
-        if let usage = response.usage {
+        if requestPurpose == .conversation, let usage = response.usage {
             latestAgentTokenUsage = usage
             let metrics = AgentCacheMetricsStore.record(
                 usage,
@@ -669,6 +676,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         agentText = ""
         agentToolCallParts = [:]
         agentUsage = nil
+        agentRequestPurpose = .conversation
 
         if let error {
             errorHandler?(error)

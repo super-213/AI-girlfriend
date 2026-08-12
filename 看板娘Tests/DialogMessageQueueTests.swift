@@ -12,6 +12,7 @@ struct DialogMessageQueueTests {
         func sendAgentStreamRequest(
             messages: [AgentMessage],
             tools: [AgentToolDefinition],
+            purpose: AgentRequestPurpose,
             onReceive: @escaping @MainActor @Sendable (String) -> Void,
             onComplete: @escaping @MainActor @Sendable (AgentModelResponse) -> Void,
             onError: @escaping @MainActor @Sendable (Error) -> Void

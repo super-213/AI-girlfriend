@@ -83,6 +83,8 @@
 - `list_automations` / `run_automation`：自动化查询与执行
 
 `AgentTool` 协议与 `AgentToolRegistry` 支持继续注册结构化工具。Runtime 支持多工具调用、结果回灌、未知工具/参数错误反馈、取消、最大迭代限制和人在回路确认。Qwen/OpenAI-compatible、智谱和 Ollama 分别在 `APIManager` 中适配为统一的 `AgentMessage`/`AgentToolCall`。
+
+长会话接近上下文预算时，Runtime 会自动压缩较早轮次：保留稳定的系统提示和最近的完整用户轮次，将较早对话、工具调用与结果整理为结构化摘要。压缩以完整轮次为边界，不会拆开 `tool_call`/`tool` 消息；摘要失败时保留原始历史并继续用户请求。界面仍保存完整可见对话，只有发给模型的 Agent 历史会被压缩，压缩请求也不会计入正常对话的缓存命中率。
 - 与主窗口共用 `APIManager` 配置（同一套模型参数）
 
 ### 6. 命令执行（受控）

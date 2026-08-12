@@ -248,7 +248,9 @@ struct DialogChatView: View {
             }
 
             HStack(spacing: 6) {
-                if viewModel.isExecutingTool {
+                if viewModel.isCompactingContext {
+                    Text(queueStatusText(prefix: "正在压缩上下文"))
+                } else if viewModel.isExecutingTool {
                     Text(queueStatusText(prefix: "正在执行工具"))
                 } else if viewModel.isRequesting {
                     Text(queueStatusText(prefix: "正在生成"))
