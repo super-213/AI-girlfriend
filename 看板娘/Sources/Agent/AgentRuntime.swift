@@ -230,16 +230,11 @@ final class AgentRuntime {
     }
 
     private func makeSystemPrompt() -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = .current
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss EEEE XXXXX"
         let environment = """
 
         ## 当前运行环境
-        当前本地时间：\(formatter.string(from: Date()))
         当前时区：\(TimeZone.current.identifier)
+        如需当前日期、时间或星期，调用 get_current_datetime 工具获取，不要猜测。
 
         ## 工具调用规则
         你拥有客户端提供的结构化工具。需要实时信息或外部操作时必须调用合适的工具，不要声称自己没有权限。

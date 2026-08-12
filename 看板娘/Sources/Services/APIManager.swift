@@ -83,6 +83,8 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     private var agentStreamBuffer = ""
     private var agentText = ""
     private var agentToolCallParts: [Int: StreamingToolCallPart] = [:]
+    private var agentUsage: AgentTokenUsage?
+    private(set) var latestAgentTokenUsage: AgentTokenUsage?
 
     // MARK: - 外部接口
     
@@ -157,6 +159,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         agentStreamBuffer = ""
         agentText = ""
         agentToolCallParts = [:]
+        agentUsage = nil
 
         guard let request = buildAgentRequest(messages: messages, tools: tools) else {
             finishAgentStream(with: APIStreamError.invalidConfiguration)
@@ -305,7 +308,8 @@ final class APIManager: NSObject, URLSessionDataDelegate {
                 "tools": toolObjects,
                 "tool_choice": "auto",
                 "temperature": 0.7,
-                "stream": true
+                "stream": true,
+                "stream_options": ["include_usage": true]
             ]
         case "ollama":
             payload = [
@@ -438,6 +442,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         agentStreamBuffer = ""
         agentText = ""
         agentToolCallParts = [:]
+        agentUsage = nil
     }
 
     func cancelStreamRequest() {
@@ -538,6 +543,10 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             return
         }
 
+        if let usage = AgentTokenUsage(responseJSONObject: json) {
+            agentUsage = usage
+        }
+
         if provider.lowercased() == "ollama" {
             processOllamaAgentChunk(json)
         } else {
@@ -566,10 +575,8 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             }
         }
 
-        if let finishReason = choice["finish_reason"] as? String,
-           ["stop", "tool_calls", "function_call"].contains(finishReason) {
-            finishAgentStream()
-        }
+        // Wait for [DONE] (or URLSession completion) so a following usage-only
+        // chunk requested through stream_options.include_usage is not dropped.
     }
 
     private func processOllamaAgentChunk(_ json: [String: Any]) {
@@ -620,8 +627,33 @@ final class APIManager: NSObject, URLSessionDataDelegate {
                         arguments: part.arguments.isEmpty ? "{}" : part.arguments
                     )
                 }
-                .filter { !$0.name.isEmpty }
+                .filter { !$0.name.isEmpty },
+            usage: agentUsage
         )
+
+        if let usage = response.usage {
+            latestAgentTokenUsage = usage
+            let metrics = AgentCacheMetricsStore.record(
+                usage,
+                provider: provider,
+                model: aiModel
+            )
+            #if DEBUG
+            let requestRatio = usage.cacheHitRatio
+                .map { String(format: "%.1f%%", $0 * 100) }
+                ?? "未报告"
+            let cumulativeRatio = metrics.cacheHitRatio
+                .map { String(format: "%.1f%%", $0 * 100) }
+                ?? "未报告"
+            let cachedTokenDescription = usage.cachedTokens.map(String.init) ?? "未报告"
+            print(
+                "Agent 缓存指标 [\(provider)/\(aiModel)] "
+                    + "prompt=\(usage.promptTokens), "
+                    + "cached=\(cachedTokenDescription), "
+                    + "hitRatio=\(requestRatio), cumulativeHitRatio=\(cumulativeRatio)"
+            )
+            #endif
+        }
 
         isAgentRequest = false
         agentOnReceive = nil
@@ -635,6 +667,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         agentStreamBuffer = ""
         agentText = ""
         agentToolCallParts = [:]
+        agentUsage = nil
 
         if let error {
             errorHandler?(error)

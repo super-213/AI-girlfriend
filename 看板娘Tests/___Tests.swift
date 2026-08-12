@@ -106,6 +106,9 @@ struct AgentFoundationTests {
 
         #expect(completed)
         #expect(client.requests.count == 2)
+        #expect(client.requests[0].first?.content == client.requests[1].first?.content)
+        #expect(client.requests[0].first?.content?.contains("当前本地时间") == false)
+        #expect(client.requests[0].first?.content?.contains("get_current_datetime") == true)
         #expect(client.requests[1].last?.role == .tool)
         #expect(client.requests[1].last?.content?.contains("ok") == true)
         #expect(runtime.messages.last?.content == "完成")
@@ -132,6 +135,76 @@ struct AgentFoundationTests {
         #expect(client.requests[1].count == 2)
         #expect(client.requests[1][0].role == .system)
         #expect(client.requests[1][1] == .user("two"))
+    }
+
+    @Test
+    func parsesCacheUsageWithoutTreatingMissingCacheDataAsZero() throws {
+        let qwenJSON: [String: Any] = [
+            "usage": [
+                "prompt_tokens": 1_000,
+                "completion_tokens": 120,
+                "total_tokens": 1_120,
+                "prompt_tokens_details": [
+                    "cached_tokens": 750,
+                    "cache_creation_input_tokens": 100,
+                    "cache_write_tokens": 50
+                ]
+            ]
+        ]
+        let qwenUsage = try #require(AgentTokenUsage(responseJSONObject: qwenJSON))
+        #expect(qwenUsage.promptTokens == 1_000)
+        #expect(qwenUsage.cachedTokens == 750)
+        #expect(qwenUsage.cacheCreationTokens == 100)
+        #expect(qwenUsage.cacheWriteTokens == 50)
+        #expect(qwenUsage.cacheHitRatio == 0.75)
+
+        let ollamaUsage = try #require(AgentTokenUsage(responseJSONObject: [
+            "prompt_eval_count": 240,
+            "eval_count": 60
+        ]))
+        #expect(ollamaUsage.promptTokens == 240)
+        #expect(ollamaUsage.cachedTokens == nil)
+        #expect(ollamaUsage.cacheHitRatio == nil)
+    }
+
+    @Test
+    func persistsCumulativeCacheMetricsPerProviderAndModel() throws {
+        let suiteName = "AgentCacheMetricsTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let measured = try #require(AgentTokenUsage(responseJSONObject: [
+            "usage": [
+                "prompt_tokens": 1_000,
+                "prompt_tokens_details": ["cached_tokens": 250]
+            ]
+        ]))
+        let unmeasured = try #require(AgentTokenUsage(responseJSONObject: [
+            "prompt_eval_count": 500
+        ]))
+
+        _ = AgentCacheMetricsStore.record(
+            measured,
+            provider: "qwen",
+            model: "qwen-plus",
+            defaults: defaults
+        )
+        let metrics = AgentCacheMetricsStore.record(
+            unmeasured,
+            provider: "qwen",
+            model: "qwen-plus",
+            defaults: defaults
+        )
+
+        #expect(metrics.requestCount == 2)
+        #expect(metrics.measuredRequestCount == 1)
+        #expect(metrics.promptTokens == 1_500)
+        #expect(metrics.measuredPromptTokens == 1_000)
+        #expect(metrics.cachedTokens == 250)
+        #expect(metrics.cacheHitRatio == 0.25)
+        #expect(
+            AgentCacheMetricsStore.load(defaults: defaults)["qwen|qwen-plus"] == metrics
+        )
     }
 }
 

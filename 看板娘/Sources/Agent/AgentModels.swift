@@ -120,6 +120,140 @@ struct AgentToolDefinition {
 struct AgentModelResponse: Equatable {
     let content: String
     let toolCalls: [AgentToolCall]
+    let usage: AgentTokenUsage?
+
+    init(
+        content: String,
+        toolCalls: [AgentToolCall],
+        usage: AgentTokenUsage? = nil
+    ) {
+        self.content = content
+        self.toolCalls = toolCalls
+        self.usage = usage
+    }
+}
+
+struct AgentTokenUsage: Equatable {
+    let promptTokens: Int
+    let completionTokens: Int?
+    let totalTokens: Int?
+    let cachedTokens: Int?
+    let cacheCreationTokens: Int?
+    let cacheWriteTokens: Int?
+
+    var cacheHitRatio: Double? {
+        guard promptTokens > 0, let cachedTokens else { return nil }
+        return Double(cachedTokens) / Double(promptTokens)
+    }
+
+    /// Parses OpenAI-compatible/Zhipu usage objects and Ollama's final
+    /// top-level evaluation counters without treating missing cache data as 0.
+    init?(responseJSONObject json: [String: Any]) {
+        let usage = json["usage"] as? [String: Any] ?? json
+        let promptDetails = usage["prompt_tokens_details"] as? [String: Any]
+        let inputDetails = usage["input_tokens_details"] as? [String: Any]
+
+        guard let promptTokens = Self.integer(
+            usage["prompt_tokens"]
+                ?? usage["input_tokens"]
+                ?? usage["prompt_eval_count"]
+        ) else { return nil }
+
+        self.promptTokens = promptTokens
+        completionTokens = Self.integer(
+            usage["completion_tokens"]
+                ?? usage["output_tokens"]
+                ?? usage["eval_count"]
+        )
+        totalTokens = Self.integer(usage["total_tokens"])
+        cachedTokens = Self.integer(
+            promptDetails?["cached_tokens"]
+                ?? inputDetails?["cached_tokens"]
+                ?? usage["cached_tokens"]
+        )
+        cacheCreationTokens = Self.integer(
+            promptDetails?["cache_creation_input_tokens"]
+                ?? inputDetails?["cache_creation_input_tokens"]
+                ?? usage["cache_creation_input_tokens"]
+        )
+        cacheWriteTokens = Self.integer(
+            promptDetails?["cache_write_tokens"]
+                ?? inputDetails?["cache_write_tokens"]
+                ?? usage["cache_write_tokens"]
+        )
+    }
+
+    private static func integer(_ value: Any?) -> Int? {
+        switch value {
+        case let value as Int:
+            return value
+        case let value as NSNumber:
+            return value.intValue
+        case let value as String:
+            return Int(value)
+        default:
+            return nil
+        }
+    }
+}
+
+struct AgentCacheMetrics: Codable, Equatable {
+    var requestCount = 0
+    var measuredRequestCount = 0
+    var promptTokens = 0
+    var measuredPromptTokens = 0
+    var cachedTokens = 0
+    var cacheCreationTokens = 0
+    var cacheWriteTokens = 0
+    var lastUpdatedAt = Date.distantPast
+
+    var cacheHitRatio: Double? {
+        guard measuredPromptTokens > 0 else { return nil }
+        return Double(cachedTokens) / Double(measuredPromptTokens)
+    }
+}
+
+enum AgentCacheMetricsStore {
+    static let storageKey = "agent.cacheMetrics.v1"
+
+    static func record(
+        _ usage: AgentTokenUsage,
+        provider: String,
+        model: String,
+        defaults: UserDefaults = .standard
+    ) -> AgentCacheMetrics {
+        let key = metricKey(provider: provider, model: model)
+        var allMetrics = load(defaults: defaults)
+        var metrics = allMetrics[key] ?? AgentCacheMetrics()
+        metrics.requestCount += 1
+        metrics.promptTokens += usage.promptTokens
+        if let cachedTokens = usage.cachedTokens {
+            metrics.measuredRequestCount += 1
+            metrics.measuredPromptTokens += usage.promptTokens
+            metrics.cachedTokens += cachedTokens
+        }
+        metrics.cacheCreationTokens += usage.cacheCreationTokens ?? 0
+        metrics.cacheWriteTokens += usage.cacheWriteTokens ?? 0
+        metrics.lastUpdatedAt = .now
+        allMetrics[key] = metrics
+
+        if let data = try? JSONEncoder().encode(allMetrics) {
+            defaults.set(data, forKey: storageKey)
+        }
+        return metrics
+    }
+
+    static func load(defaults: UserDefaults = .standard) -> [String: AgentCacheMetrics] {
+        guard let data = defaults.data(forKey: storageKey),
+              let metrics = try? JSONDecoder().decode([String: AgentCacheMetrics].self, from: data) else {
+            return [:]
+        }
+        return metrics
+    }
+
+    static func metricKey(provider: String, model: String) -> String {
+        "\(provider.lowercased())|\(model)"
+    }
 }
 
 struct AgentToolExecutionResult: Equatable {
