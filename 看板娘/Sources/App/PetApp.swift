@@ -15,6 +15,18 @@ struct PetApp: App {
 
     init() {
         PetHorizontalPosition.migrateStorage()
+        let defaults = UserDefaults.standard
+        let legacyConfiguration = ModelConfiguration.migratedLegacy(
+            provider: defaults.string(forKey: "provider") ?? "zhipu",
+            aiModel: defaults.string(forKey: "aiModel") ?? "glm-4v-flash",
+            apiUrl: defaults.string(forKey: "apiUrl") ?? "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+            apiKey: defaults.string(forKey: "apiKey") ?? ""
+        )
+        // 升级迁移失败时保留旧明文，下次启动重试，避免丢失密钥。
+        _ = try? ModelConfigurationLibrary.load(
+            from: defaults,
+            legacyConfiguration: legacyConfiguration
+        )
         // 初始化内存优化器
         _ = MemoryOptimizer.shared
     }

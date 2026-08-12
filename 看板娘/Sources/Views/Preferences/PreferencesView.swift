@@ -16,7 +16,7 @@ struct PreferencesView: View {
     @StateObject private var automationStore = AutomationStore.shared
     @StateObject private var triggerStore = TriggerStore.shared
     
-    @AppStorage("apiKey") private var apiKey = ""
+    @State private var apiKey = ""
     @AppStorage("aiModel") private var aiModel = "glm-4v-flash"
     @AppStorage("systemPrompt") private var systemPrompt = "你的名字叫布偶熊·觅语，用80%可爱和20%傲娇的风格回答问题，在回答问题前都要说：指挥官，你好。"
     @AppStorage("apiUrl") private var apiUrl = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
@@ -337,7 +337,13 @@ extension PreferencesView {
             configurations: normalizedConfigurations,
             activeConfigurationID: activeModelConfigurationID
         )
-        library.save()
+        do {
+            try library.save()
+        } catch {
+            backend.errorAlertMessage = SensitiveDataRedactor.redact(error.localizedDescription)
+            backend.showErrorAlert = true
+            return
+        }
 
         modelConfigurations = normalizedConfigurations
         originalModelConfigurations = normalizedConfigurations
@@ -367,18 +373,27 @@ extension PreferencesView {
         petContentScale = currentContentScale
         originalPetContentScale = currentContentScale
 
+        let defaults = UserDefaults.standard
         let legacyConfiguration = ModelConfiguration.migratedLegacy(
             provider: provider,
             aiModel: aiModel,
             apiUrl: apiUrl,
-            apiKey: apiKey
+            apiKey: defaults.string(forKey: "apiKey") ?? ""
         )
-        let library = ModelConfigurationLibrary.load(legacyConfiguration: legacyConfiguration)
+        let library: ModelConfigurationLibrary
+        do {
+            library = try ModelConfigurationLibrary.load(legacyConfiguration: legacyConfiguration)
+        } catch {
+            backend.errorAlertMessage = SensitiveDataRedactor.redact(error.localizedDescription)
+            backend.showErrorAlert = true
+            return
+        }
         modelConfigurations = library.configurations
         originalModelConfigurations = library.configurations
         activeModelConfigurationID = library.activeConfigurationID
         originalActiveModelConfigurationID = library.activeConfigurationID
         selectedModelConfigurationID = library.activeConfigurationID
+        apiKey = library.configurations.first(where: { $0.id == library.activeConfigurationID })?.apiKey ?? ""
 
         backend.loadTemporaryValues(
             apiKey: apiKey,

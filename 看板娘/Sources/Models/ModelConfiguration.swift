@@ -45,7 +45,13 @@ struct ModelConfiguration: Codable, Identifiable, Equatable {
     var provider: String
     var aiModel: String
     var apiUrl: String
+    /// 仅供编辑和请求期间使用；Codable 持久化时不会编码此字段。
     var apiKey: String
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, provider, aiModel, apiUrl
+        case apiKey // 仅用于解码旧版明文数据。
+    }
 
     init(
         id: String = UUID().uuidString,
@@ -61,6 +67,25 @@ struct ModelConfiguration: Codable, Identifiable, Equatable {
         self.aiModel = aiModel
         self.apiUrl = apiUrl
         self.apiKey = apiKey
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        provider = try container.decode(String.self, forKey: .provider)
+        aiModel = try container.decode(String.self, forKey: .aiModel)
+        apiUrl = try container.decode(String.self, forKey: .apiUrl)
+        apiKey = try container.decodeIfPresent(String.self, forKey: .apiKey) ?? ""
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(provider, forKey: .provider)
+        try container.encode(aiModel, forKey: .aiModel)
+        try container.encode(apiUrl, forKey: .apiUrl)
     }
 
     var providerKind: ModelProvider {
@@ -157,8 +182,10 @@ struct ModelConfigurationLibrary: Equatable {
 
     static func load(
         from defaults: UserDefaults = .standard,
-        legacyConfiguration: ModelConfiguration
-    ) -> ModelConfigurationLibrary {
+        legacyConfiguration: ModelConfiguration,
+        keyStore: APIKeyStoring = KeychainAPIKeyStore.shared
+    ) throws -> ModelConfigurationLibrary {
+        let library: ModelConfigurationLibrary
         if let data = defaults.data(forKey: configurationsKey),
            let configurations = try? JSONDecoder().decode([ModelConfiguration].self, from: data),
            !configurations.isEmpty {
@@ -166,35 +193,82 @@ struct ModelConfigurationLibrary: Equatable {
             let activeID = storedActiveID.flatMap { candidate in
                 configurations.contains(where: { $0.id == candidate }) ? candidate : nil
             } ?? configurations[0].id
-            return ModelConfigurationLibrary(
+            library = ModelConfigurationLibrary(
                 configurations: configurations,
                 activeConfigurationID: activeID
             )
+        } else {
+            let migrated = legacyConfiguration.normalized()
+            library = ModelConfigurationLibrary(
+                configurations: [migrated],
+                activeConfigurationID: migrated.id
+            )
         }
 
-        let migrated = legacyConfiguration.normalized()
-        let library = ModelConfigurationLibrary(
-            configurations: [migrated],
-            activeConfigurationID: migrated.id
-        )
-        library.save(to: defaults)
-        return library
+        var migratedLibrary = library
+        let legacyDefaultsKey = defaults.string(forKey: "apiKey")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        for index in migratedLibrary.configurations.indices {
+            let configurationID = migratedLibrary.configurations[index].id
+            var plaintext = migratedLibrary.configurations[index].apiKey
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if configurationID == migratedLibrary.activeConfigurationID,
+               let legacyDefaultsKey,
+               !legacyDefaultsKey.isEmpty {
+                plaintext = legacyDefaultsKey
+            }
+
+            if !plaintext.isEmpty {
+                try keyStore.setAPIKey(plaintext, for: configurationID)
+            }
+            migratedLibrary.configurations[index].apiKey = try keyStore.apiKey(for: configurationID) ?? ""
+        }
+
+        // 只有所有 Keychain 写入成功后，才覆盖旧 JSON 并删除 UserDefaults 明文。
+        try migratedLibrary.persistMetadata(to: defaults)
+        defaults.removeObject(forKey: "apiKey")
+        return migratedLibrary
     }
 
-    func save(to defaults: UserDefaults = .standard) {
+    func save(
+        to defaults: UserDefaults = .standard,
+        keyStore: APIKeyStoring = KeychainAPIKeyStore.shared
+    ) throws {
         guard !configurations.isEmpty,
-              configurations.contains(where: { $0.id == activeConfigurationID }),
-              let data = try? JSONEncoder().encode(configurations) else { return }
+              configurations.contains(where: { $0.id == activeConfigurationID }) else { return }
 
-        defaults.set(data, forKey: Self.configurationsKey)
-        defaults.set(activeConfigurationID, forKey: Self.activeConfigurationIDKey)
+        let previousIDs: Set<String>
+        if let data = defaults.data(forKey: Self.configurationsKey),
+           let previous = try? JSONDecoder().decode([ModelConfiguration].self, from: data) {
+            previousIDs = Set(previous.map(\.id))
+        } else {
+            previousIDs = []
+        }
+
+        for configuration in configurations {
+            let apiKey = configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            if apiKey.isEmpty {
+                try keyStore.removeAPIKey(for: configuration.id)
+            } else {
+                try keyStore.setAPIKey(apiKey, for: configuration.id)
+            }
+        }
+
+        try persistMetadata(to: defaults)
+        defaults.removeObject(forKey: "apiKey")
+
+        for deletedID in previousIDs.subtracting(configurations.map(\.id)) {
+            try keyStore.removeAPIKey(for: deletedID)
+        }
     }
 
     static func synchronizeActiveConfiguration(
         in defaults: UserDefaults = .standard,
-        legacyConfiguration: ModelConfiguration
-    ) {
-        var library = load(from: defaults, legacyConfiguration: legacyConfiguration)
+        legacyConfiguration: ModelConfiguration,
+        keyStore: APIKeyStoring = KeychainAPIKeyStore.shared
+    ) throws {
+        var library = try load(from: defaults, legacyConfiguration: legacyConfiguration, keyStore: keyStore)
         guard let index = library.configurations.firstIndex(where: { $0.id == library.activeConfigurationID }) else {
             return
         }
@@ -203,6 +277,12 @@ struct ModelConfigurationLibrary: Equatable {
         updated.id = library.configurations[index].id
         updated.name = library.configurations[index].name
         library.configurations[index] = updated
-        library.save(to: defaults)
+        try library.save(to: defaults, keyStore: keyStore)
+    }
+
+    private func persistMetadata(to defaults: UserDefaults) throws {
+        let data = try JSONEncoder().encode(configurations)
+        defaults.set(data, forKey: Self.configurationsKey)
+        defaults.set(activeConfigurationID, forKey: Self.activeConfigurationIDKey)
     }
 }

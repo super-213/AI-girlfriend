@@ -34,7 +34,7 @@
 - 🧩 **结构化控制 API**：通过 `PetControlService` 提供 sendMessage、switchCharacter、runAutomation、updateSettings、importSkill 等稳定 Swift API
 - 📝 **审计日志**：控制服务记录动作来源、请求 ID、执行状态和错误信息，便于追踪外部 Agent 行为
 - 🎵 **音乐搜索**：识别关键词后打开 Apple Music 搜索
-- 💾 **数据持久化**：`@AppStorage + UserDefaults`
+- 💾 **数据持久化**：普通配置使用 `@AppStorage + UserDefaults`，API Key 使用 macOS Keychain
 - 🧰 **快捷入口**：右键快捷菜单、双击完整对话、Dock + 菜单栏入口
 - ⏰ **自动交互**：随机间隔（270-330 秒）自动播放动作和消息
 
@@ -352,6 +352,7 @@ PetControlService
 ### 数据与存储
 - **UserDefaults**
 - **@AppStorage**
+- **macOS Keychain**（API Key）
 
 ### 网络通信
 - **URLSession**
@@ -412,7 +413,7 @@ aiModel: "qwen-plus"
 
 `qwen` 是历史保留的 provider ID，实际按 OpenAI-compatible `/v1/chat/completions` 流式接口发送和解析。可用于 DashScope、LM Studio、vLLM、LocalAI 等兼容服务；LM Studio 常用地址为 `http://localhost:1234/v1/chat/completions`。
 
-偏好设置中可为每个服务保存独立的模型配置（名称、服务类型、模型、API 地址和 API Key），例如同时保留“通义千问云端”和“LM Studio 本地”，再将任意一项设为当前配置。旧版的单配置会在首次打开偏好设置时自动迁移。
+偏好设置中可为每个服务保存独立的模型配置（名称、服务类型、模型、API 地址和 API Key），例如同时保留“通义千问云端”和“LM Studio 本地”，再将任意一项设为当前配置。API Key 按配置 ID 保存到 macOS Keychain，配置 JSON 不包含密钥。升级后首次启动会迁移旧版明文，仅在 Keychain 写入成功后删除 UserDefaults 旧值。
 
 #### 3. Ollama（本地）
 ```swift
@@ -449,7 +450,6 @@ apiKey: "ollama" // 本地模式通常不会校验
 
 | 键名 | 类型 | 说明 |
 |------|------|------|
-| `apiKey` | String | API 密钥 |
 | `aiModel` | String | 模型名称 |
 | `systemPrompt` | String | 系统提示词 |
 | `apiUrl` | String | API 地址 |
@@ -458,6 +458,8 @@ apiKey: "ollama" // 本地模式通常不会校验
 | `petSleepMinutes` | Double | 空闲多久进入休息，0 表示关闭 |
 | `commandConfirmationStyle` | String | `nearPet` 或 `systemAlert` |
 | `bubbleAutoHideDuration` | Double | 回复气泡自动收起秒数 |
+
+`apiKey` 仅作为旧版迁移键读取；迁移成功后会从 UserDefaults 删除，后续只保存在 macOS Keychain。
 | `petWindowPlacement.v2` | Data | 显示器标识和相对窗口位置 |
 | `selectedPetCharacterID` | String | 当前角色稳定 ID |
 | `petConversationStyles.v1` | Data | 按角色 ID 保存的对话风格（系统提示词、输入框提示语、主动消息） |

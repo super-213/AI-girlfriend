@@ -56,6 +56,11 @@ struct PetControlError: Error, Codable, LocalizedError {
     let code: PetControlErrorCode
     let message: String
 
+    init(code: PetControlErrorCode, message: String) {
+        self.code = code
+        self.message = SensitiveDataRedactor.redact(message)
+    }
+
     var errorDescription: String? { message }
 
     static func invalidInput(_ message: String) -> PetControlError {
@@ -230,6 +235,10 @@ struct SettingsPatch: Codable {
     var staticMessages: [String]?
     var context: PetControlRequestContext
 
+    private enum CodingKeys: String, CodingKey {
+        case apiKey, apiUrl, aiModel, provider, systemPrompt, overlapRatio, staticMessages, context
+    }
+
     init(
         apiKey: String? = nil,
         apiUrl: String? = nil,
@@ -248,6 +257,32 @@ struct SettingsPatch: Codable {
         self.overlapRatio = overlapRatio
         self.staticMessages = staticMessages
         self.context = context
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        apiKey = try container.decodeIfPresent(String.self, forKey: .apiKey)
+        apiUrl = try container.decodeIfPresent(String.self, forKey: .apiUrl)
+        aiModel = try container.decodeIfPresent(String.self, forKey: .aiModel)
+        provider = try container.decodeIfPresent(String.self, forKey: .provider)
+        systemPrompt = try container.decodeIfPresent(String.self, forKey: .systemPrompt)
+        overlapRatio = try container.decodeIfPresent(Double.self, forKey: .overlapRatio)
+        staticMessages = try container.decodeIfPresent([String].self, forKey: .staticMessages)
+        context = try container.decode(PetControlRequestContext.self, forKey: .context)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        if apiKey != nil {
+            try container.encode(SensitiveDataRedactor.placeholder, forKey: .apiKey)
+        }
+        try container.encodeIfPresent(apiUrl, forKey: .apiUrl)
+        try container.encodeIfPresent(aiModel, forKey: .aiModel)
+        try container.encodeIfPresent(provider, forKey: .provider)
+        try container.encodeIfPresent(systemPrompt, forKey: .systemPrompt)
+        try container.encodeIfPresent(overlapRatio, forKey: .overlapRatio)
+        try container.encodeIfPresent(staticMessages, forKey: .staticMessages)
+        try container.encode(context, forKey: .context)
     }
 }
 
@@ -290,11 +325,17 @@ final class PetControlService: PetControlling {
     private weak var petViewBackend: PetViewBackend?
     private let automationStore: AutomationStore
     private let defaults: UserDefaults
+    private let keyStore: APIKeyStoring
     private let auditLogger = PetControlAuditLogger()
 
-    private init(automationStore: AutomationStore = .shared, defaults: UserDefaults = .standard) {
+    private init(
+        automationStore: AutomationStore = .shared,
+        defaults: UserDefaults = .standard,
+        keyStore: APIKeyStoring = KeychainAPIKeyStore.shared
+    ) {
         self.automationStore = automationStore
         self.defaults = defaults
+        self.keyStore = keyStore
     }
 
     func register(petViewBackend: PetViewBackend) {
@@ -467,9 +508,6 @@ final class PetControlService: PetControlling {
         do {
             let activeCharacterID = defaults.string(forKey: "selectedPetCharacterID") ?? puppetBear.id
             var activeStyle = PetConversationStyleStore.style(for: activeCharacterID, defaults: defaults)
-            if let apiKey = patch.apiKey {
-                defaults.set(apiKey, forKey: "apiKey")
-            }
             if let apiUrl = patch.apiUrl {
                 guard URL(string: apiUrl) != nil else {
                     throw PetControlError.invalidInput("API URL 格式无效")
@@ -516,10 +554,21 @@ final class PetControlService: PetControlling {
                     apiUrl: defaults.string(forKey: "apiUrl") ?? "https://open.bigmodel.cn/api/paas/v4/chat/completions",
                     apiKey: defaults.string(forKey: "apiKey") ?? ""
                 )
-                ModelConfigurationLibrary.synchronizeActiveConfiguration(
-                    in: defaults,
-                    legacyConfiguration: legacyConfiguration
+                var library = try ModelConfigurationLibrary.load(
+                    from: defaults,
+                    legacyConfiguration: legacyConfiguration,
+                    keyStore: keyStore
                 )
+                guard let index = library.configurations.firstIndex(where: { $0.id == library.activeConfigurationID }) else {
+                    throw PetControlError.internalError("无法读取当前模型配置")
+                }
+                library.configurations[index].provider = defaults.string(forKey: "provider") ?? "zhipu"
+                library.configurations[index].aiModel = defaults.string(forKey: "aiModel") ?? "glm-4v-flash"
+                library.configurations[index].apiUrl = defaults.string(forKey: "apiUrl") ?? "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+                if let apiKey = patch.apiKey {
+                    library.configurations[index].apiKey = apiKey
+                }
+                try library.save(to: defaults, keyStore: keyStore)
             }
 
             NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
@@ -596,13 +645,14 @@ final class PetControlService: PetControlling {
     }
 
     private func snapshot(from backend: PetViewBackend) -> PetRuntimeStateSnapshot {
-        PetRuntimeStateSnapshot(
+        let secrets = knownAPIKeys()
+        return PetRuntimeStateSnapshot(
             currentCharacterID: backend.currentCharacter.id,
             currentCharacterName: backend.currentCharacter.name,
             currentGif: backend.currentGif,
             isThinking: backend.isThinking,
             isExecutingCommand: backend.isExecutingCommand,
-            streamedResponse: backend.streamedResponse,
+            streamedResponse: SensitiveDataRedactor.redact(backend.streamedResponse, secrets: secrets),
             activityState: backend.stateCoordinator.snapshot.activityState,
             renderedState: backend.stateCoordinator.snapshot.renderedState,
             stateSource: backend.stateCoordinator.snapshot.source,
@@ -667,17 +717,26 @@ final class PetControlService: PetControlling {
     }
 
     private func audit(_ action: String, context: PetControlRequestContext, status: String, message: String) {
+        let secrets = knownAPIKeys()
         let event = PetControlAuditEvent(
             id: UUID(),
             action: action,
             requestID: context.requestID,
             source: context.source,
-            actorID: context.actorID,
+            actorID: SensitiveDataRedactor.redact(context.actorID, secrets: secrets),
             status: status,
-            message: message,
+            message: SensitiveDataRedactor.redact(message, secrets: secrets),
             createdAt: Date()
         )
         auditLogger.append(event)
+    }
+
+    private func knownAPIKeys() -> [String] {
+        guard let data = defaults.data(forKey: ModelConfigurationLibrary.configurationsKey),
+              let configurations = try? JSONDecoder().decode([ModelConfiguration].self, from: data) else {
+            return []
+        }
+        return configurations.compactMap { try? keyStore.apiKey(for: $0.id) }.compactMap { $0 }
     }
 }
 

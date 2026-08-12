@@ -683,6 +683,24 @@ struct StreamingTextCoalescerTests {
 }
 
 struct ModelConfigurationLibraryTests {
+    private final class MemoryAPIKeyStore: APIKeyStoring, @unchecked Sendable {
+        var values: [String: String] = [:]
+        var writeError: Error?
+
+        func apiKey(for configurationID: String) throws -> String? {
+            values[configurationID]
+        }
+
+        func setAPIKey(_ apiKey: String, for configurationID: String) throws {
+            if let writeError { throw writeError }
+            values[configurationID] = apiKey
+        }
+
+        func removeAPIKey(for configurationID: String) throws {
+            values.removeValue(forKey: configurationID)
+        }
+    }
+
     @Test
     func configurationRequiresAnHTTPServiceURL() {
         var configuration = ModelConfiguration.preset(for: .openAICompatible)
@@ -696,7 +714,7 @@ struct ModelConfigurationLibraryTests {
     }
 
     @Test
-    func legacyLMStudioConfigurationMigratesIntoNamedLibrary() {
+    func legacyLMStudioConfigurationMigratesIntoNamedLibrary() throws {
         let suiteName = "ModelConfigurationLibraryTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -707,16 +725,27 @@ struct ModelConfigurationLibraryTests {
             apiUrl: "http://localhost:1234/v1/chat/completions",
             apiKey: "lm-studio"
         )
-        let library = ModelConfigurationLibrary.load(from: defaults, legacyConfiguration: legacy)
+        defaults.set("lm-studio", forKey: "apiKey")
+        let keyStore = MemoryAPIKeyStore()
+        let library = try ModelConfigurationLibrary.load(
+            from: defaults,
+            legacyConfiguration: legacy,
+            keyStore: keyStore
+        )
 
         #expect(library.configurations.count == 1)
         #expect(library.configurations[0].name == "LM Studio 本地")
         #expect(library.activeConfigurationID == library.configurations[0].id)
         #expect(defaults.data(forKey: ModelConfigurationLibrary.configurationsKey) != nil)
+        #expect(defaults.object(forKey: "apiKey") == nil)
+        #expect(keyStore.values[library.activeConfigurationID] == "lm-studio")
+        let persisted = try #require(defaults.data(forKey: ModelConfigurationLibrary.configurationsKey))
+        #expect(!String(decoding: persisted, as: UTF8.self).contains("lm-studio"))
+        #expect(!String(decoding: persisted, as: UTF8.self).contains("apiKey"))
     }
 
     @Test
-    func multipleCompatibleServicesRoundTripWithoutOverwritingEachOther() {
+    func multipleCompatibleServicesRoundTripWithoutOverwritingEachOther() throws {
         let suiteName = "ModelConfigurationLibraryTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -739,16 +768,21 @@ struct ModelConfigurationLibraryTests {
             configurations: [cloud, local],
             activeConfigurationID: local.id
         )
-        saved.save(to: defaults)
+        let keyStore = MemoryAPIKeyStore()
+        try saved.save(to: defaults, keyStore: keyStore)
 
-        let loaded = ModelConfigurationLibrary.load(from: defaults, legacyConfiguration: cloud)
+        let loaded = try ModelConfigurationLibrary.load(
+            from: defaults,
+            legacyConfiguration: cloud,
+            keyStore: keyStore
+        )
         #expect(loaded == saved)
         #expect(loaded.configurations[0].apiKey == "cloud-key")
         #expect(loaded.configurations[1].apiKey == "lm-studio")
     }
 
     @Test
-    func externalSettingsPatchUpdatesOnlyTheActiveProfileDetails() {
+    func externalSettingsPatchUpdatesOnlyTheActiveProfileDetails() throws {
         let suiteName = "ModelConfigurationLibraryTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -761,7 +795,8 @@ struct ModelConfigurationLibraryTests {
             configurations: [cloud, local],
             activeConfigurationID: local.id
         )
-        original.save(to: defaults)
+        let keyStore = MemoryAPIKeyStore()
+        try original.save(to: defaults, keyStore: keyStore)
 
         let patched = ModelConfiguration.migratedLegacy(
             provider: "qwen",
@@ -769,17 +804,71 @@ struct ModelConfigurationLibraryTests {
             apiUrl: local.apiUrl,
             apiKey: "new-key"
         )
-        ModelConfigurationLibrary.synchronizeActiveConfiguration(
+        try ModelConfigurationLibrary.synchronizeActiveConfiguration(
             in: defaults,
-            legacyConfiguration: patched
+            legacyConfiguration: patched,
+            keyStore: keyStore
         )
 
-        let loaded = ModelConfigurationLibrary.load(from: defaults, legacyConfiguration: cloud)
+        let loaded = try ModelConfigurationLibrary.load(
+            from: defaults,
+            legacyConfiguration: cloud,
+            keyStore: keyStore
+        )
         #expect(loaded.configurations[0] == cloud)
         #expect(loaded.configurations[1].id == local.id)
         #expect(loaded.configurations[1].name == "LM Studio 本地")
         #expect(loaded.configurations[1].aiModel == "local/new-model")
         #expect(loaded.configurations[1].apiKey == "new-key")
+    }
+
+    @Test
+    func failedKeychainMigrationKeepsLegacyPlaintextForRetry() throws {
+        struct ExpectedFailure: Error {}
+
+        let suiteName = "ModelConfigurationLibraryTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("legacy-secret", forKey: "apiKey")
+
+        let keyStore = MemoryAPIKeyStore()
+        keyStore.writeError = ExpectedFailure()
+        let legacy = ModelConfiguration.migratedLegacy(
+            provider: "zhipu",
+            aiModel: "glm-4v-flash",
+            apiUrl: "https://example.com/chat/completions",
+            apiKey: "legacy-secret"
+        )
+
+        #expect(throws: ExpectedFailure.self) {
+            _ = try ModelConfigurationLibrary.load(
+                from: defaults,
+                legacyConfiguration: legacy,
+                keyStore: keyStore
+            )
+        }
+        #expect(defaults.string(forKey: "apiKey") == "legacy-secret")
+    }
+
+    @Test
+    func settingsPatchEncodingRedactsAPIKey() throws {
+        let patch = SettingsPatch(apiKey: "sk-super-secret-value")
+        let encoded = try JSONEncoder().encode(patch)
+        let json = String(decoding: encoded, as: UTF8.self)
+
+        #expect(!json.contains("sk-super-secret-value"))
+        #expect(json.contains(SensitiveDataRedactor.placeholder))
+    }
+
+    @Test
+    func redactorRemovesConfiguredAndBearerSecrets() {
+        let secret = "otherwise-unrecognizable-secret"
+        let message = "Authorization: Bearer \(secret); apiKey=sk-example-secret-123"
+        let redacted = SensitiveDataRedactor.redact(message, secrets: [secret])
+
+        #expect(!redacted.contains(secret))
+        #expect(!redacted.contains("sk-example-secret-123"))
+        #expect(redacted.contains(SensitiveDataRedactor.placeholder))
     }
 }
 

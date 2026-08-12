@@ -34,9 +34,6 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     /// AI模型名称
     @AppStorage("aiModel") private var aiModel = "glm-4v-flash"
     
-    /// API密钥
-    @AppStorage("apiKey") private var apiKey = ""
-    
     /// 系统提示词
     @AppStorage("systemPrompt") private var systemPrompt = "你的名字叫布偶熊·觅语，用80%可爱和20%傲娇的风格回答问题，在回答问题前都要说：指挥官，你好。"
     
@@ -189,7 +186,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             Task { @MainActor [weak self] in
                 #if DEBUG
                 if let errorDescription {
-                    print("JSON 请求出错：\(errorDescription)")
+                    print("JSON 请求出错：\(self?.redacted(errorDescription) ?? "请求失败")")
                 }
                 #endif
                 let content = data.flatMap { self?.parseNonStreamContent($0) } ?? ""
@@ -277,6 +274,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         
         // Ollama 不需要 Authorization header
         if provider.lowercased() != "ollama" {
+            guard let apiKey = currentAPIKey() else { return nil }
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
         
@@ -344,9 +342,31 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         request.httpBody = data
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if provider.lowercased() != "ollama" {
+            guard let apiKey = currentAPIKey() else { return nil }
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
         return request
+    }
+
+    private func currentAPIKey() -> String? {
+        let defaults = UserDefaults.standard
+        let legacyConfiguration = ModelConfiguration.migratedLegacy(
+            provider: provider,
+            aiModel: aiModel,
+            apiUrl: apiUrl,
+            apiKey: defaults.string(forKey: "apiKey") ?? ""
+        )
+        guard let library = try? ModelConfigurationLibrary.load(
+            from: defaults,
+            legacyConfiguration: legacyConfiguration
+        ), let active = library.configurations.first(where: { $0.id == library.activeConfigurationID }) else {
+            return nil
+        }
+        return active.apiKey
+    }
+
+    private func redacted(_ value: String) -> String {
+        SensitiveDataRedactor.redact(value, secrets: [currentAPIKey()].compactMap { $0 })
     }
 
     private func parseNonStreamContent(_ data: Data) -> String {
@@ -546,7 +566,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
 
         if let error = json["error"] as? [String: Any] {
             let message = error["message"] as? String ?? "模型服务返回错误"
-            finishAgentStream(with: APIStreamError.transport(message))
+            finishAgentStream(with: APIStreamError.transport(redacted(message)))
             return
         }
 
@@ -717,7 +737,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             guard let jsonData = line.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else {
                 #if DEBUG
-                print("Ollama JSON解析失败: \(line)")
+                print("Ollama JSON 解析失败")
                 #endif
                 continue
             }
@@ -725,7 +745,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             // 检查是否有错误
             if let error = json["error"] as? String {
                 #if DEBUG
-                print("Ollama 错误: \(error)")
+                print("Ollama 错误: \(redacted(error))")
                 #endif
                 continue
             }
@@ -764,7 +784,7 @@ final class APIManager: NSObject, URLSessionDataDelegate {
                   let first = choices.first
             else {
                 #if DEBUG
-                print("OpenAI-Compatible JSON解析失败: \(line)")
+                print("OpenAI-Compatible JSON 解析失败")
                 #endif
                 continue
             }
@@ -798,12 +818,12 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             guard self?.activeTaskIdentifier == taskIdentifier else { return }
             if let errorDescription {
                 #if DEBUG
-                print("任务出错：\(errorDescription)")
+                print("任务出错：\(self?.redacted(errorDescription) ?? "请求失败")")
                 #endif
                 if self?.isAgentRequest == true {
-                    self?.finishAgentStream(with: APIStreamError.transport(errorDescription))
+                    self?.finishAgentStream(with: APIStreamError.transport(self?.redacted(errorDescription) ?? "请求失败"))
                 } else {
-                    self?.finishStream(with: APIStreamError.transport(errorDescription))
+                    self?.finishStream(with: APIStreamError.transport(self?.redacted(errorDescription) ?? "请求失败"))
                 }
             } else {
                 if self?.isAgentRequest == true {
