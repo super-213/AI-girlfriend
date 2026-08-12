@@ -75,7 +75,7 @@ final class DialogWindowController {
         window.isOpaque = true
         window.backgroundColor = .windowBackgroundColor
         window.hasShadow = true
-        window.level = .floating
+        window.level = .normal
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.isMovableByWindowBackground = false
         window.contentMinSize = NSSize(width: 760, height: 500)
