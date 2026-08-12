@@ -8,6 +8,7 @@ import SwiftUI
 
 @MainActor
 protocol PetInteractiveRegion: AnyObject {
+    var petInteractionFrameInScreen: NSRect? { get }
     func containsPetInteraction(at screenPoint: NSPoint) -> Bool
 }
 
@@ -21,12 +22,17 @@ final class PetWindowHitTestCoordinator {
     private var globalMonitor: Any?
     private var interactionLockCount = 0
     private var isResizeModeActive = false
+    private let movementRefreshInterval: TimeInterval = 1.0 / 30.0
+    private var lastMovementLocation: NSPoint?
+    private var lastMovementRefreshTime: TimeInterval = -.infinity
+    private var pendingMovementLocation: NSPoint?
+    private var pendingMovementRefresh: DispatchWorkItem?
 
     private init() {
         localMonitor = NSEvent.addLocalMonitorForEvents(
             matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
         ) { [weak self] event in
-            self?.refreshMousePolicy()
+            self?.scheduleMousePolicyRefresh(at: NSEvent.mouseLocation)
             return event
         }
 
@@ -34,7 +40,7 @@ final class PetWindowHitTestCoordinator {
             matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
         ) { [weak self] _ in
             DispatchQueue.main.async {
-                self?.refreshMousePolicy()
+                self?.scheduleMousePolicyRefresh(at: NSEvent.mouseLocation)
             }
         }
     }
@@ -43,6 +49,7 @@ final class PetWindowHitTestCoordinator {
         MainActor.assumeIsolated {
             if let localMonitor { NSEvent.removeMonitor(localMonitor) }
             if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
+            pendingMovementRefresh?.cancel()
         }
     }
 
@@ -73,17 +80,68 @@ final class PetWindowHitTestCoordinator {
     }
 
     func refreshMousePolicy() {
-        guard let window else { return }
-        if interactionLockCount > 0 || isResizeModeActive {
-            window.ignoresMouseEvents = false
+        pendingMovementRefresh?.cancel()
+        pendingMovementRefresh = nil
+        pendingMovementLocation = nil
+        lastMovementRefreshTime = ProcessInfo.processInfo.systemUptime
+        applyMousePolicy(at: NSEvent.mouseLocation)
+    }
+
+    private func scheduleMousePolicyRefresh(at mouseLocation: NSPoint) {
+        // Local/global monitors can report the same physical movement. A policy
+        // refresh cannot produce a different result while the pointer is still
+        // at the same screen coordinate, so discard the duplicate immediately.
+        guard lastMovementLocation != mouseLocation else { return }
+        lastMovementLocation = mouseLocation
+        pendingMovementLocation = mouseLocation
+
+        guard pendingMovementRefresh == nil else { return }
+
+        let now = ProcessInfo.processInfo.systemUptime
+        let delay = max(movementRefreshInterval - (now - lastMovementRefreshTime), 0)
+        if delay == 0 {
+            performPendingMovementRefresh()
             return
         }
 
-        let mouse = NSEvent.mouseLocation
-        let isInteractive = regions.allObjects.contains { view in
-            (view as? PetInteractiveRegion)?.containsPetInteraction(at: mouse) == true
+        let workItem = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                self?.performPendingMovementRefresh()
+            }
         }
-        window.ignoresMouseEvents = !isInteractive
+        pendingMovementRefresh = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    private func performPendingMovementRefresh() {
+        pendingMovementRefresh = nil
+        guard let mouseLocation = pendingMovementLocation else { return }
+        pendingMovementLocation = nil
+        lastMovementRefreshTime = ProcessInfo.processInfo.systemUptime
+        applyMousePolicy(at: mouseLocation)
+    }
+
+    private func applyMousePolicy(at mouse: NSPoint) {
+        guard let window else { return }
+        if interactionLockCount > 0 || isResizeModeActive {
+            if window.ignoresMouseEvents {
+                window.ignoresMouseEvents = false
+            }
+            return
+        }
+
+        let isInteractive = regions.allObjects.contains { view in
+            guard let region = view as? PetInteractiveRegion,
+                  let visibleFrame = region.petInteractionFrameInScreen,
+                  visibleFrame.contains(mouse) else {
+                return false
+            }
+            return region.containsPetInteraction(at: mouse)
+        }
+        let shouldIgnoreMouseEvents = !isInteractive
+        if window.ignoresMouseEvents != shouldIgnoreMouseEvents {
+            window.ignoresMouseEvents = shouldIgnoreMouseEvents
+        }
     }
 }
 
@@ -108,10 +166,18 @@ final class PetInteractionRegionNSView: NSView, PetInteractiveRegion {
     }
 
     func containsPetInteraction(at screenPoint: NSPoint) -> Bool {
-        guard let window, !isHidden, alphaValue > 0.01 else { return false }
+        guard let window, !isHiddenOrHasHiddenAncestor, alphaValue > 0.01 else { return false }
         let pointInWindow = window.convertPoint(fromScreen: screenPoint)
         let localPoint = convert(pointInWindow, from: nil)
-        return bounds.contains(localPoint)
+        return visibleRect.contains(localPoint)
+    }
+
+    var petInteractionFrameInScreen: NSRect? {
+        guard let window,
+              !isHiddenOrHasHiddenAncestor,
+              alphaValue > 0.01,
+              !visibleRect.isEmpty else { return nil }
+        return window.convertToScreen(convert(visibleRect, to: nil))
     }
 }
 

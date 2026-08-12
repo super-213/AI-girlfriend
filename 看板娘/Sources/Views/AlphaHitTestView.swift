@@ -14,6 +14,43 @@ import AppKit
 /// 自定义 NSView，通过渲染窗口 contentView 的 layer 来采样位置的 alpha 值，
 /// 判断是否命中非透明区域（用于点击和悬停检测）
 class AlphaHitTestNSView: NSView, PetInteractiveRegion {
+    private struct AlphaMask {
+        let contentRect: NSRect
+        let backingScale: CGFloat
+        let pixelWidth: Int
+        let pixelHeight: Int
+        let bytesPerRow: Int
+        let pixels: [UInt8]
+
+        func isOpaque(at pointInContent: NSPoint) -> Bool {
+            guard contentRect.contains(pointInContent) else { return false }
+
+            let pixelX = min(
+                max(Int((pointInContent.x - contentRect.minX) * backingScale), 0),
+                pixelWidth - 1
+            )
+            // NSHostingView is flipped, while the bitmap context is bottom-up.
+            // This is the cached equivalent of the previous per-pixel Y flip.
+            let pixelY = min(
+                max(Int((contentRect.maxY - pointInContent.y) * backingScale), 0),
+                pixelHeight - 1
+            )
+            let alphaOffset = pixelY * bytesPerRow + pixelX * 2 + 1
+            return pixels[alphaOffset] > 30
+        }
+    }
+
+    private struct AlphaMaskGeometry: Equatable {
+        let contentRect: NSRect
+        let contentBounds: NSRect
+        let backingScale: CGFloat
+    }
+
+    /// The window policy is refreshed at 30 Hz. Reusing the mask for the same
+    /// interval lets policy, hover and click hit tests sample one animation-frame
+    /// snapshot instead of independently rendering the full layer tree.
+    private static let alphaMaskLifetime: TimeInterval = 1.0 / 30.0
+
     /// 点击命中非透明区域时的回调
     var onTap: (() -> Void)?
 
@@ -39,9 +76,13 @@ class AlphaHitTestNSView: NSView, PetInteractiveRegion {
     private var initialMouseLocation: NSPoint?
     private var initialWindowOrigin: NSPoint?
     private var didDrag = false
+    private var cachedAlphaMask: AlphaMask?
+    private var cachedAlphaMaskGeometry: AlphaMaskGeometry?
+    private var cachedAlphaMaskCreationTime: TimeInterval = -.infinity
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        invalidateAlphaMask()
         guard window != nil else { return }
         Task { @MainActor in
             PetWindowHitTestCoordinator.shared.register(self)
@@ -49,6 +90,7 @@ class AlphaHitTestNSView: NSView, PetInteractiveRegion {
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
+        invalidateAlphaMask()
         if window != nil, newWindow == nil {
             Task { @MainActor in
                 PetWindowHitTestCoordinator.shared.unregister(self)
@@ -79,7 +121,7 @@ class AlphaHitTestNSView: NSView, PetInteractiveRegion {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard bounds.contains(point) else { return nil }
+        guard visibleRect.contains(point) else { return nil }
 
         if isPointOpaque(point) {
             return self
@@ -153,50 +195,109 @@ class AlphaHitTestNSView: NSView, PetInteractiveRegion {
     
     /// 判断指定本地坐标点是否为非透明像素
     private func isPointOpaque(_ localPoint: NSPoint) -> Bool {
-        // 尝试从窗口的 contentView layer 采样 alpha
+        // First reject points outside the clipped visible region. Most desktop
+        // mouse movement never reaches the more expensive alpha path.
+        guard visibleRect.contains(localPoint) else { return false }
+
         guard let contentView = window?.contentView, let layer = contentView.layer else {
             return fallbackHitTest(localPoint)
         }
-        
-        // 将坐标转换到 contentView 的坐标系
+
         let pointInContent = convert(localPoint, to: contentView)
-        
-        // 考虑 Retina 缩放
         let backingScale = window?.backingScaleFactor ?? 1.0
-        let scaledX = pointInContent.x * backingScale
-        let scaledY = (contentView.bounds.height - pointInContent.y) * backingScale // 翻转 Y 轴（layer 坐标系 Y 向下）
-        
-        // 创建 1x1 像素的 bitmap context
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        var pixel: [UInt8] = [0, 0, 0, 0] // RGBA
-        guard let ctx = CGContext(
-            data: &pixel,
-            width: 1,
-            height: 1,
-            bitsPerComponent: 8,
-            bytesPerRow: 4,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        let visibleContentRect = convert(visibleRect, to: contentView).standardized
+            .intersection(contentView.bounds)
+        guard !visibleContentRect.isEmpty else { return false }
+
+        let geometry = AlphaMaskGeometry(
+            contentRect: visibleContentRect,
+            contentBounds: contentView.bounds,
+            backingScale: backingScale
+        )
+        let now = ProcessInfo.processInfo.systemUptime
+        if let cachedAlphaMask,
+           cachedAlphaMaskGeometry == geometry,
+           now - cachedAlphaMaskCreationTime < Self.alphaMaskLifetime {
+            return cachedAlphaMask.isOpaque(at: pointInContent)
+        }
+
+        guard let mask = makeAlphaMask(
+            layer: layer,
+            contentRect: visibleContentRect,
+            backingScale: backingScale
         ) else {
+            invalidateAlphaMask()
             return fallbackHitTest(localPoint)
         }
-        
-        // 平移 context 使得目标像素位于原点
-        ctx.translateBy(x: -scaledX, y: -scaledY)
-        ctx.scaleBy(x: backingScale, y: backingScale)
-        
-        // 渲染整个 layer 到偏移后的 context（只有目标像素会被绘制）
-        layer.render(in: ctx)
-        
-        // alpha > 30 视为非透明像素
-        return pixel[3] > 30
+
+        cachedAlphaMask = mask
+        cachedAlphaMaskGeometry = geometry
+        cachedAlphaMaskCreationTime = now
+        return mask.isOpaque(at: pointInContent)
+    }
+
+    private func makeAlphaMask(
+        layer: CALayer,
+        contentRect: NSRect,
+        backingScale: CGFloat
+    ) -> AlphaMask? {
+        let pixelWidth = max(Int(ceil(contentRect.width * backingScale)), 1)
+        let pixelHeight = max(Int(ceil(contentRect.height * backingScale)), 1)
+        let bytesPerPixel = 2 // grayscale + alpha
+        let bytesPerRow = pixelWidth * bytesPerPixel
+        var pixels = [UInt8](repeating: 0, count: bytesPerRow * pixelHeight)
+
+        let rendered = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(
+                data: buffer.baseAddress,
+                width: pixelWidth,
+                height: pixelHeight,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: CGColorSpaceCreateDeviceGray(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else {
+                return false
+            }
+
+            let scaledMinX = contentRect.minX * backingScale
+            let scaledMinY = contentRect.minY * backingScale
+            context.translateBy(x: -scaledMinX, y: -scaledMinY)
+            context.scaleBy(x: backingScale, y: backingScale)
+            layer.render(in: context)
+            return true
+        }
+        guard rendered else { return nil }
+
+        return AlphaMask(
+            contentRect: contentRect,
+            backingScale: backingScale,
+            pixelWidth: pixelWidth,
+            pixelHeight: pixelHeight,
+            bytesPerRow: bytesPerRow,
+            pixels: pixels
+        )
+    }
+
+    private func invalidateAlphaMask() {
+        cachedAlphaMask = nil
+        cachedAlphaMaskGeometry = nil
+        cachedAlphaMaskCreationTime = -.infinity
     }
 
     func containsPetInteraction(at screenPoint: NSPoint) -> Bool {
-        guard let window, !isHidden, alphaValue > 0.01 else { return false }
+        guard let window, !isHiddenOrHasHiddenAncestor, alphaValue > 0.01 else { return false }
         let pointInWindow = window.convertPoint(fromScreen: screenPoint)
         let localPoint = convert(pointInWindow, from: nil)
-        return bounds.contains(localPoint) && isPointOpaque(localPoint)
+        return visibleRect.contains(localPoint) && isPointOpaque(localPoint)
+    }
+
+    var petInteractionFrameInScreen: NSRect? {
+        guard let window,
+              !isHiddenOrHasHiddenAncestor,
+              alphaValue > 0.01,
+              !visibleRect.isEmpty else { return nil }
+        return window.convertToScreen(convert(visibleRect, to: nil))
     }
 
     /// 兜底命中测试：如果 layer 渲染失败，使用中心 60% 区域
