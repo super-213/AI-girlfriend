@@ -62,4 +62,34 @@ struct MarkdownPreviewTests {
             rows: [["city", "Target city"]]
         )))
     }
+
+    @Test
+    func selectableRendererProducesOneContinuousPlainTextSequence() {
+        let markdown = """
+        # Title
+
+        A **formatted** paragraph.
+
+        - First
+        - Second
+
+        ```swift
+        let answer = 42
+        ```
+        """
+
+        let rendered = DialogMarkdownAttributedString.make(from: markdown)
+
+        #expect(String(rendered.characters) == """
+        Title
+
+        A formatted paragraph.
+
+        • First
+        • Second
+
+        SWIFT
+        let answer = 42
+        """)
+    }
 }

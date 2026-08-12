@@ -7,6 +7,116 @@
 
 import SwiftUI
 
+/// 将一条 Markdown 消息渲染为单个 Text，使鼠标可以跨标题、段落和列表连续选择。
+struct SelectableMarkdownText: View {
+    let source: String
+
+    var body: some View {
+        Text(DialogMarkdownAttributedString.make(from: source))
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+enum DialogMarkdownAttributedString {
+    static func make(from source: String) -> AttributedString {
+        let blocks = MarkdownDocumentParser.parse(source)
+        guard !blocks.isEmpty else { return AttributedString(source) }
+
+        var result = AttributedString()
+        for (index, block) in blocks.enumerated() {
+            if index > 0 {
+                result.append(AttributedString("\n\n"))
+            }
+            result.append(attributedString(for: block))
+        }
+        return result
+    }
+
+    private static func attributedString(for block: MarkdownBlock) -> AttributedString {
+        switch block {
+        case let .heading(level, text):
+            var value = inlineMarkdown(text)
+            value.font = headingFont(level)
+            return value
+
+        case let .paragraph(text):
+            return inlineMarkdown(text)
+
+        case let .list(ordered, items):
+            var value = AttributedString()
+            for (index, item) in items.enumerated() {
+                if index > 0 { value.append(AttributedString("\n")) }
+                let indentation = String(repeating: "    ", count: item.depth)
+                let marker: String
+                if let checked = item.checked {
+                    marker = checked ? "☑ " : "☐ "
+                } else if ordered {
+                    marker = "\(index + 1). "
+                } else {
+                    marker = "• "
+                }
+                value.append(AttributedString(indentation + marker))
+                value.append(inlineMarkdown(item.text))
+            }
+            return value
+
+        case let .quote(text):
+            var marker = AttributedString("▌ ")
+            marker.foregroundColor = .accentColor
+            marker.append(inlineMarkdown(text))
+            return marker
+
+        case let .code(language, content):
+            var value = AttributedString()
+            if let language, !language.isEmpty {
+                var label = AttributedString(language.uppercased() + "\n")
+                label.font = .system(size: 10.5, weight: .semibold, design: .monospaced)
+                label.foregroundColor = .secondary
+                value.append(label)
+            }
+            var code = AttributedString(content)
+            code.font = .system(size: 12.5, design: .monospaced)
+            value.append(code)
+            return value
+
+        case .divider:
+            var value = AttributedString("────────────")
+            value.foregroundColor = .secondary
+            return value
+
+        case let .table(headers, rows):
+            let columnCount = max(headers.count, rows.map(\.count).max() ?? 0)
+            let normalizedRows = [headers] + rows
+            var value = AttributedString()
+            for (rowIndex, row) in normalizedRows.enumerated() {
+                if rowIndex > 0 { value.append(AttributedString("\n")) }
+                let cells = (0..<columnCount).map { index in
+                    index < row.count ? row[index] : ""
+                }
+                var line = AttributedString(cells.joined(separator: "  |  "))
+                line.font = .system(
+                    size: 12.5,
+                    weight: rowIndex == 0 ? .semibold : .regular,
+                    design: .monospaced
+                )
+                value.append(line)
+            }
+            return value
+        }
+    }
+
+    private static func headingFont(_ level: Int) -> Font {
+        switch level {
+        case 1: .system(size: 20, weight: .bold)
+        case 2: .system(size: 18, weight: .bold)
+        case 3: .system(size: 16, weight: .semibold)
+        default: .system(size: 14, weight: .semibold)
+        }
+    }
+}
+
 struct MarkdownPreview: View {
     let source: String
 

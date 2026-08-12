@@ -448,6 +448,8 @@ struct DialogChatView: View {
                         Text("正在思考…")
                             .foregroundStyle(.secondary)
                     }
+                } else if message.role == .assistant {
+                    SelectableMarkdownText(source: message.content)
                 } else {
                     Text(message.content)
                         .textSelection(.enabled)
