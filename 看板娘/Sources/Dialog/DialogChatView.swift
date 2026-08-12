@@ -39,7 +39,11 @@ struct DialogChatView: View {
             }
         }
         .onAppear {
+            viewModel.refreshCacheStatus()
             isInputFocused = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            viewModel.refreshCacheStatus()
         }
         .onChange(of: viewModel.selectedConversationID) { _, _ in
             inputEditorHeight = DialogTextEditor.minimumHeight
@@ -249,6 +253,10 @@ struct DialogChatView: View {
                     Text("·")
                     Text("⇧↵ 换行")
                 }
+
+                Spacer(minLength: 8)
+
+                cacheStatusLabel
             }
             .font(.system(size: 10.5, weight: .medium))
             .foregroundStyle(.tertiary)
@@ -286,6 +294,20 @@ struct DialogChatView: View {
             .allowsHitTesting(false)
         }
         .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 1), value: isInputFocused)
+    }
+
+    private var cacheStatusLabel: some View {
+        Label(cacheStatusText, systemImage: "memorychip")
+            .lineLimit(1)
+            .foregroundStyle(viewModel.cacheStatus.cacheHitRatio == nil ? .tertiary : .secondary)
+            .contentTransition(.numericText(value: viewModel.cacheStatus.cacheHitRatio ?? 0))
+            .animation(
+                reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1),
+                value: viewModel.cacheStatus.cacheHitRatio
+            )
+            .help(cacheStatusHelp)
+            .accessibilityLabel("缓存命中率")
+            .accessibilityValue(cacheStatusAccessibilityValue)
     }
 
     @ViewBuilder
@@ -393,6 +415,35 @@ struct DialogChatView: View {
 
     private var composerBackgroundColor: Color {
         Color(nsColor: .textBackgroundColor).opacity(reduceTransparency ? 1 : 0.88)
+    }
+
+    private var cacheStatusText: String {
+        guard let ratio = viewModel.cacheStatus.cacheHitRatio else {
+            return "缓存命中 —"
+        }
+        return "缓存命中 \(ratio.formatted(.percent.precision(.fractionLength(1))))"
+    }
+
+    private var cacheStatusAccessibilityValue: String {
+        guard let ratio = viewModel.cacheStatus.cacheHitRatio else {
+            return "当前模型尚未提供缓存统计"
+        }
+        return "累计 \(ratio.formatted(.percent.precision(.fractionLength(1))))"
+    }
+
+    private var cacheStatusHelp: String {
+        let status = viewModel.cacheStatus
+        let providerName = ModelProvider(rawValue: status.provider)?.displayName ?? status.provider
+        guard let metrics = status.metrics, let ratio = metrics.cacheHitRatio else {
+            return "\(providerName) · \(status.model)\n当前模型尚未返回缓存 token 统计。"
+        }
+
+        return """
+        累计缓存命中率 \(ratio.formatted(.percent.precision(.fractionLength(1))))
+        缓存 \(metrics.cachedTokens.formatted()) / \(metrics.measuredPromptTokens.formatted()) 个提示 token
+        \(metrics.measuredRequestCount) / \(metrics.requestCount) 次请求提供缓存统计
+        \(providerName) · \(status.model)
+        """
     }
 
     private var separatorColor: Color {

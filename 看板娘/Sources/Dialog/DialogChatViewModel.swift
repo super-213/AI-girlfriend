@@ -51,6 +51,27 @@ struct DialogConversation: Identifiable, Equatable, Codable {
     }
 }
 
+struct DialogCacheStatus: Equatable {
+    let provider: String
+    let model: String
+    let metrics: AgentCacheMetrics?
+
+    var cacheHitRatio: Double? {
+        metrics?.cacheHitRatio
+    }
+
+    static func load(from defaults: UserDefaults) -> DialogCacheStatus {
+        let provider = defaults.string(forKey: "provider") ?? ModelProvider.zhipu.rawValue
+        let model = defaults.string(forKey: "aiModel") ?? "glm-4v-flash"
+        let key = AgentCacheMetricsStore.metricKey(provider: provider, model: model)
+        return DialogCacheStatus(
+            provider: provider,
+            model: model,
+            metrics: AgentCacheMetricsStore.load(defaults: defaults)[key]
+        )
+    }
+}
+
 @MainActor
 final class DialogChatViewModel: ObservableObject {
     @Published private(set) var conversations: [DialogConversation]
@@ -61,6 +82,7 @@ final class DialogChatViewModel: ObservableObject {
     @Published var showToolConfirmation: Bool = false
     @Published var pendingToolSummary: String = ""
     @Published var isExecutingTool: Bool = false
+    @Published private(set) var cacheStatus: DialogCacheStatus
 
     private static let conversationsStorageKey = "dialog.conversations.v1"
     private static let selectedConversationStorageKey = "dialog.selectedConversation.v1"
@@ -99,6 +121,7 @@ final class DialogChatViewModel: ObservableObject {
         conversations = initialConversations
         selectedConversationID = initialSelection
         messages = initialConversation.messages
+        cacheStatus = DialogCacheStatus.load(from: defaults)
 
         configureAgentRuntime()
         agentRuntime.restoreConversation(initialConversation.agentHistory)
@@ -187,7 +210,12 @@ final class DialogChatViewModel: ObservableObject {
             messages.removeLast()
         }
         appendAssistantStatus("已停止生成。")
+        refreshCacheStatus()
         synchronizeSelectedConversation(persist: true)
+    }
+
+    func refreshCacheStatus() {
+        cacheStatus = DialogCacheStatus.load(from: defaults)
     }
 
     func approvePendingTool() {
@@ -257,6 +285,7 @@ final class DialogChatViewModel: ObservableObject {
             self.isRequesting = false
             self.isExecutingTool = false
             self.fillEmptyAssistantMessage("（模型没有返回文本）")
+            self.refreshCacheStatus()
             self.synchronizeSelectedConversation(persist: true)
         }
         agentRuntime.onError = { [weak self] error in
@@ -267,6 +296,7 @@ final class DialogChatViewModel: ObservableObject {
             self.showToolConfirmation = false
             self.pendingToolSummary = ""
             self.fillEmptyAssistantMessage("请求失败：\(error.localizedDescription)")
+            self.refreshCacheStatus()
             self.synchronizeSelectedConversation(persist: true)
         }
     }

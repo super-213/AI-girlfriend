@@ -283,6 +283,35 @@ struct AgentFoundationTests {
             AgentCacheMetricsStore.load(defaults: defaults)["qwen|qwen-plus"] == metrics
         )
     }
+
+    @Test
+    func dialogCacheStatusLoadsMetricsForTheActiveProviderAndModel() throws {
+        let suiteName = "DialogCacheStatusTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("qwen", forKey: "provider")
+        defaults.set("qwen-plus", forKey: "aiModel")
+
+        let usage = try #require(AgentTokenUsage(responseJSONObject: [
+            "usage": [
+                "prompt_tokens": 800,
+                "prompt_tokens_details": ["cached_tokens": 600]
+            ]
+        ]))
+        _ = AgentCacheMetricsStore.record(
+            usage,
+            provider: "qwen",
+            model: "qwen-plus",
+            defaults: defaults
+        )
+
+        let status = DialogCacheStatus.load(from: defaults)
+
+        #expect(status.provider == "qwen")
+        #expect(status.model == "qwen-plus")
+        #expect(status.cacheHitRatio == 0.75)
+        #expect(status.metrics?.cachedTokens == 600)
+    }
 }
 
 struct SkillManifestTests {
