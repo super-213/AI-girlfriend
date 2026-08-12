@@ -219,10 +219,14 @@ struct DialogChatView: View {
 
     private var inputArea: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if !viewModel.queuedMessages.isEmpty {
+                queuedMessagesView
+            }
+
             HStack(alignment: .bottom, spacing: 10) {
                 ZStack(alignment: .topLeading) {
                     if viewModel.inputText.isEmpty {
-                        Text("给看板娘发送消息…")
+                        Text(inputPlaceholder)
                             .font(.system(size: 14))
                             .foregroundStyle(Color(nsColor: .placeholderTextColor))
                             .padding(.top, 2)
@@ -233,21 +237,21 @@ struct DialogChatView: View {
                         text: $viewModel.inputText,
                         height: $inputEditorHeight,
                         isFocused: $isInputFocused,
-                        isEditable: !viewModel.isBusy,
+                        isEditable: true,
                         onSubmit: viewModel.sendCurrentInput
                     )
                     .frame(height: inputEditorHeight)
                     .accessibilityLabel("消息")
                 }
 
-                composerAction
+                composerActions
             }
 
             HStack(spacing: 6) {
                 if viewModel.isExecutingTool {
-                    Text("正在执行工具")
+                    Text(queueStatusText(prefix: "正在执行工具"))
                 } else if viewModel.isRequesting {
-                    Text("正在生成，可随时停止")
+                    Text(queueStatusText(prefix: "正在生成"))
                 } else {
                     Text("↵ 发送")
                     Text("·")
@@ -294,6 +298,71 @@ struct DialogChatView: View {
             .allowsHitTesting(false)
         }
         .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 1), value: isInputFocused)
+        .animation(
+            reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1),
+            value: viewModel.queuedMessages.count
+        )
+    }
+
+    private var queuedMessagesView: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "tray.and.arrow.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(DesignColors.primary)
+
+                Text("待发送 · \(viewModel.queuedMessages.count)")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            ScrollView {
+                LazyVStack(spacing: 4) {
+                    ForEach(Array(viewModel.queuedMessages.enumerated()), id: \.element.id) { index, message in
+                        queuedMessageRow(message, position: index + 1)
+                    }
+                }
+            }
+            .scrollIndicators(.automatic)
+            .frame(height: min(CGFloat(viewModel.queuedMessages.count) * 34, 106))
+        }
+        .padding(.bottom, 2)
+        .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
+    }
+
+    private func queuedMessageRow(_ message: QueuedDialogMessage, position: Int) -> some View {
+        HStack(spacing: 8) {
+            Text("\(position)")
+                .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+                .frame(width: 20, height: 20)
+                .background(Color.primary.opacity(0.06), in: Circle())
+
+            Text(message.content)
+                .font(.system(size: 12.5))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .help(message.content)
+
+            Button {
+                viewModel.deleteQueuedMessage(message.id)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(DialogPressButtonStyle())
+            .help("从队列中删除")
+            .accessibilityLabel("删除待发送消息")
+            .accessibilityValue(message.content)
+        }
+        .padding(.leading, 5)
+        .padding(.trailing, 3)
+        .frame(height: 30)
+        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 
     private var cacheStatusLabel: some View {
@@ -310,37 +379,46 @@ struct DialogChatView: View {
             .accessibilityValue(cacheStatusAccessibilityValue)
     }
 
-    @ViewBuilder
-    private var composerAction: some View {
-        if viewModel.isRequesting && !viewModel.isExecutingTool {
-            Button(action: viewModel.stopGenerating) {
-                Image(systemName: "stop.fill")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.primary)
+    private var composerActions: some View {
+        HStack(spacing: 6) {
+            if viewModel.isRequesting && !viewModel.isExecutingTool {
+                stopButton
+            } else if viewModel.isExecutingTool {
+                ProgressView()
+                    .controlSize(.small)
                     .frame(width: 32, height: 32)
-                    .background(Color.primary.opacity(0.10), in: Circle())
+                    .accessibilityLabel("正在执行工具")
             }
-            .buttonStyle(DialogPressButtonStyle())
-            .help("停止生成")
-            .accessibilityLabel("停止生成")
-        } else if viewModel.isExecutingTool {
-            ProgressView()
-                .controlSize(.small)
-                .frame(width: 32, height: 32)
-                .accessibilityLabel("正在执行工具")
-        } else {
-            Button(action: viewModel.sendCurrentInput) {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(canSend ? Color(nsColor: .alternateSelectedControlTextColor) : Color.secondary)
-                    .frame(width: 32, height: 32)
-                    .background(canSend ? DesignColors.primary : Color.primary.opacity(0.075), in: Circle())
-            }
-            .buttonStyle(DialogPressButtonStyle())
-            .disabled(!canSend)
-            .help("发送消息")
-            .accessibilityLabel("发送消息")
+
+            sendButton
         }
+    }
+
+    private var stopButton: some View {
+        Button(action: viewModel.stopGenerating) {
+            Image(systemName: "stop.fill")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.primary)
+                .frame(width: 32, height: 32)
+                .background(Color.primary.opacity(0.10), in: Circle())
+        }
+        .buttonStyle(DialogPressButtonStyle())
+        .help("停止生成")
+        .accessibilityLabel("停止生成")
+    }
+
+    private var sendButton: some View {
+        Button(action: viewModel.sendCurrentInput) {
+            Image(systemName: viewModel.isBusy ? "tray.and.arrow.down" : "arrow.up")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(canSend ? Color(nsColor: .alternateSelectedControlTextColor) : Color.secondary)
+                .frame(width: 32, height: 32)
+                .background(canSend ? DesignColors.primary : Color.primary.opacity(0.075), in: Circle())
+        }
+        .buttonStyle(DialogPressButtonStyle())
+        .disabled(!canSend)
+        .help(viewModel.isBusy ? "加入发送队列" : "发送消息")
+        .accessibilityLabel(viewModel.isBusy ? "加入发送队列" : "发送消息")
     }
 
     private func messageRow(for message: DialogMessage) -> some View {
@@ -410,7 +488,17 @@ struct DialogChatView: View {
 
     private var canSend: Bool {
         !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !viewModel.isBusy
+    }
+
+    private var inputPlaceholder: String {
+        viewModel.isBusy ? "继续输入，回车加入队列…" : "给看板娘发送消息…"
+    }
+
+    private func queueStatusText(prefix: String) -> String {
+        guard !viewModel.queuedMessages.isEmpty else {
+            return prefix == "正在生成" ? "正在生成，可随时停止" : prefix
+        }
+        return "\(prefix) · \(viewModel.queuedMessages.count) 条待发送"
     }
 
     private var composerBackgroundColor: Color {

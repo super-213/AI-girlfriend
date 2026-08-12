@@ -26,6 +26,16 @@ struct DialogMessage: Identifiable, Equatable, Codable {
     }
 }
 
+struct QueuedDialogMessage: Identifiable, Equatable {
+    let id: UUID
+    let content: String
+
+    init(id: UUID = UUID(), content: String) {
+        self.id = id
+        self.content = content
+    }
+}
+
 struct DialogConversation: Identifiable, Equatable, Codable {
     let id: UUID
     var title: String
@@ -78,6 +88,7 @@ final class DialogChatViewModel: ObservableObject {
     @Published private(set) var selectedConversationID: UUID
     @Published var messages: [DialogMessage]
     @Published var inputText: String = ""
+    @Published private(set) var queuedMessages: [QueuedDialogMessage] = []
     @Published var isRequesting: Bool = false
     @Published var showToolConfirmation: Bool = false
     @Published var pendingToolSummary: String = ""
@@ -88,16 +99,12 @@ final class DialogChatViewModel: ObservableObject {
     private static let selectedConversationStorageKey = "dialog.selectedConversation.v1"
 
     private let defaults: UserDefaults
-    private let apiManager = APIManager()
-    private lazy var agentRuntime = AgentRuntime(apiManager: apiManager) { [weak self, apiManager] in
-        let style = PetConversationStyleStore.activeStyle(defaults: self?.defaults ?? .standard)
-        return apiManager.systemPromptContent(basePrompt: style.systemPrompt)
-    }
-    private var activeAssistantID: UUID?
+    private let agentRuntime: AgentRuntime
     private lazy var streamTextCoalescer = StreamingTextCoalescer { [weak self] text in
         guard let self, let id = self.activeAssistantID else { return }
         self.appendAssistantChunk(text, to: id)
     }
+    private var activeAssistantID: UUID?
 
     var selectedConversationTitle: String {
         conversations.first(where: { $0.id == selectedConversationID })?.title ?? "对话"
@@ -107,8 +114,17 @@ final class DialogChatViewModel: ObservableObject {
         isRequesting || isExecutingTool
     }
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, agentRuntime: AgentRuntime? = nil) {
         self.defaults = defaults
+        if let agentRuntime {
+            self.agentRuntime = agentRuntime
+        } else {
+            let apiManager = APIManager()
+            self.agentRuntime = AgentRuntime(apiManager: apiManager) {
+                let style = PetConversationStyleStore.activeStyle(defaults: defaults)
+                return apiManager.systemPromptContent(basePrompt: style.systemPrompt)
+            }
+        }
 
         let restored = Self.loadConversations(from: defaults)
         let initialConversations = restored.isEmpty ? [DialogConversation()] : restored
@@ -124,7 +140,7 @@ final class DialogChatViewModel: ObservableObject {
         cacheStatus = DialogCacheStatus.load(from: defaults)
 
         configureAgentRuntime()
-        agentRuntime.restoreConversation(initialConversation.agentHistory)
+        self.agentRuntime.restoreConversation(initialConversation.agentHistory)
     }
 
     func sendCurrentInput() {
@@ -133,11 +149,24 @@ final class DialogChatViewModel: ObservableObject {
 
     func send(_ rawText: String) {
         let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isBusy else { return }
+        guard !trimmed.isEmpty else { return }
 
-        messages.append(DialogMessage(role: .user, content: trimmed))
         inputText = ""
-        agentRuntime.send(trimmed)
+        if isBusy {
+            queuedMessages.append(QueuedDialogMessage(content: trimmed))
+            return
+        }
+
+        sendImmediately(trimmed)
+    }
+
+    func deleteQueuedMessage(_ messageID: UUID) {
+        queuedMessages.removeAll(where: { $0.id == messageID })
+    }
+
+    private func sendImmediately(_ text: String) {
+        messages.append(DialogMessage(role: .user, content: text))
+        agentRuntime.send(text)
         synchronizeSelectedConversation(persist: true)
     }
 
@@ -212,6 +241,7 @@ final class DialogChatViewModel: ObservableObject {
         appendAssistantStatus("已停止生成。")
         refreshCacheStatus()
         synchronizeSelectedConversation(persist: true)
+        sendNextQueuedMessageIfPossible()
     }
 
     func refreshCacheStatus() {
@@ -287,6 +317,7 @@ final class DialogChatViewModel: ObservableObject {
             self.fillEmptyAssistantMessage("（模型没有返回文本）")
             self.refreshCacheStatus()
             self.synchronizeSelectedConversation(persist: true)
+            self.sendNextQueuedMessageIfPossible()
         }
         agentRuntime.onError = { [weak self] error in
             guard let self else { return }
@@ -298,7 +329,14 @@ final class DialogChatViewModel: ObservableObject {
             self.fillEmptyAssistantMessage("请求失败：\(error.localizedDescription)")
             self.refreshCacheStatus()
             self.synchronizeSelectedConversation(persist: true)
+            self.sendNextQueuedMessageIfPossible()
         }
+    }
+
+    private func sendNextQueuedMessageIfPossible() {
+        guard !isBusy, !queuedMessages.isEmpty else { return }
+        let next = queuedMessages.removeFirst()
+        sendImmediately(next.content)
     }
 
     private func appendAssistantStatus(_ status: String) {
