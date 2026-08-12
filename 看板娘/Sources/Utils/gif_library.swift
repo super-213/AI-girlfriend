@@ -30,22 +30,6 @@ let puppetBear = PetCharacter(
     ] //布偶熊的自动回复
 )
 
-/// 内置角色：夏提雅
-let puppetCat = PetCharacter(
-    id: "builtin.shalltear",
-    name: "夏提雅",
-    assetsByState: [
-        .idle: [PetAnimationAsset(id: "shalltear.idle", location: "夏提雅.gif")]
-    ],
-    interactionAssets: [
-        PetAnimationAsset(id: "shalltear.interaction", location: "夏提雅.gif", loop: false)
-    ],
-    autoMessages: [
-        "喵~ 轻语来陪你啦~",
-        "不可以冷落猫猫哟~"
-    ]
-)
-
 /// 内置角色：抹茶旦旦
 let matchaDandan = PetCharacter(
     id: "builtin.matcha-dandan",
@@ -80,4 +64,4 @@ let matchaDandan = PetCharacter(
 )
 
 /// 所有可用的内置角色列表
-let availableCharacters: [PetCharacter] = [puppetBear, puppetCat, matchaDandan]
+let availableCharacters: [PetCharacter] = [puppetBear, matchaDandan]
