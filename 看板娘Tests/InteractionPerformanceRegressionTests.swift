@@ -4,6 +4,42 @@ import Testing
 
 struct InteractionPerformanceRegressionTests {
     @Test
+    func listeningStatusResizesBeforeIdleFocusTransition() {
+        let delta = PetListeningLayoutSynchronization.statusHeightDelta(
+            focused: true,
+            activityState: .idle,
+            renderedState: .idle,
+            rowHeight: 36
+        )
+
+        #expect(delta == 36)
+    }
+
+    @Test
+    func endingListeningPreflightsStatusRowRemoval() {
+        let delta = PetListeningLayoutSynchronization.statusHeightDelta(
+            focused: false,
+            activityState: .listening,
+            renderedState: .listening,
+            rowHeight: 36
+        )
+
+        #expect(delta == -36)
+    }
+
+    @Test
+    func replacingAnExistingStatusDoesNotResizeTheWindow() {
+        let delta = PetListeningLayoutSynchronization.statusHeightDelta(
+            focused: true,
+            activityState: .sleeping,
+            renderedState: .sleeping,
+            rowHeight: 36
+        )
+
+        #expect(delta == 0)
+    }
+
+    @Test
     func alphaMaskMapsAspectFitCoordinatesWithoutRenderingAViewTree() {
         // Bitmap rows are bottom-up. Make only the source image's top-left
         // pixel opaque and verify point mapping in a 20 x 20 fitted container.

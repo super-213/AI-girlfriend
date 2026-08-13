@@ -149,6 +149,7 @@ final class PetWindowController: ObservableObject {
     private weak var resizeOverlay: OptionWindowResizeNSView?
     private var attachedWindowNumber: Int?
     private var resizeWorkItem: DispatchWorkItem?
+    private var contentResizeGeneration = 0
     private var screenObserver: NSObjectProtocol?
     private var modifierPollTimer: Timer?
     private var localModifierEventMonitor: Any?
@@ -252,10 +253,12 @@ final class PetWindowController: ObservableObject {
         self.suppressContentResizeUntil = nil
         lastReportedContentSize = proposedSize
 
-        resizeWorkItem?.cancel()
+        invalidatePendingContentResize()
+        let generation = contentResizeGeneration
         let item = DispatchWorkItem { [weak self] in
             Task { @MainActor in
-                self?.resizeWindow(to: proposedSize)
+                guard let self, self.contentResizeGeneration == generation else { return }
+                self.resizeWindow(to: proposedSize)
             }
         }
         resizeWorkItem = item
@@ -264,6 +267,30 @@ final class PetWindowController: ObservableObject {
         // 防抖：流式输出会连续改变气泡高度，延迟会让 SwiftUI 内容
         // 先重排、窗口后追赶，视觉上就是桌宠上下抖动。
         DispatchQueue.main.async(execute: item)
+    }
+
+    /// Applies a known intrinsic-height change before SwiftUI publishes the
+    /// corresponding view state. This closes the one-frame gap where content
+    /// could otherwise reflow inside the old window and visibly move the pet.
+    func resizeForImmediateContentHeightChange(by heightDelta: CGFloat) {
+        guard let window, abs(heightDelta) > 0.5 else { return }
+
+        invalidatePendingContentResize()
+        suppressContentResizeUntil = nil
+
+        let measuredSize = lastReportedContentSize.width > 0
+            && lastReportedContentSize.height > 0
+            ? lastReportedContentSize
+            : window.frame.size
+        let proposedSize = CGSize(
+            width: measuredSize.width,
+            height: max(measuredSize.height + heightDelta, 0)
+        )
+
+        // Keep the next preference report in sync with this preflight resize;
+        // a genuinely different measurement will still correct the frame.
+        lastReportedContentSize = proposedSize
+        resizeWindow(to: proposedSize)
     }
 
     /// Updates the pet's visual scale. Preference previews can opt out of
@@ -276,7 +303,7 @@ final class PetWindowController: ObservableObject {
         }
 
         guard abs(contentScale - clampedScale) > 0.0001 else { return }
-        resizeWorkItem?.cancel()
+        invalidatePendingContentResize()
         suppressContentResizeUntil = nil
         contentScale = clampedScale
     }
@@ -386,7 +413,7 @@ final class PetWindowController: ObservableObject {
     }
 
     private func beginUserResize(from frame: NSRect) {
-        resizeWorkItem?.cancel()
+        invalidatePendingContentResize()
         resizeStartFrame = frame
         resizeStartScale = contentScale
         isUserResizing = true
@@ -451,6 +478,12 @@ final class PetWindowController: ObservableObject {
         // SwiftUI 浮层自行呈现；窗口 frame 不做插值，避免宠物在两套动画之间漂移。
         window.setFrame(targetFrame, display: true, animate: false)
         PetWindowHitTestCoordinator.shared.refreshMousePolicy()
+    }
+
+    private func invalidatePendingContentResize() {
+        contentResizeGeneration &+= 1
+        resizeWorkItem?.cancel()
+        resizeWorkItem = nil
     }
 
     private func restorePlacementIfNeeded() {

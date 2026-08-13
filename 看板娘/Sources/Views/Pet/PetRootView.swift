@@ -54,7 +54,32 @@ struct PetWindowScaledContent<Content: View>: View {
     }
 }
 
+enum PetListeningLayoutSynchronization {
+    static func statusHeightDelta(
+        focused: Bool,
+        activityState: PetActivityState,
+        renderedState: PetActivityState,
+        rowHeight: CGFloat
+    ) -> CGFloat {
+        let statusIsVisible = renderedState != .idle
+
+        let statusWillBeVisible: Bool
+        if focused, activityState == .idle || activityState == .sleeping {
+            statusWillBeVisible = true
+        } else if !focused, activityState == .listening {
+            statusWillBeVisible = false
+        } else {
+            statusWillBeVisible = statusIsVisible
+        }
+
+        guard statusWillBeVisible != statusIsVisible else { return 0 }
+        return statusWillBeVisible ? rowHeight : -rowHeight
+    }
+}
+
 struct PetRootView: View {
+    private static let panelSpacing: CGFloat = 8
+
     @ObservedObject var petViewBackend: PetViewBackend
     @ObservedObject private var coordinator: PetStateCoordinator
     @ObservedObject private var windowController: PetWindowController
@@ -92,7 +117,7 @@ struct PetRootView: View {
 
     var body: some View {
         VStack(spacing: petStackSpacing) {
-            VStack(spacing: 8) {
+            VStack(spacing: Self.panelSpacing) {
                 if showQuickMenu {
                     PetQuickMenuView(
                         backend: petViewBackend,
@@ -195,6 +220,7 @@ struct PetRootView: View {
             PetWindowController.shared.setInteractionLocked(false)
         }
         .onChange(of: isInputFocused) { _, focused in
+            synchronizeWindowForListeningChange(focused: focused)
             petViewBackend.handleInputFocusChanged(focused)
         }
         .alert("工具调用确认", isPresented: systemConfirmationBinding) {
@@ -250,5 +276,21 @@ struct PetRootView: View {
                 }
             }
         }
+    }
+
+    /// Focus changes are the only state transition where the status row is
+    /// introduced by the input control itself. Resize the bottom-anchored
+    /// window before publishing `listening`, so SwiftUI never lays out the
+    /// extra row inside the previous, shorter window for a single frame.
+    private func synchronizeWindowForListeningChange(focused: Bool) {
+        let snapshot = coordinator.snapshot
+        let rowHeight = PetStatusIndicatorView.height + Self.panelSpacing
+        let heightDelta = PetListeningLayoutSynchronization.statusHeightDelta(
+            focused: focused,
+            activityState: snapshot.activityState,
+            renderedState: snapshot.renderedState,
+            rowHeight: rowHeight
+        )
+        windowController.resizeForImmediateContentHeightChange(by: heightDelta)
     }
 }

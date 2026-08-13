@@ -6,6 +6,8 @@
 import SwiftUI
 
 struct PetStatusIndicatorView: View {
+    static let height: CGFloat = 28
+
     let state: PetActivityState
 
     var body: some View {
@@ -16,7 +18,7 @@ struct PetStatusIndicatorView: View {
         .font(.system(size: 11, weight: .semibold))
         .foregroundStyle(tint)
         .padding(.horizontal, 11)
-        .frame(height: 28)
+        .frame(height: Self.height)
         .background(.regularMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(tint.opacity(0.3), lineWidth: 0.8))
         .petInteractiveRegion()
