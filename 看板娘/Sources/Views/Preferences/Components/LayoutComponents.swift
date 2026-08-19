@@ -23,10 +23,8 @@ struct OverlapPreview: View {
     @Binding var contentScale: Double
     let character: PetCharacter
 
-    private let layoutMetrics = PetLayoutMetrics.live.scaled(by: 0.95)
-
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var characterLayoutWidth: CGFloat = 84
+    @State private var characterLayoutWidth: CGFloat = 190
     @State private var previousDragTranslation: CGSize?
     @State private var magnificationOrigin: Double?
     @State private var isCharacterHovered = false
@@ -38,10 +36,6 @@ struct OverlapPreview: View {
 
     private var horizontalPercentage: Int {
         PetHorizontalPosition.percentage(for: horizontalPosition)
-    }
-
-    private var overlapSpacing: CGFloat {
-        layoutMetrics.petStackSpacing(for: overlapRatio)
     }
 
     private var sizePercentage: Int {
@@ -144,8 +138,18 @@ struct OverlapPreview: View {
     }
 
     private func previewScene(size: CGSize) -> some View {
-        let stageWidth = min(max(size.width * 0.54, 230), 320)
+        let stageWidth = min(
+            PetLayoutPreviewGeometry.defaultPanelWidth,
+            max(size.width - 48, 1)
+        )
+        let geometry = PetLayoutPreviewGeometry(
+            contentScale: CGFloat(contentScale),
+            panelWidth: stageWidth
+        )
         let horizontalTravel = max(stageWidth - characterLayoutWidth, 1)
+        let overlapSpacing = PetLayoutMetrics.live
+            .scaled(by: geometry.normalizationScale)
+            .petStackSpacing(for: overlapRatio)
 
         return ZStack(alignment: .top) {
             LinearGradient(
@@ -171,14 +175,17 @@ struct OverlapPreview: View {
                 .padding(.bottom, 10)
 
             VStack(spacing: overlapSpacing) {
-                VStack(spacing: 6) {
-                    speechBubble
-                    inputCapsule
+                VStack(spacing: geometry.scaledPanelMetric(PetPanelLayoutMetrics.spacing)) {
+                    speechBubble(scale: geometry.normalizationScale)
+                    inputCapsule(scale: geometry.normalizationScale)
                 }
                 .zIndex(2)
 
                 PetHorizontalPositionLayout(position: horizontalPosition) {
-                    interactiveCharacter(horizontalTravel: horizontalTravel)
+                    interactiveCharacter(
+                        horizontalTravel: horizontalTravel,
+                        geometry: geometry
+                    )
                 }
                 .frame(maxWidth: .infinity)
                 .zIndex(1)
@@ -231,9 +238,9 @@ struct OverlapPreview: View {
         .frame(height: 48)
     }
 
-    private var speechBubble: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 5) {
+    private func speechBubble(scale: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 9 * scale) {
+            HStack(spacing: 8 * scale) {
                 Image(systemName: "sparkles")
                     .foregroundStyle(.blue)
                 Text("回答中")
@@ -243,25 +250,28 @@ struct OverlapPreview: View {
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
                 Image(systemName: "xmark")
             }
-            .font(.system(size: 8.5, weight: .medium))
+            .font(.system(size: 11 * scale, weight: .medium))
 
             Text("指挥官，你好。布局变化会在这里即时呈现。")
-                .font(.system(size: 9.5))
+                .font(.system(size: 13 * scale))
+                .lineSpacing(3 * scale)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(13 * scale)
+        .background(
+            .regularMaterial,
+            in: RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
+        )
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.blue.opacity(0.23), lineWidth: 0.8)
+            RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
+                .strokeBorder(Color.blue.opacity(0.23), lineWidth: max(scale, 0.5))
         }
-        .shadow(color: .black.opacity(0.1), radius: 8, y: 4)
+        .shadow(color: .black.opacity(0.1), radius: 16 * scale, y: 7 * scale)
     }
 
-    private var inputCapsule: some View {
-        HStack(spacing: 6) {
+    private func inputCapsule(scale: CGFloat) -> some View {
+        HStack(spacing: 9 * scale) {
             Image(systemName: "sparkles")
                 .foregroundStyle(.secondary)
             Text("问问 \(character.name)…")
@@ -271,12 +281,12 @@ struct OverlapPreview: View {
             Image(systemName: "xmark.circle.fill")
                 .foregroundStyle(.tertiary)
         }
-        .font(.system(size: 9.5))
-        .padding(.horizontal, 10)
-        .frame(height: 28)
+        .font(.system(size: 13 * scale))
+        .padding(.horizontal, 13 * scale)
+        .frame(height: PetPanelLayoutMetrics.inputHeight * scale)
         .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(0.3), lineWidth: 0.7))
-        .shadow(color: .black.opacity(0.09), radius: 7, y: 3)
+        .overlay(Capsule().strokeBorder(.white.opacity(0.3), lineWidth: max(0.8 * scale, 0.5)))
+        .shadow(color: .black.opacity(0.09), radius: 12 * scale, y: 5 * scale)
     }
 
     private var minimumScale: Double {
@@ -287,8 +297,11 @@ struct OverlapPreview: View {
         Double(PetWindowSizing.maximumContentScale)
     }
 
-    private func interactiveCharacter(horizontalTravel: CGFloat) -> some View {
-        characterArtwork
+    private func interactiveCharacter(
+        horizontalTravel: CGFloat,
+        geometry: PetLayoutPreviewGeometry
+    ) -> some View {
+        characterArtwork(geometry: geometry)
             .contentShape(Rectangle())
             .background {
                 GeometryReader { proxy in
@@ -320,7 +333,13 @@ struct OverlapPreview: View {
             .onHover { hovering in
                 isCharacterHovered = hovering
             }
-            .gesture(layoutDragGesture(horizontalTravel: horizontalTravel))
+            .gesture(
+                layoutDragGesture(
+                    horizontalTravel: horizontalTravel,
+                    overlapTravel: PetLayoutMetrics.live.overlapTravel
+                        * geometry.normalizationScale
+                )
+            )
             .simultaneousGesture(magnificationGesture)
             .help("拖动调整横向和纵向位置，双指捏合调整大小")
             .accessibilityElement(children: .ignore)
@@ -329,7 +348,10 @@ struct OverlapPreview: View {
             .accessibilityHint("拖动调整位置，双指捏合调整大小")
     }
 
-    private func layoutDragGesture(horizontalTravel: CGFloat) -> some Gesture {
+    private func layoutDragGesture(
+        horizontalTravel: CGFloat,
+        overlapTravel: CGFloat
+    ) -> some Gesture {
         DragGesture(minimumDistance: 1, coordinateSpace: .named("layoutPreviewScene"))
             .onChanged { value in
                 let previousDragTranslation = previousDragTranslation ?? .zero
@@ -346,7 +368,7 @@ struct OverlapPreview: View {
                 )
 
                 overlapRatio = clampedOverlap(
-                    overlapRatio - Double(deltaHeight / layoutMetrics.overlapTravel)
+                    overlapRatio - Double(deltaHeight / max(overlapTravel, 1))
                 )
             }
             .onEnded { _ in
@@ -394,24 +416,26 @@ struct OverlapPreview: View {
     }
 
     @ViewBuilder
-    private var characterArtwork: some View {
+    private func characterArtwork(geometry: PetLayoutPreviewGeometry) -> some View {
+        let artworkScale = CGFloat(contentScale) * geometry.normalizationScale
+
         if let image = previewImage {
             Image(nsImage: image)
                 .resizable()
                 .scaledToFit()
                 .scaleEffect(character.displayOptions.scale)
                 .offset(
-                    x: character.displayOptions.horizontalOffset * 0.45,
-                    y: character.displayOptions.verticalOffset * 0.45
+                    x: character.displayOptions.horizontalOffset * artworkScale,
+                    y: character.displayOptions.verticalOffset * artworkScale
                 )
-                .frame(height: 84 * contentScale)
+                .frame(height: geometry.characterHeight)
                 .shadow(color: .black.opacity(0.12), radius: 7, y: 5)
                 .accessibilityHidden(true)
         } else {
             Image(systemName: "pawprint.fill")
-                .font(.system(size: 48 * contentScale, weight: .light))
+                .font(.system(size: geometry.characterHeight * 4 / 7, weight: .light))
                 .foregroundStyle(.secondary.opacity(0.65))
-                .frame(height: 84 * contentScale)
+                .frame(height: geometry.characterHeight)
                 .accessibilityHidden(true)
         }
     }

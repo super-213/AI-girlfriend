@@ -78,8 +78,6 @@ enum PetListeningLayoutSynchronization {
 }
 
 struct PetRootView: View {
-    private static let panelSpacing: CGFloat = 8
-
     @ObservedObject var petViewBackend: PetViewBackend
     @ObservedObject private var coordinator: PetStateCoordinator
     @ObservedObject private var windowController: PetWindowController
@@ -117,7 +115,7 @@ struct PetRootView: View {
 
     var body: some View {
         VStack(spacing: petStackSpacing) {
-            VStack(spacing: Self.panelSpacing) {
+            VStack(spacing: PetPanelLayoutMetrics.spacing) {
                 if showQuickMenu {
                     PetQuickMenuView(
                         backend: petViewBackend,
@@ -170,7 +168,12 @@ struct PetRootView: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
                     }
                 }
-                .frame(maxWidth: .infinity, minHeight: 42, maxHeight: 42, alignment: .bottom)
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: PetPanelLayoutMetrics.inputHeight,
+                    maxHeight: PetPanelLayoutMetrics.inputHeight,
+                    alignment: .bottom
+                )
                 .animation(DesignAnimation.fast, value: shouldShowInput)
             }
             .zIndex(2)
@@ -284,7 +287,7 @@ struct PetRootView: View {
     /// extra row inside the previous, shorter window for a single frame.
     private func synchronizeWindowForListeningChange(focused: Bool) {
         let snapshot = coordinator.snapshot
-        let rowHeight = PetStatusIndicatorView.height + Self.panelSpacing
+        let rowHeight = PetStatusIndicatorView.height + PetPanelLayoutMetrics.spacing
         let heightDelta = PetListeningLayoutSynchronization.statusHeightDelta(
             focused: focused,
             activityState: snapshot.activityState,

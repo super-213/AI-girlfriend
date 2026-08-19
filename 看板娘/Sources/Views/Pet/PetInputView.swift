@@ -42,7 +42,11 @@ struct PetInputView: View {
         }
         .font(.system(size: 13))
         .padding(.horizontal, 13)
-        .frame(maxWidth: .infinity, minHeight: 42, maxHeight: 42)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: PetPanelLayoutMetrics.inputHeight,
+            maxHeight: PetPanelLayoutMetrics.inputHeight
+        )
         .background(.regularMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(.white.opacity(0.28), lineWidth: 0.8))
         .shadow(color: .black.opacity(0.12), radius: 12, y: 5)

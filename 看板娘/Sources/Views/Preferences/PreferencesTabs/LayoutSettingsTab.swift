@@ -32,7 +32,7 @@ struct LayoutSettingsTab: View {
                     contentScale: $petContentScale,
                     character: character
                 )
-                .frame(height: 380)
+                .frame(height: 500)
 
                 behaviorSection
 

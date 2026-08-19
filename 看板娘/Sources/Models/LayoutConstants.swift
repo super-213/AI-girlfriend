@@ -106,6 +106,12 @@ struct LayoutConstants {
     static let borderWidth: CGFloat = 1
 }
 
+/// 桌宠上方面板组中需要由实际界面与布局预览共用的尺寸。
+enum PetPanelLayoutMetrics {
+    static let spacing: CGFloat = 8
+    static let inputHeight: CGFloat = 42
+}
+
 /// 宠物主界面与布局预览共用的垂直几何参数。
 ///
 /// `petStackSpacing` 是面板组（气泡、状态和输入框）与角色画布之间的
@@ -129,5 +135,36 @@ struct PetLayoutMetrics {
             separatedSpacing: separatedSpacing * scale,
             overlapTravel: overlapTravel * scale
         )
+    }
+}
+
+/// 将实际桌宠界面等比归一化到设置页预览宽度。
+///
+/// 预览中的角色、输入框和间距必须使用同一个 `normalizationScale`，否则
+/// 即使百分比相同，角色相对于输入框的视觉大小也会与桌面实际显示不一致。
+struct PetLayoutPreviewGeometry {
+    static let defaultPanelWidth: CGFloat = 230
+
+    let contentScale: CGFloat
+    let panelWidth: CGFloat
+
+    init(
+        contentScale: CGFloat,
+        panelWidth: CGFloat = Self.defaultPanelWidth
+    ) {
+        self.contentScale = PetWindowSizing.clampedContentScale(contentScale)
+        self.panelWidth = max(panelWidth, 1)
+    }
+
+    var normalizationScale: CGFloat {
+        panelWidth / PetWindowSizing.panelWidth(for: contentScale)
+    }
+
+    var characterHeight: CGFloat {
+        PetWindowSizing.characterBaseHeight * contentScale * normalizationScale
+    }
+
+    func scaledPanelMetric(_ value: CGFloat) -> CGFloat {
+        value * normalizationScale
     }
 }

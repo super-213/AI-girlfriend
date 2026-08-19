@@ -1347,6 +1347,32 @@ struct PetWindowRuntimeSizingTests {
         #expect(PetWindowSizing.panelWidth(for: 2) == 696)
     }
 
+    @Test
+    func layoutPreviewPreservesActualCharacterToPanelRatioAtEveryScale() {
+        for contentScale: CGFloat in [0.5, 1, 2] {
+            let preview = PetLayoutPreviewGeometry(contentScale: contentScale)
+            let previewRatio = preview.characterHeight / preview.panelWidth
+            let liveRatio = PetWindowSizing.characterBaseHeight * contentScale
+                / PetWindowSizing.panelWidth(for: contentScale)
+
+            #expect(abs(previewRatio - liveRatio) < 0.0001)
+        }
+    }
+
+    @Test
+    func layoutPreviewUsesSameNormalizationForInputAndCharacter() {
+        let preview = PetLayoutPreviewGeometry(contentScale: 1)
+
+        #expect(abs(preview.scaledPanelMetric(340) - preview.panelWidth) < 0.0001)
+        #expect(
+            abs(
+                preview.characterHeight
+                    / preview.scaledPanelMetric(PetPanelLayoutMetrics.inputHeight)
+                    - PetWindowSizing.characterBaseHeight / PetPanelLayoutMetrics.inputHeight
+            ) < 0.0001
+        )
+    }
+
     @Test @MainActor
     func scaledContentReportsItsVisualSizeInsteadOfUnscaledLayoutSize() {
         let rootView = PetWindowScaledContent(scale: 0.5) {
