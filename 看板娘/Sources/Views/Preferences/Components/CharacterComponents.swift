@@ -237,7 +237,7 @@ struct CharacterImportSheet: View {
                         .font(.headline)
                     CharacterImportAssetRow(
                         title: "待命素材",
-                        detail: "必选 · GIF、PNG 或 JPEG",
+                        detail: "必选 · GIF、APNG、PNG 或 JPEG",
                         systemImage: "figure.stand",
                         url: idleAssetURL,
                         onChoose: { chooseAsset(title: "选择角色待命素材") { idleAssetURL = $0 } },
@@ -306,12 +306,12 @@ struct CharacterImportSheet: View {
     private func chooseAsset(title: String, completion: @escaping (URL) -> Void) {
         let panel = NSOpenPanel()
         panel.title = title
-        panel.message = "支持 GIF、PNG 与 JPEG 文件"
+        panel.message = "支持 GIF、APNG、PNG 与 JPEG 文件"
         panel.prompt = "选择"
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        panel.allowedContentTypes = [.gif, .png, .jpeg]
+        panel.allowedContentTypes = [.gif, .animatedPNG, .png, .jpeg]
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             completion(url)

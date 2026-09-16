@@ -7,7 +7,7 @@
         <mxCell id="o_start" value="启动 App" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#5b9bd5;fontStyle=1;fontSize=16;" parent="1" vertex="1">
           <mxGeometry x="120" y="220" width="180" height="70" as="geometry" />
         </mxCell>
-        <mxCell id="o_petapp" value="PetApp&lt;br&gt;创建 PetViewBackend&lt;br&gt;初始化 MemoryOptimizer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#5b9bd5;fontSize=15;" parent="1" vertex="1">
+        <mxCell id="o_petapp" value="PetApp&lt;br&gt;创建 PetViewBackend&lt;br&gt;系统 ImageIO 动画" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#5b9bd5;fontSize=15;" parent="1" vertex="1">
           <mxGeometry x="420" y="195" width="300" height="120" as="geometry" />
         </mxCell>
         <mxCell id="o_delegate" value="AppDelegate&lt;br&gt;设置透明悬浮主窗口&lt;br&gt;注册 Ctrl+T 热键" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#5b9bd5;fontSize=15;" parent="1" vertex="1">

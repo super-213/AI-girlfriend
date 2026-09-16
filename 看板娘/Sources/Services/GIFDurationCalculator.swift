@@ -9,7 +9,7 @@ import Foundation
 import ImageIO
 import AppKit
 
-/// GIF动画时长计算器
+/// GIF/APNG 动画时长计算器（保留原名称以兼容现有调用）。
 struct GIFDurationCalculator {
     private final class DurationCache: @unchecked Sendable {
         let values = NSCache<NSString, NSNumber>()
@@ -41,7 +41,7 @@ struct GIFDurationCalculator {
             return cached
         }
 
-        guard let gifUrl = getGifUrl(gifName: gifName) else {
+        guard let gifUrl = getImageURL(name: gifName) else {
             return 2.0
         }
 
@@ -65,32 +65,33 @@ struct GIFDurationCalculator {
     
     /// 获取单帧的延迟时间
     private static func getFrameDuration(from imageSource: CGImageSource, at index: Int) -> TimeInterval {
-        guard let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, index, nil) as? [String: Any],
-              let gifInfo = properties[kCGImagePropertyGIFDictionary as String] as? [String: Any] else {
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, index, nil) as? [String: Any] else {
             return 0.1
         }
-        
-        var frameDuration: TimeInterval = 0.1
-        
-        // 优先使用 UnclampedDelayTime
-        if let unclampedDelay = gifInfo[kCGImagePropertyGIFUnclampedDelayTime as String] as? TimeInterval,
-           unclampedDelay > 0 {
-            frameDuration = unclampedDelay
-        } else if let delay = gifInfo[kCGImagePropertyGIFDelayTime as String] as? TimeInterval,
-                  delay > 0 {
-            frameDuration = delay
-        }
-        
-        // 限制最小延迟
-        if frameDuration < 0.02 {
-            frameDuration = 0.1
-        }
+
+        let gifInfo = properties[kCGImagePropertyGIFDictionary as String] as? [String: Any]
+        let pngInfo = properties[kCGImagePropertyPNGDictionary as String] as? [String: Any]
+        let frameDuration = positiveDuration(
+            gifInfo?[kCGImagePropertyGIFUnclampedDelayTime as String],
+            gifInfo?[kCGImagePropertyGIFDelayTime as String],
+            pngInfo?[kCGImagePropertyAPNGUnclampedDelayTime as String],
+            pngInfo?[kCGImagePropertyAPNGDelayTime as String]
+        ) ?? 0.1
         
         return frameDuration
     }
+
+    private static func positiveDuration(_ values: Any?...) -> TimeInterval? {
+        values.lazy.compactMap { value -> TimeInterval? in
+            if let value = value as? NSNumber, value.doubleValue > 0 {
+                return value.doubleValue
+            }
+            return nil
+        }.first
+    }
     
     /// 获取GIF文件的URL
-    private static func getGifUrl(gifName: String) -> URL? {
+    private static func getImageURL(name gifName: String) -> URL? {
         if gifName.hasPrefix("/") {
             return URL(fileURLWithPath: gifName)
         } else {

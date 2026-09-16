@@ -27,8 +27,6 @@ struct PetApp: App {
             from: defaults,
             legacyConfiguration: legacyConfiguration
         )
-        // 初始化内存优化器
-        _ = MemoryOptimizer.shared
     }
 
     var body: some Scene {

@@ -1049,6 +1049,13 @@ struct PetStateCoordinatorTests {
 
 struct PetAssetResolverTests {
     @Test
+    func animatedAssetTypesIncludeGifAndApng() {
+        #expect(PetAssetType.infer(from: "character.gif")?.isAnimated == true)
+        #expect(PetAssetType.infer(from: "character.apng")?.isAnimated == true)
+        #expect(PetAssetType.infer(from: "character.png")?.isAnimated == false)
+    }
+
+    @Test
     func missingWorkingAssetFallsBackToIdle() {
         let idle = PetAnimationAsset(id: "idle", location: "idle.png", type: .png)
         let character = PetCharacter(

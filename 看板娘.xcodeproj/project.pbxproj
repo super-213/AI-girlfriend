@@ -9,7 +9,6 @@
 /* Begin PBXBuildFile section */
 		6231AD972D3A4352009BE5ED /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6231AD902D3A3C2A009BE5ED /* AVFoundation.framework */; };
 		6231AD982D3A4352009BE5ED /* AVKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6231AD8E2D3A3BCA009BE5ED /* AVKit.framework */; };
-		62F09D79300E210200AC02B1 /* SDWebImageSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 62F09D78300E210200AC02B1 /* SDWebImageSwiftUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -60,7 +59,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				62F09D79300E210200AC02B1 /* SDWebImageSwiftUI in Frameworks */,
 				6231AD982D3A4352009BE5ED /* AVKit.framework in Frameworks */,
 				6231AD972D3A4352009BE5ED /* AVFoundation.framework in Frameworks */,
 			);
@@ -133,7 +131,6 @@
 			);
 			name = "看板娘";
 			packageProductDependencies = (
-				62F09D78300E210200AC02B1 /* SDWebImageSwiftUI */,
 			);
 			productName = "看板娘";
 			productReference = 62A3BF012D19899F003DB0DF /* 看板娘.app */;
@@ -218,7 +215,6 @@
 			mainGroup = 62A3BEF82D19899F003DB0DF;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				62F09D77300E1F3100AC02B1 /* XCRemoteSwiftPackageReference "SDWebImageSwiftUI" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 62A3BF022D19899F003DB0DF /* Products */;
@@ -585,24 +581,6 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		62F09D77300E1F3100AC02B1 /* XCRemoteSwiftPackageReference "SDWebImageSwiftUI" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/SDWebImage/SDWebImageSwiftUI.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 3.1.4;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		62F09D78300E210200AC02B1 /* SDWebImageSwiftUI */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 62F09D77300E1F3100AC02B1 /* XCRemoteSwiftPackageReference "SDWebImageSwiftUI" */;
-			productName = SDWebImageSwiftUI;
-		};
-/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 62A3BEF92D19899F003DB0DF /* Project object */;
 }

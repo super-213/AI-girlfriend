@@ -5,8 +5,6 @@
 
 import AppKit
 import ImageIO
-import SDWebImage
-import SDWebImageSwiftUI
 import SwiftUI
 
 struct PetArtworkBounds: Equatable, @unchecked Sendable {
@@ -293,7 +291,6 @@ struct PetCharacterView: View, @MainActor Equatable {
         .accessibilityLabel("\(character.name)，\(coordinator.snapshot.renderedState.displayName)")
         .onAppear(perform: prefetchInteractionMetadata)
         .onChange(of: character.id) { _, _ in prefetchInteractionMetadata() }
-        .onDisappear { SDImageCache.shared.clearMemory() }
     }
 
     private var artworkMetadata: PetArtworkMetadata? {
@@ -319,8 +316,8 @@ struct PetCharacterView: View, @MainActor Equatable {
     @ViewBuilder
     private var media: some View {
         if let asset = resolvedAsset?.asset {
-            if asset.type == .gif {
-                gifView(asset: asset)
+            if asset.type.isAnimated {
+                animatedImage(asset: asset)
             } else if let image = staticImage(location: asset.location) {
                 Image(nsImage: image)
                     .resizable()
@@ -335,20 +332,21 @@ struct PetCharacterView: View, @MainActor Equatable {
     }
 
     @ViewBuilder
-    private func gifView(asset: PetAnimationAsset) -> some View {
-        if asset.location.hasPrefix("/") {
-            AnimatedImage(url: URL(fileURLWithPath: asset.location))
-                .resizable()
-                .customLoopCount(asset.loop ? nil : 1)
-                .scaledToFit()
+    private func animatedImage(asset: PetAnimationAsset) -> some View {
+        if let url = assetURL(location: asset.location) {
+            NativeAnimatedImage(url: url, loops: asset.loop)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .id(asset.id)
         } else {
-            AnimatedImage(name: asset.location)
-                .resizable()
-                .customLoopCount(asset.loop ? nil : 1)
-                .scaledToFit()
-                .id(asset.id)
+            placeholder
         }
+    }
+
+    private func assetURL(location: String) -> URL? {
+        if location.hasPrefix("/") {
+            return URL(fileURLWithPath: location)
+        }
+        return Bundle.main.url(forResource: location, withExtension: nil)
     }
 
     private func staticImage(location: String) -> NSImage? {

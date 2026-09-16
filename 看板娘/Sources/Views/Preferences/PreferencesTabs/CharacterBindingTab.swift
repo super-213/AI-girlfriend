@@ -109,7 +109,7 @@ struct CharacterBindingTab: View {
                 Label("导入角色", systemImage: "plus")
             }
             .disabled(customCharacters.count >= 3)
-            .help(customCharacters.count >= 3 ? "最多可保存 3 个自定义角色" : "从 GIF、PNG 或 JPEG 创建角色")
+            .help(customCharacters.count >= 3 ? "最多可保存 3 个自定义角色" : "从 GIF、APNG、PNG 或 JPEG 创建角色")
         }
         .padding(.horizontal, DesignSpacing.xl)
         .padding(.vertical, DesignSpacing.lg)

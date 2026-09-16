@@ -23,7 +23,7 @@
 
 ### 主要特性
 
-- 🎭 **多状态角色**：内置角色 + 自定义角色（最多 3 个），支持 GIF/PNG/JPEG、状态回退和多素材轮换
+- 🎭 **多状态角色**：内置角色 + 自定义角色（最多 3 个），支持 GIF/APNG/PNG/JPEG、状态回退和多素材轮换
 - 🧭 **状态驱动桌宠**：支持 idle、thinking、talking、working、waitingForConfirmation、success、error、sleeping 等 13 种状态
 - 🖱️ **桌面级交互**：透明区域整窗穿透、Alpha 命中拖拽、位置恢复、动态窗口尺寸和屏幕边界约束
 - 🤖 **AI 对话**：支持智谱清言、OpenAI-Compatible、Ollama（流式输出）
@@ -55,7 +55,7 @@
 - **布局**：休息阈值、气泡时长、命令确认方式和原布局参数
 - **技能**：导入或生成 `agent.md`，新建/导入标准目录 Skill，并兼容旧版单 `.md` 技能
 - **自动化**：新增、编辑、启停和删除自动化流程，设置名称、提示词和运行频率
-- **角色绑定**：切换角色，导入 GIF/PNG/JPEG，并为每个业务状态配置多份素材与预览
+- **角色绑定**：切换角色，导入 GIF/APNG/PNG/JPEG，并为每个业务状态配置多份素材与预览
 - **关于**：应用信息与当前角色显示
 
 ### 3. 自动化流程
@@ -134,8 +134,7 @@ PetApp (入口)
     │               ├─▶ PetControlService
     │               ├─▶ APIManager
     │               ├─▶ PetAssetResolver
-    │               ├─▶ TriggerDispatcher / AutomationStore
-    │               └─▶ MemoryOptimizer
+    │               └─▶ TriggerDispatcher / AutomationStore
     │
     ├─▶ PetWindowController / PetWindowHitTestCoordinator
     │
@@ -310,6 +309,7 @@ PetControlService
 │   │   ├── Views/
 │   │   │   ├── PetView.swift
 │   │   │   ├── Pet/
+│   │   │   │   └── NativeAnimatedImage.swift
 │   │   │   └── Preferences/
 │   │   │       ├── PreferencesView.swift
 │   │   │       ├── Components/
@@ -324,7 +324,6 @@ PetControlService
 │   │   │   ├── PetWindowController.swift
 │   │   │   └── PetWindowHitTestCoordinator.swift
 │   │   ├── Utils/
-│   │   │   ├── MemoryOptimizer.swift
 │   │   │   └── gif_library.swift
 │   │   └── UI/
 │   │       ├── DesignSystem.swift
@@ -345,9 +344,8 @@ PetControlService
 - **AppKit**：窗口层级、无边框悬浮窗、系统事件监听
 - **Combine**：定时器与响应式状态流
 
-### 第三方库
-- **SDWebImage**
-- **SDWebImageSwiftUI**
+### 动画渲染
+- **ImageIO / Core Animation**：系统原生 GIF/APNG 解码与透明动画渲染
 
 ### 数据与存储
 - **UserDefaults**
@@ -383,13 +381,7 @@ xcodebuild -project 看板娘.xcodeproj -scheme 看板娘 -destination 'platform
 ```
 
 ### 依赖说明
-工程使用本地 Swift Package 引用：
-
-```text
-../库/SDWebImageSwiftUI-master
-```
-
-请确保该目录存在；若不存在，需要在 Xcode 中重新绑定可用的 SDWebImageSwiftUI 包路径。
+动画播放使用 macOS 系统框架，不需要第三方图片包。
 
 ---
 
@@ -492,14 +484,14 @@ apiKey: "ollama" // 本地模式通常不会校验
 - **APIManager.swift**：多 Provider 请求构建、流式解析、system prompt 增强注入
 - **PetControlService.swift**：机器可调用控制面，定义结构化请求/响应、错误码、动作路由和审计日志
 - **MusicPlayerService.swift**：歌曲关键词提取与 Apple Music 跳转
-- **GIFDurationCalculator.swift**：GIF 实际播放时长计算
+- **GIFDurationCalculator.swift**：GIF/APNG 实际播放时长计算
 - **PetAssetResolver.swift**：状态素材轮换、交互素材和统一回退链
 
 ### Store 层
 - **AutomationStore.swift**：自动化流程的新增、更新、删除、启停、到期查询和 UserDefaults 持久化
 
-### Utils 层
-- **MemoryOptimizer.swift**：SDWebImage 缓存与周期性清理
+### 动画与 Utils 层
+- **NativeAnimatedImage.swift**：基于 ImageIO 的低缓存 GIF/APNG 播放
 - **gif_library.swift**：内置角色库
 
 ---
@@ -507,7 +499,7 @@ apiKey: "ollama" // 本地模式通常不会校验
 ## 开发建议
 
 ### 添加新角色
-1. 准备待命素材（GIF、PNG 或 JPEG）以及可选互动素材
+1. 准备待命素材（GIF、APNG、PNG 或 JPEG）以及可选互动素材
 2. 在偏好设置 → 角色绑定导入，并确认拥有素材使用权
 3. 点击“状态素材”为不同状态添加一份或多份素材；缺失状态会按统一回退链使用待命素材
 4. 旧版 `normalGif/clickGif` 自定义角色按已确认策略不自动迁移，需要重新导入

@@ -497,8 +497,8 @@ extension PreferencesView {
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        panel.allowedContentTypes = [.gif, .png, .jpeg]
-        panel.message = "为“\(state.displayName)”选择素材"
+        panel.allowedContentTypes = [.gif, .animatedPNG, .png, .jpeg]
+        panel.message = "为“\(state.displayName)”选择 GIF、APNG、PNG 或 JPEG 素材"
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             _ = backend.addStateAsset(toCharacterAt: characterIndex, state: state, sourceURL: url)
@@ -546,6 +546,13 @@ extension UTType {
             return type
         }
         return .data
+    }
+
+    static var animatedPNG: UTType {
+        if let type = UTType(filenameExtension: "apng") {
+            return type
+        }
+        return .png
     }
     
     static var markdown: UTType {

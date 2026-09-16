@@ -8,6 +8,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import ImageIO
 
 // MARK: - 偏好设置视图后端
 
@@ -129,7 +130,7 @@ final class PreferencesViewBackend: ObservableObject {
         }
     }
     
-    /// 导入 GIF/PNG/JPEG 创建新结构角色。
+    /// 导入 GIF/APNG/PNG/JPEG 创建新结构角色。
     /// - Parameters:
     ///   - normalGif: 站立状态的GIF文件URL
     ///   - clickGif: 点击动作的GIF文件URL（可选）
@@ -149,7 +150,7 @@ final class PreferencesViewBackend: ObservableObject {
         }
         
         guard let normalGif, PetAssetType.infer(from: normalGif.path) != nil else {
-            importErrorMessage = "必须选择 GIF、PNG 或 JPEG 待命素材"
+            importErrorMessage = "必须选择 GIF、APNG、PNG 或 JPEG 待命素材"
             showImportError = true
             return false
         }
@@ -242,8 +243,13 @@ final class PreferencesViewBackend: ObservableObject {
     }
 
     private func copyCharacterAsset(from sourceURL: URL, nameHint: String, loop: Bool = true) throws -> PetAnimationAsset {
-        guard let type = PetAssetType.infer(from: sourceURL.path) else {
-            throw NSError(domain: "PetCharacter", code: 1, userInfo: [NSLocalizedDescriptionKey: "仅支持 GIF、PNG 和 JPEG"])
+        guard var type = PetAssetType.infer(from: sourceURL.path) else {
+            throw NSError(domain: "PetCharacter", code: 1, userInfo: [NSLocalizedDescriptionKey: "仅支持 GIF、APNG、PNG 和 JPEG"])
+        }
+        if type == .png,
+           let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
+           CGImageSourceGetCount(source) > 1 {
+            type = .apng
         }
         let fileManager = FileManager.default
         guard let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {

@@ -7,12 +7,18 @@ import Foundation
 
 enum PetAssetType: String, Codable, CaseIterable {
     case gif
+    case apng
     case png
     case jpeg
+
+    var isAnimated: Bool {
+        self == .gif || self == .apng
+    }
 
     static func infer(from location: String) -> PetAssetType? {
         switch URL(fileURLWithPath: location).pathExtension.lowercased() {
         case "gif": return .gif
+        case "apng": return .apng
         case "png": return .png
         case "jpg", "jpeg": return .jpeg
         default: return nil

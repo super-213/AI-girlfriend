@@ -84,7 +84,6 @@ final class PetViewBackend: ObservableObject {
     private let assetResolver = PetAssetResolver()
     private var outputBoxHideTimer: AnyCancellable?
     private var periodicAutoActionTimer: AnyCancellable?
-    private var memoryCleanupTimer: AnyCancellable?
     private var assetRotationTimer: AnyCancellable?
     private var automationTimer: Timer?
     private var sleepTimer: Timer?
@@ -115,7 +114,6 @@ final class PetViewBackend: ObservableObject {
         configureAgentRuntime()
         bindState()
         registerNotifications()
-        startPeriodicMemoryCleanup()
         observeAutomationChanges()
         scheduleNextAutomationAction()
         startAssetRotation()
@@ -128,7 +126,6 @@ final class PetViewBackend: ObservableObject {
             notificationObservers.forEach(NotificationCenter.default.removeObserver)
             outputBoxHideTimer?.cancel()
             periodicAutoActionTimer?.cancel()
-            memoryCleanupTimer?.cancel()
             assetRotationTimer?.cancel()
             automationTimer?.invalidate()
             sleepTimer?.invalidate()
@@ -571,12 +568,6 @@ final class PetViewBackend: ObservableObject {
         submitAutomation(automation)
     }
 
-    private func startPeriodicMemoryCleanup() {
-        memoryCleanupTimer = Timer.publish(every: 300, on: .main, in: .common)
-            .autoconnect()
-            .sink { _ in MemoryOptimizer.shared.periodicCleanup() }
-    }
-
     private var configuredBubbleDuration: TimeInterval {
         let defaults = UserDefaults.standard
         return defaults.object(forKey: "bubbleAutoHideDuration") == nil
@@ -587,7 +578,7 @@ final class PetViewBackend: ObservableObject {
     private var interactionDuration: TimeInterval? {
         guard let asset = currentCharacter.interactionAssets.first else { return nil }
         if let preferredDuration = asset.preferredDuration { return preferredDuration }
-        guard asset.type == .gif, !asset.loop else { return nil }
+        guard asset.type.isAnimated, !asset.loop else { return nil }
         guard let cachedDuration = GIFDurationCalculator.cachedDuration(for: asset.location) else {
             GIFDurationCalculator.prefetchDuration(for: asset.location)
             return nil
@@ -597,7 +588,7 @@ final class PetViewBackend: ObservableObject {
 
     private func prefetchInteractionDurations() {
         for asset in currentCharacter.interactionAssets
-        where asset.preferredDuration == nil && asset.type == .gif && !asset.loop {
+        where asset.preferredDuration == nil && asset.type.isAnimated && !asset.loop {
             GIFDurationCalculator.prefetchDuration(for: asset.location)
         }
     }
