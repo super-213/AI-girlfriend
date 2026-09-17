@@ -450,7 +450,13 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     }
     
     private func loadSkillCatalog() -> String? {
-        let catalog = SkillLibrary.enabledCatalog()
+        var catalog = SkillLibrary.enabledCatalog()
+        if KnowledgeBaseRegistry.shared.hasEnabledKnowledgeBase {
+            catalog.append([
+                "name": KnowledgeBaseAnswerSkill.name,
+                "description": KnowledgeBaseAnswerSkill.description
+            ])
+        }
         guard !catalog.isEmpty,
               let data = try? JSONSerialization.data(withJSONObject: catalog, options: [.sortedKeys]),
               let json = String(data: data, encoding: .utf8) else {

@@ -217,6 +217,9 @@ extension PreferencesView {
                 onCancel: cancelChanges,
                 hasUnsavedChanges: backend.hasUnsavedChanges || petSizeHasUnsavedChanges
             )
+
+        case .knowledgeBases:
+            KnowledgeBaseSettingsTab()
             
         case .skills:
             SkillsSettingsTab(

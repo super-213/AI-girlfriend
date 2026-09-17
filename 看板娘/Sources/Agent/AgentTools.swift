@@ -45,6 +45,9 @@ final class AgentToolRegistry {
         let registry = AgentToolRegistry()
         registry.register(CurrentDateTimeTool())
         registry.register(ReadSkillTool())
+        registry.register(ListKnowledgeBasesTool())
+        registry.register(AddToKnowledgeBaseTool())
+        registry.register(SearchKnowledgeBaseTool())
         registry.register(ListDirectoryTool())
         registry.register(ReadFileTool())
         registry.register(ReadDocumentTool())
@@ -109,6 +112,11 @@ final class ReadSkillTool: AgentTool {
             return
         }
         let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.caseInsensitiveCompare(KnowledgeBaseAnswerSkill.name) == .orderedSame,
+           KnowledgeBaseRegistry.shared.hasEnabledKnowledgeBase {
+            completion(.success(KnowledgeBaseAnswerSkill.content))
+            return
+        }
         guard let skill = SkillLibrary.enabledSkill(named: name, defaults: defaults) else {
             completion(.failure("未找到已启用且有效的 Skill：\(name)"))
             return

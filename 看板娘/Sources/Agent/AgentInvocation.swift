@@ -143,7 +143,7 @@ enum AgentInvocationCatalog {
                 )
             }
 
-        let skills = SkillLibrary.load(defaults: defaults)
+        var skills = SkillLibrary.load(defaults: defaults)
             .filter { $0.isEnabled && $0.isValid }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             .map {
@@ -153,6 +153,14 @@ enum AgentInvocationCatalog {
                     description: $0.description
                 )
             }
+
+        if KnowledgeBaseRegistry.shared.hasEnabledKnowledgeBase {
+            skills.append(AgentInvocationOption(
+                kind: .skill,
+                name: KnowledgeBaseAnswerSkill.name,
+                description: KnowledgeBaseAnswerSkill.description
+            ))
+        }
 
         return tools + skills
     }

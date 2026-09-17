@@ -66,6 +66,7 @@ Computer Use 的长期目标是形成“观察当前界面 → 判断下一步 �
 - 🔐 **低打扰安全界面**：云端文件提示、目录授权状态和对话内工具日志可在偏好设置中独立开关，完整审计始终保留在设置页
 - 🪟 **悬浮对话窗**：`Ctrl + T` 呼出独立无边框聊天窗口
 - 🧠 **技能注入**：支持 Codex Agent Skill 标准目录（`SKILL.md` + 可选 `scripts/` 等资源），并兼容旧版单 `.md` 技能
+- 📚 **外置 RAG 知识库**：可绑定多个任意目录，文档、分块和向量索引保存在所选目录内，支持 Agent 写入和带来源的知识问答
 - 🛰️ **Codex 任务感知**：只读监听 Codex CLI / Desktop 本地 rollout，不干扰桌宠日常状态；任务完成后立即在输出框展示最终回复
 - ⏱️ **自动化流程**：在偏好设置中创建常用提示词，按一次、15 分钟、小时、天、周、月、年等频率自动发送给模型
 - 🧾 **命令执行管道**：模型可生成命令，客户端二次确认并执行安全命令
@@ -92,6 +93,7 @@ Computer Use 的长期目标是形成“观察当前界面 → 判断下一步 �
 - **模型设置**：Provider、Model、API URL、API Key
 - **布局**：休息阈值、气泡时长、命令确认方式和原布局参数
 - **技能**：导入或生成 `agent.md`，新建/导入标准目录 Skill，并兼容旧版单 `.md` 技能
+- **知识库**：添加、启停或移除外置知识库目录；移除引用不会删除目录内的 `.kanban-rag/index.json`
 - **自动化**：新增、编辑、启停和删除自动化流程，设置名称、提示词和运行频率
 - **角色绑定**：切换角色，导入 GIF/APNG/PNG/JPEG，并为每个业务状态配置多份素材与预览
 - **关于**：应用信息与当前角色显示
@@ -115,6 +117,8 @@ Computer Use 的长期目标是形成“观察当前界面 → 判断下一步 �
 主窗口对话、设置页提示词自动化和 Ctrl+T 完整对话均由通用 Agent Runtime 编排，当前内置工具包括：
 
 - `get_current_datetime`：读取本机日期、时间、星期和时区
+- `list_knowledge_bases` / `search_knowledge_base`：列出并使用语义向量 + 关键词混合方式检索已启用的外置知识库
+- `add_to_knowledge_base`：经用户确认后，将文本或 PDF、Office、RTF、图片 OCR 等本机文档分块并索引到指定知识库
 - `list_directory` / `read_file`：目录和文本文件读取
 - `read_document` / `get_file_info`：读取 PDF、Word、图片 OCR 等文档内容及元数据
 - `search_files` / `open_file` / `reveal_in_finder`：Spotlight 搜索、打开文件和 Finder 定位

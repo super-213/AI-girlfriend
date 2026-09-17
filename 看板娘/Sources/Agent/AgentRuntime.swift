@@ -64,7 +64,14 @@ final class AgentRuntime {
         maxIterations: Int = 16,
         contextCompactionPolicy: AgentContextCompactionPolicy = .standard,
         enabledSkillNameResolver: @escaping (String) -> String? = {
-            SkillLibrary.enabledSkill(named: $0)?.name
+            if let skill = SkillLibrary.enabledSkill(named: $0) {
+                return skill.name
+            }
+            if $0.caseInsensitiveCompare(KnowledgeBaseAnswerSkill.name) == .orderedSame,
+               KnowledgeBaseRegistry.shared.hasEnabledKnowledgeBase {
+                return KnowledgeBaseAnswerSkill.name
+            }
+            return nil
         },
         systemPromptProvider: @escaping () -> String
     ) {
