@@ -409,6 +409,8 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         - 调用 perform_ui_action 时尽量提供 expected_text、expected_element、expected_element_absent 或 expected_window_title；客户端会轮询界面直到满足条件或超时。
         - 多个控件同名时不要猜测：优先用 element_handle，或提供 scope_handle、window_handle、row_label、role 或 occurrence。表格行、树节点、列表项和弹窗都要保留所属作用域。
         - AX 树信息不足时使用 observe_desktop 返回的 OCR visual_handle。仅使用原始坐标时必须同时传入 coordinate_observation_id；如果客户端拒绝过期坐标，必须根据新观察重新定位。
+        - 需要悬停、按住/释放、精确分段滚动、剪贴板粘贴、层级菜单、文件选择/保存面板或跨应用文件传递时，直接使用 perform_ui_action 的对应 action；发送文件优先 paste_files，只有目标必须接受拖放时才用 drag_files。
+        - 验证失败后客户端会先重新激活应用并强制 AX+OCR 观察；仅 set_value、mouse_move、hover 和 mouse_up 可安全自动重放一次。不要要求客户端重放点击、输入、粘贴、保存、菜单、文件选择或文件发送。
         - 如果高风险操作已发出但验证失败，先重新观察并说明不确定性，不要自动重复发送、删除、付款、覆盖或提交动作。
         """]
         

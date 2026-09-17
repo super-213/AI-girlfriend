@@ -123,6 +123,8 @@ Computer Use 的长期目标是形成“观察当前界面 → 判断下一步 �
 - `list_shortcuts` / `run_shortcut`：查看并运行 macOS 快捷指令
 - `run_applescript` / `control_application`：经确认执行 AppleScript 或辅助功能操作
 - `observe_desktop` / `perform_ui_action`：观察屏幕与 Accessibility 元素，维持跨观察的稳定窗口/元素身份和 AX 增量变化，理解表格、树、列表、滚动区域、WebView、焦点、选中、禁用与弹窗状态；AX 稀疏时自动用 OCR 补足，动作后再按预期状态自动验证
+- 完整桌面动作：鼠标移动、悬停、按住/释放、精确拖拽、分段惯性滚动、特殊键/组合键、剪贴板文本与文件粘贴、菜单层级、打开/保存/目录面板和 Finder 跨应用文件拖放
+- 自动恢复：验证失败时重新激活应用、执行强制 AX+OCR 观察并恢复按住的鼠标状态；仅对可证明幂等的设值、移动、悬停和释放动作自动重放一次
 - `present_action_plan` / `undo_last_file_operation`：变更计划审批与最近文件操作撤销
 - `run_command`：按用户配置的命令权限策略执行非交互式 Shell 命令
 - `list_pet_characters` / `switch_pet_character`：桌宠角色查询与切换

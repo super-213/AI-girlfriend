@@ -189,6 +189,73 @@ struct AgentFoundationTests {
         #expect(!tool.requiresConfirmation(arguments: [
             "application": "TextEdit", "action": "type_text", "text": "delete is only text here"
         ]))
+        #expect(tool.requiresConfirmation(arguments: [
+            "application": "Messages", "action": "paste_files", "paths": ["/tmp/report.pdf"]
+        ]))
+        #expect(tool.requiresConfirmation(arguments: [
+            "application": "TextEdit", "action": "save_file", "path": "/tmp/report.txt"
+        ]))
+        #expect(tool.requiresConfirmation(arguments: [
+            "application": "TextEdit", "action": "select_menu", "menu_path": ["File", "Save"]
+        ]))
+    }
+
+    @Test @MainActor
+    func uiActionSchemaExposesCompletePointerFileMenuAndRecoveryActions() throws {
+        let tool = PerformUIActionTool()
+        let properties = try #require(tool.definition.parameters["properties"] as? [String: Any])
+        let action = try #require(properties["action"] as? [String: Any])
+        let actions = try #require(action["enum"] as? [String])
+
+        for expected in [
+            "mouse_move", "hover", "mouse_down", "mouse_up", "paste_text", "paste_files",
+            "drag_files", "select_menu", "choose_file", "choose_files", "choose_directory",
+            "save_file", "key_sequence"
+        ] {
+            #expect(actions.contains(expected))
+        }
+        #expect(properties["recovery_policy"] != nil)
+        #expect(properties["coordinate_observation_id"] != nil)
+    }
+
+    @Test
+    func recoveryReplayPolicyOnlyAllowsIdempotentActions() {
+        #expect(UIActionReplayPolicy.isSafelyReplayable(arguments: ["action": "set_value"]))
+        #expect(UIActionReplayPolicy.isSafelyReplayable(arguments: ["action": "hover"]))
+        #expect(UIActionReplayPolicy.isSafelyReplayable(arguments: ["action": "mouse_up"]))
+        #expect(!UIActionReplayPolicy.isSafelyReplayable(arguments: ["action": "click"]))
+        #expect(!UIActionReplayPolicy.isSafelyReplayable(arguments: ["action": "paste_text"]))
+        #expect(!UIActionReplayPolicy.isSafelyReplayable(arguments: ["action": "paste_files"]))
+        #expect(!UIActionReplayPolicy.isSafelyReplayable(arguments: ["action": "save_file"]))
+        #expect(!UIActionExpectation(arguments: ["action": "mouse_move"]).verifyChange)
+        #expect(!UIActionExpectation(arguments: ["action": "mouse_down"]).verifyChange)
+        #expect(UIActionExpectation(arguments: ["action": "hover"]).verifyChange)
+    }
+
+    @Test
+    func preciseInputPlannerPreservesScrollTotalsAndPointerEndpoint() throws {
+        let base = UIPreciseInputPlanner.scrollSteps(deltaX: 17, deltaY: -503, steps: 13, inertia: false)
+        #expect(base.count == 13)
+        #expect(base.reduce(Int32(0)) { $0 + $1.deltaX } == 17)
+        #expect(base.reduce(Int32(0)) { $0 + $1.deltaY } == -503)
+        #expect(base.first?.phase == 1)
+        #expect(base.last?.phase == 4)
+
+        let inertial = UIPreciseInputPlanner.scrollSteps(deltaX: 0, deltaY: -600, steps: 6, inertia: true)
+        let momentum = inertial.dropFirst(6)
+        #expect(!momentum.isEmpty)
+        #expect(momentum.first?.momentumPhase == 1)
+        let magnitudes = momentum.map { abs($0.deltaY) }
+        #expect(zip(magnitudes, magnitudes.dropFirst()).allSatisfy { $0.0 >= $0.1 })
+
+        let points = UIPreciseInputPlanner.pointerPoints(
+            from: CGPoint(x: 10, y: 20),
+            to: CGPoint(x: 310, y: 220),
+            steps: 24
+        )
+        #expect(points.count == 24)
+        #expect(try #require(points.last).x == 310)
+        #expect(try #require(points.last).y == 220)
     }
 
     @Test

@@ -289,7 +289,9 @@ struct UIActionExpectation: Equatable {
         expectedWindowTitle = Self.trimmed(arguments["expected_window_title"])
         expectedFocusedElement = Self.trimmed(arguments["expected_focused_element"])
         expectedSelectedElement = Self.trimmed(arguments["expected_selected_element"])
-        verifyChange = arguments["verify_change"] as? Bool ?? true
+        let action = arguments["action"] as? String ?? ""
+        verifyChange = arguments["verify_change"] as? Bool
+            ?? !["mouse_move", "mouse_down", "mouse_up"].contains(action)
     }
 
     var hasExplicitCondition: Bool {
@@ -709,6 +711,97 @@ private final class AccessibilityComputerUseService {
         }
     }
 
+    func selectMenuPath(application: NSRunningApplication, path: [String]) async throws -> String {
+        try ensurePermission()
+        let root = AXUIElementCreateApplication(application.processIdentifier)
+        let menuBar = elementAttribute(kAXMenuBarAttribute as CFString, element: root) ?? root
+        var container = menuBar
+        var traversed: [String] = []
+        for (index, component) in path.enumerated() {
+            var visited: Set<CFHashCode> = []
+            let roles: Set<String> = index == 0 && path.count > 1
+                ? ["AXMenuBarItem", "AXMenuItem"]
+                : ["AXMenuItem", "AXMenuBarItem"]
+            var item = findMenuElement(
+                container,
+                title: component,
+                acceptedRoles: roles,
+                depth: 0,
+                visited: &visited
+            )
+            if item == nil {
+                visited.removeAll(keepingCapacity: true)
+                item = findMenuElement(
+                    root,
+                    title: component,
+                    acceptedRoles: roles,
+                    depth: 0,
+                    visited: &visited
+                )
+            }
+            guard let item else {
+                throw ComputerUseError.elementNotFound("菜单路径 \((traversed + [component]).joined(separator: " > "))")
+            }
+            if let enabled = boolAttribute(kAXEnabledAttribute, element: item), !enabled {
+                throw ComputerUseError.actionFailed("菜单项“\(component)”当前已禁用")
+            }
+            try press(item)
+            traversed.append(component)
+            try? await Task.sleep(for: .milliseconds(index == path.count - 1 ? 80 : 180))
+            container = semanticChildren(item).first(where: {
+                stringAttribute(kAXRoleAttribute, element: $0) == "AXMenu"
+            }) ?? item
+        }
+        return "已选择菜单 \(traversed.joined(separator: " > "))"
+    }
+
+    func setPreferredTextFieldValue(application: NSRunningApplication, value: String) throws -> String {
+        _ = try snapshot(application: application, maxDepth: 12, maxNodes: 1_000)
+        let candidates = currentRecords(for: application.processIdentifier).filter {
+            $0.role == kAXTextFieldRole && $0.enabled != false
+        }.sorted {
+            if $0.focused != $1.focused { return $0.focused }
+            let lhsIsSaveField = normalized($0.label).contains("save")
+                || normalized($0.label).contains("存储")
+                || normalized($0.label).contains("名称")
+            let rhsIsSaveField = normalized($1.label).contains("save")
+                || normalized($1.label).contains("存储")
+                || normalized($1.label).contains("名称")
+            if lhsIsSaveField != rhsIsSaveField { return lhsIsSaveField }
+            return ($0.frame?.minY ?? .greatestFiniteMagnitude) < ($1.frame?.minY ?? .greatestFiniteMagnitude)
+        }
+        guard let record = candidates.first,
+              let stored = elementsByHandle[record.handle] else {
+            throw ComputerUseError.elementNotFound("保存面板文件名输入框")
+        }
+        try setValue(value, on: stored.element)
+        return record.label
+    }
+
+    func selectedElementFrame(application: NSRunningApplication, preferredLabel: String?) throws -> CGRect {
+        _ = try snapshot(application: application, maxDepth: 12, maxNodes: 1_000)
+        let records = currentRecords(for: application.processIdentifier)
+        let preferred = preferredLabel.map(normalized)
+        let selected = records.filter { record in
+            guard record.selected, record.frame != nil else { return false }
+            guard let preferred else { return true }
+            return normalized(record.label) == preferred || normalized(record.label).contains(preferred)
+        }
+        if let record = selected.min(by: {
+            ($0.frame?.area ?? .greatestFiniteMagnitude) < ($1.frame?.area ?? .greatestFiniteMagnitude)
+        }), let frame = record.frame {
+            return frame
+        }
+        if let preferredLabel {
+            let target = try resolveElement(
+                application: application,
+                arguments: ["label": preferredLabel]
+            )
+            if let frame = target.frame { return frame }
+        }
+        throw ComputerUseError.elementNotFound("文件管理器中的已选文件")
+    }
+
     func ensureInputPermission() throws {
         try ensurePermission()
     }
@@ -921,10 +1014,42 @@ private final class AccessibilityComputerUseService {
             ?? role
     }
 
+    private func findMenuElement(
+        _ element: AXUIElement,
+        title: String,
+        acceptedRoles: Set<String>,
+        depth: Int,
+        visited: inout Set<CFHashCode>
+    ) -> AXUIElement? {
+        guard depth <= 8, visited.insert(CFHash(element)).inserted else { return nil }
+        let role = stringAttribute(kAXRoleAttribute, element: element) ?? ""
+        if acceptedRoles.contains(role), normalized(elementLabel(element)) == normalized(title) {
+            return element
+        }
+        for child in semanticChildren(element) {
+            if let result = findMenuElement(
+                child,
+                title: title,
+                acceptedRoles: acceptedRoles,
+                depth: depth + 1,
+                visited: &visited
+            ) {
+                return result
+            }
+        }
+        return nil
+    }
+
     private func attribute(_ name: CFString, element: AXUIElement) -> CFTypeRef? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, name, &value) == .success else { return nil }
         return value
+    }
+
+    private func elementAttribute(_ name: CFString, element: AXUIElement) -> AXUIElement? {
+        guard let value = attribute(name, element: element),
+              CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return (value as! AXUIElement)
     }
 
     private func stringAttribute(_ name: String, element: AXUIElement) -> String? {
@@ -1344,7 +1469,8 @@ private final class DesktopObservationService {
         maxDepth: Int,
         maxNodes: Int,
         persistScreenshot: Bool = true,
-        storeElements: Bool = true
+        storeElements: Bool = true,
+        forceOCR: Bool = false
     ) async -> DesktopObservation {
         let observationID = UUID()
         var sections: [String] = []
@@ -1417,7 +1543,7 @@ private final class DesktopObservationService {
                     preferredWindowFrame: accessibilitySnapshot?.focusedWindowFrame,
                     persist: persistScreenshot,
                     observationID: observationID,
-                    performOCR: accessibilitySnapshot?.needsVisualFallback ?? true
+                    performOCR: forceOCR || (accessibilitySnapshot?.needsVisualFallback ?? true)
                 )
                 if let path = capture.path {
                     imagePaths.append(path)
@@ -1542,8 +1668,10 @@ private enum UIActionRiskPolicy {
     private static let highRiskTerms = [
         "send", "submit", "publish", "post", "upload", "share", "delete", "remove", "erase",
         "overwrite", "replace", "install", "confirm", "pay", "purchase", "buy", "transfer",
+        "quit", "close", "save", "export",
         "confirm payment", "place order", "发送", "提交", "发布", "上传", "共享", "删除", "移除",
-        "清空", "覆盖", "替换", "安装", "确认", "付款", "购买", "下单", "转账"
+        "清空", "覆盖", "替换", "安装", "确认", "付款", "购买", "下单", "转账",
+        "退出", "关闭", "保存", "存储", "导出"
     ]
 
     static func requiresConfirmation(arguments: [String: Any]) -> Bool {
@@ -1553,13 +1681,16 @@ private enum UIActionRiskPolicy {
         )
         let semanticContext = [
             arguments["label"] as? String,
-            storedLabel
+            storedLabel,
+            (arguments["menu_path"] as? [String])?.joined(separator: " "),
+            arguments["path"] as? String
         ].compactMap { $0 }.joined(separator: " ").lowercased()
-        let canCommit = ["press", "click", "double_click", "right_click", "drag", "key_press"].contains(action)
+        if ["paste_files", "drag_files", "save_file"].contains(action) { return true }
+        let canCommit = ["press", "click", "double_click", "right_click", "drag", "mouse_down", "key_press", "key_sequence", "select_menu"].contains(action)
         if canCommit, highRiskTerms.contains(where: semanticContext.contains) { return true }
 
         let semanticTargetProvided = arguments["label"] != nil || storedLabel != nil
-        if ["press", "click", "double_click", "right_click", "drag"].contains(action), !semanticTargetProvided {
+        if ["press", "click", "double_click", "right_click", "drag", "mouse_down"].contains(action), !semanticTargetProvided {
             return true
         }
         if action == "key_press",
@@ -1571,9 +1702,80 @@ private enum UIActionRiskPolicy {
     }
 }
 
+enum UIActionReplayPolicy {
+    static func isSafelyReplayable(arguments: [String: Any]) -> Bool {
+        guard let action = arguments["action"] as? String else { return false }
+        return ["set_value", "mouse_move", "hover", "mouse_up"].contains(action)
+    }
+}
+
+struct UIScrollStep: Equatable {
+    let deltaX: Int32
+    let deltaY: Int32
+    let phase: Int64
+    let momentumPhase: Int64
+}
+
+enum UIPreciseInputPlanner {
+    static func pointerPoints(from start: CGPoint, to end: CGPoint, steps: Int) -> [CGPoint] {
+        let count = max(1, steps)
+        return (1...count).map { step in
+            let raw = CGFloat(step) / CGFloat(count)
+            let progress = raw * raw * (3 - 2 * raw)
+            return CGPoint(
+                x: start.x + (end.x - start.x) * progress,
+                y: start.y + (end.y - start.y) * progress
+            )
+        }
+    }
+
+    static func scrollSteps(deltaX: Int32, deltaY: Int32, steps: Int, inertia: Bool) -> [UIScrollStep] {
+        let count = max(1, steps)
+        var result: [UIScrollStep] = []
+        var emittedX: Int32 = 0
+        var emittedY: Int32 = 0
+        for step in 1...count {
+            let x = step == count ? deltaX - emittedX : Int32((Double(deltaX) / Double(count)).rounded())
+            let y = step == count ? deltaY - emittedY : Int32((Double(deltaY) / Double(count)).rounded())
+            emittedX += x
+            emittedY += y
+            result.append(UIScrollStep(
+                deltaX: x,
+                deltaY: y,
+                phase: step == 1 ? 1 : (step == count ? 4 : 2),
+                momentumPhase: 0
+            ))
+        }
+        if inertia {
+            for step in 0..<8 {
+                let decay = pow(0.62, Double(step + 1))
+                let x = Int32((Double(deltaX) / Double(count) * decay).rounded())
+                let y = Int32((Double(deltaY) / Double(count) * decay).rounded())
+                if x == 0, y == 0 { break }
+                result.append(UIScrollStep(
+                    deltaX: x,
+                    deltaY: y,
+                    phase: 0,
+                    momentumPhase: step == 0 ? 1 : (step == 7 ? 4 : 2)
+                ))
+            }
+        }
+        return result
+    }
+}
+
 @MainActor
 private final class NativeInputService {
     static let shared = NativeInputService()
+    private var heldButtons: Set<CGMouseButton> = []
+
+    func releaseHeldButtons() {
+        let point = CGEvent(source: nil)?.location ?? .zero
+        for button in heldButtons {
+            postMouse(type: mouseUpType(button), point: point, button: button)
+        }
+        heldButtons.removeAll()
+    }
 
     func perform(
         arguments: [String: Any],
@@ -1618,6 +1820,36 @@ private final class NativeInputService {
             let button: CGMouseButton = action == "right_click" ? .right : .left
             await click(point: point, button: button, count: action == "double_click" ? 2 : 1)
             return "已在 (\(Int(point.x)), \(Int(point.y))) 执行 \(action)"
+        case "mouse_move", "hover":
+            let point = try targetPoint(
+                arguments: arguments,
+                application: application,
+                currentState: currentState
+            )
+            let duration = boundedDuration(arguments["duration_ms"], defaultMilliseconds: action == "hover" ? 250 : 120)
+            await movePointer(to: point, durationMilliseconds: duration)
+            if action == "hover" {
+                let hoverDuration = boundedDuration(arguments["hold_ms"], defaultMilliseconds: 500)
+                try? await Task.sleep(for: .milliseconds(hoverDuration))
+            }
+            return "已将指针移动到 (\(Int(point.x)), \(Int(point.y)))\(action == "hover" ? " 并悬停" : "")"
+        case "mouse_down":
+            let point = try targetPoint(
+                arguments: arguments,
+                application: application,
+                currentState: currentState
+            )
+            let button = try mouseButton(arguments["button"] as? String)
+            await movePointer(to: point, durationMilliseconds: boundedDuration(arguments["duration_ms"], defaultMilliseconds: 80))
+            postMouse(type: mouseDownType(button), point: point, button: button)
+            heldButtons.insert(button)
+            return "已在 (\(Int(point.x)), \(Int(point.y))) 按住 \(buttonName(button)) 键"
+        case "mouse_up":
+            let button = try mouseButton(arguments["button"] as? String)
+            let point = optionalPoint(arguments: arguments) ?? CGEvent(source: nil)?.location ?? .zero
+            postMouse(type: mouseUpType(button), point: point, button: button)
+            heldButtons.remove(button)
+            return "已释放 \(buttonName(button)) 键"
         case "scroll":
             let point: CGPoint?
             if arguments["element_handle"] != nil
@@ -1634,12 +1866,18 @@ private final class NativeInputService {
             if let point { movePointer(to: point) }
             let deltaX = intValue(arguments["delta_x"]) ?? 0
             let deltaY = intValue(arguments["delta_y"]) ?? -480
-            scroll(deltaX: deltaX, deltaY: deltaY)
-            return "已滚动 delta_x=\(deltaX), delta_y=\(deltaY)"
+            let steps = max(1, min((arguments["steps"] as? NSNumber)?.intValue ?? 1, 120))
+            let duration = boundedDuration(arguments["duration_ms"], defaultMilliseconds: steps == 1 ? 0 : 300)
+            let inertia = arguments["inertia"] as? Bool ?? false
+            await scroll(deltaX: deltaX, deltaY: deltaY, steps: steps, durationMilliseconds: duration, inertia: inertia)
+            return "已分 \(steps) 段滚动 delta_x=\(deltaX), delta_y=\(deltaY), inertia=\(inertia)"
         case "drag":
             let start = try requiredPoint(arguments: arguments, xKey: "x", yKey: "y")
             let end = try requiredPoint(arguments: arguments, xKey: "to_x", yKey: "to_y")
-            await drag(from: start, to: end)
+            let steps = max(2, min((arguments["steps"] as? NSNumber)?.intValue ?? 24, 240))
+            let duration = boundedDuration(arguments["duration_ms"], defaultMilliseconds: 450)
+            let hold = boundedDuration(arguments["hold_ms"], defaultMilliseconds: 120)
+            await drag(from: start, to: end, steps: steps, durationMilliseconds: duration, holdMilliseconds: hold)
             return "已从 (\(Int(start.x)), \(Int(start.y))) 拖动到 (\(Int(end.x)), \(Int(end.y)))"
         case "key_press":
             guard let key = arguments["key"] as? String, let keyCode = keyCode(for: key) else {
@@ -1648,12 +1886,64 @@ private final class NativeInputService {
             let modifiers = eventFlags(arguments["modifiers"] as? [String] ?? [])
             keyPress(code: keyCode, flags: modifiers)
             return "已按下快捷键 \((arguments["modifiers"] as? [String] ?? []).joined(separator: "+"))\(modifiers.isEmpty ? "" : "+")\(key)"
+        case "key_sequence":
+            guard let keys = arguments["keys"] as? [String], !keys.isEmpty else {
+                throw ComputerUseError.invalidArguments("key_sequence 缺少 keys")
+            }
+            let modifiers = eventFlags(arguments["modifiers"] as? [String] ?? [])
+            let interval = max(0, min((arguments["interval_ms"] as? NSNumber)?.intValue ?? 80, 2_000))
+            for key in keys {
+                guard let code = keyCode(for: key) else {
+                    throw ComputerUseError.invalidArguments("不支持的按键：\(key)")
+                }
+                keyPress(code: code, flags: modifiers)
+                if interval > 0 { try? await Task.sleep(for: .milliseconds(interval)) }
+            }
+            return "已按顺序输入 \(keys.joined(separator: " "))"
         case "type_text":
             guard let text = arguments["text"] as? String else {
                 throw ComputerUseError.invalidArguments("type_text 缺少 text")
             }
             await typeText(text)
             return "已输入 \(text.count) 个字符"
+        case "paste_text":
+            guard let text = arguments["text"] as? String else {
+                throw ComputerUseError.invalidArguments("paste_text 缺少 text")
+            }
+            try await withTemporaryPasteboard(strings: [text], fileURLs: []) {
+                self.keyPress(code: self.keyCode(for: "v") ?? 9, flags: .maskCommand)
+            }
+            return "已通过剪贴板粘贴 \(text.count) 个字符并恢复原剪贴板"
+        case "paste_files":
+            let urls = try readableFileURLs(arguments["paths"])
+            try await withTemporaryPasteboard(strings: [], fileURLs: urls) {
+                self.keyPress(code: self.keyCode(for: "v") ?? 9, flags: .maskCommand)
+            }
+            return "已向目标应用粘贴 \(urls.count) 个文件"
+        case "drag_files":
+            let urls = try readableFileURLs(arguments["paths"])
+            let destination = try targetPoint(
+                arguments: arguments,
+                application: application,
+                currentState: currentState
+            )
+            try await dragFilesFromFinder(
+                urls: urls,
+                to: destination,
+                targetApplication: application,
+                durationMilliseconds: boundedDuration(arguments["duration_ms"], defaultMilliseconds: 700)
+            )
+            return "已从 Finder 向 \(application.localizedName ?? "目标应用") 拖放 \(urls.count) 个文件"
+        case "select_menu":
+            guard let path = arguments["menu_path"] as? [String], !path.isEmpty else {
+                throw ComputerUseError.invalidArguments("select_menu 缺少 menu_path")
+            }
+            return try await AccessibilityComputerUseService.shared.selectMenuPath(
+                application: application,
+                path: path
+            )
+        case "choose_file", "choose_files", "choose_directory", "save_file":
+            return try await handleFileDialog(action: action, arguments: arguments, application: application)
         default:
             throw ComputerUseError.invalidArguments("不支持的 action：\(action)")
         }
@@ -1701,7 +1991,7 @@ private final class NativeInputService {
         if arguments["visual_handle"] != nil { return }
         let usesRawCoordinates: Bool
         switch action {
-        case "click", "double_click", "right_click":
+        case "click", "double_click", "right_click", "mouse_move", "hover", "mouse_down", "drag_files":
             usesRawCoordinates = !hasSemanticTarget
         case "drag":
             usesRawCoordinates = true
@@ -1730,13 +2020,20 @@ private final class NativeInputService {
         return CGPoint(x: x, y: y)
     }
 
-    private func click(point: CGPoint, button: CGMouseButton, count: Int) async {
+    private func click(
+        point: CGPoint,
+        button: CGMouseButton,
+        count: Int,
+        flags: CGEventFlags = []
+    ) async {
         let source = CGEventSource(stateID: .hidSystemState)
         let downType: CGEventType = button == .right ? .rightMouseDown : .leftMouseDown
         let upType: CGEventType = button == .right ? .rightMouseUp : .leftMouseUp
         for index in 1...count {
             let down = CGEvent(mouseEventSource: source, mouseType: downType, mouseCursorPosition: point, mouseButton: button)
             let up = CGEvent(mouseEventSource: source, mouseType: upType, mouseCursorPosition: point, mouseButton: button)
+            down?.flags = flags
+            up?.flags = flags
             down?.setIntegerValueField(.mouseEventClickState, value: Int64(index))
             up?.setIntegerValueField(.mouseEventClickState, value: Int64(index))
             down?.post(tap: .cghidEventTap)
@@ -1754,30 +2051,315 @@ private final class NativeInputService {
         )?.post(tap: .cghidEventTap)
     }
 
-    private func scroll(deltaX: Int32, deltaY: Int32) {
-        CGEvent(
+    private func movePointer(to destination: CGPoint, durationMilliseconds: Int) async {
+        guard durationMilliseconds > 0,
+              let start = CGEvent(source: nil)?.location else {
+            movePointer(to: destination)
+            return
+        }
+        let steps = max(2, min(durationMilliseconds / 12, 120))
+        let delay = max(1, durationMilliseconds / steps)
+        for point in UIPreciseInputPlanner.pointerPoints(from: start, to: destination, steps: steps) {
+            movePointer(to: point)
+            try? await Task.sleep(for: .milliseconds(delay))
+        }
+    }
+
+    private func scroll(
+        deltaX: Int32,
+        deltaY: Int32,
+        steps: Int,
+        durationMilliseconds: Int,
+        inertia: Bool
+    ) async {
+        let delay = steps > 1 ? max(1, durationMilliseconds / steps) : 0
+        let planned = UIPreciseInputPlanner.scrollSteps(
+            deltaX: deltaX,
+            deltaY: deltaY,
+            steps: steps,
+            inertia: inertia
+        )
+        for (index, step) in planned.enumerated() {
+            postScroll(
+                deltaX: step.deltaX,
+                deltaY: step.deltaY,
+                phase: step.phase,
+                momentumPhase: step.momentumPhase
+            )
+            if delay > 0 { try? await Task.sleep(for: .milliseconds(delay)) }
+            if index >= steps - 1, step.momentumPhase != 0 {
+                try? await Task.sleep(for: .milliseconds(22))
+            }
+        }
+    }
+
+    private func postScroll(deltaX: Int32, deltaY: Int32, phase: Int64, momentumPhase: Int64) {
+        let event = CGEvent(
             scrollWheelEvent2Source: CGEventSource(stateID: .hidSystemState),
             units: .pixel,
             wheelCount: 2,
             wheel1: deltaY,
             wheel2: deltaX,
             wheel3: 0
+        )
+        event?.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        event?.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+        event?.setIntegerValueField(.scrollWheelEventMomentumPhase, value: momentumPhase)
+        event?.post(tap: .cghidEventTap)
+    }
+
+    private func drag(
+        from start: CGPoint,
+        to end: CGPoint,
+        steps: Int,
+        durationMilliseconds: Int,
+        holdMilliseconds: Int
+    ) async {
+        let source = CGEventSource(stateID: .hidSystemState)
+        movePointer(to: start)
+        CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: start, mouseButton: .left)?.post(tap: .cghidEventTap)
+        heldButtons.insert(.left)
+        if holdMilliseconds > 0 { try? await Task.sleep(for: .milliseconds(holdMilliseconds)) }
+        let delay = max(1, durationMilliseconds / steps)
+        for point in UIPreciseInputPlanner.pointerPoints(from: start, to: end, steps: steps) {
+            CGEvent(mouseEventSource: source, mouseType: .leftMouseDragged, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
+            try? await Task.sleep(for: .milliseconds(delay))
+        }
+        CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: end, mouseButton: .left)?.post(tap: .cghidEventTap)
+        heldButtons.remove(.left)
+    }
+
+    private func postMouse(type: CGEventType, point: CGPoint, button: CGMouseButton) {
+        CGEvent(
+            mouseEventSource: CGEventSource(stateID: .hidSystemState),
+            mouseType: type,
+            mouseCursorPosition: point,
+            mouseButton: button
         )?.post(tap: .cghidEventTap)
     }
 
-    private func drag(from start: CGPoint, to end: CGPoint) async {
-        let source = CGEventSource(stateID: .hidSystemState)
-        CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: start, mouseButton: .left)?.post(tap: .cghidEventTap)
-        for step in 1...12 {
-            let progress = CGFloat(step) / 12
-            let point = CGPoint(
-                x: start.x + (end.x - start.x) * progress,
-                y: start.y + (end.y - start.y) * progress
-            )
-            CGEvent(mouseEventSource: source, mouseType: .leftMouseDragged, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
-            try? await Task.sleep(for: .milliseconds(10))
+    private func mouseButton(_ value: String?) throws -> CGMouseButton {
+        switch value?.lowercased() ?? "left" {
+        case "left": return .left
+        case "right": return .right
+        case "middle", "center": return .center
+        default: throw ComputerUseError.invalidArguments("不支持的鼠标按键")
         }
-        CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: end, mouseButton: .left)?.post(tap: .cghidEventTap)
+    }
+
+    private func mouseDownType(_ button: CGMouseButton) -> CGEventType {
+        button == .left ? .leftMouseDown : (button == .right ? .rightMouseDown : .otherMouseDown)
+    }
+
+    private func mouseUpType(_ button: CGMouseButton) -> CGEventType {
+        button == .left ? .leftMouseUp : (button == .right ? .rightMouseUp : .otherMouseUp)
+    }
+
+    private func buttonName(_ button: CGMouseButton) -> String {
+        button == .left ? "left" : (button == .right ? "right" : "middle")
+    }
+
+    private func boundedDuration(_ value: Any?, defaultMilliseconds: Int) -> Int {
+        max(0, min((value as? NSNumber)?.intValue ?? defaultMilliseconds, 15_000))
+    }
+
+    private struct PasteboardSnapshot {
+        let items: [[NSPasteboard.PasteboardType: Data]]
+    }
+
+    private func withTemporaryPasteboard(
+        strings: [String],
+        fileURLs: [URL],
+        operation: () -> Void
+    ) async throws {
+        let pasteboard = NSPasteboard.general
+        let snapshot = PasteboardSnapshot(items: (pasteboard.pasteboardItems ?? []).map { item in
+            Dictionary(uniqueKeysWithValues: item.types.compactMap { type in
+                item.data(forType: type).map { (type, $0) }
+            })
+        })
+        pasteboard.clearContents()
+        if !fileURLs.isEmpty {
+            guard pasteboard.writeObjects(fileURLs as [NSURL]) else {
+                throw ComputerUseError.actionFailed("无法将文件写入剪贴板")
+            }
+        } else if let text = strings.first {
+            guard pasteboard.setString(text, forType: .string) else {
+                throw ComputerUseError.actionFailed("无法将文本写入剪贴板")
+            }
+        }
+        operation()
+        try? await Task.sleep(for: .milliseconds(fileURLs.isEmpty ? 350 : 700))
+        pasteboard.clearContents()
+        if !snapshot.items.isEmpty {
+            let restored = snapshot.items.map { values -> NSPasteboardItem in
+                let item = NSPasteboardItem()
+                for (type, data) in values { item.setData(data, forType: type) }
+                return item
+            }
+            _ = pasteboard.writeObjects(restored)
+        }
+    }
+
+    private func readableFileURLs(_ rawPaths: Any?) throws -> [URL] {
+        guard let paths = rawPaths as? [String], !paths.isEmpty else {
+            throw ComputerUseError.invalidArguments("文件操作需要 paths")
+        }
+        return try paths.map { rawPath in
+            let path = URL(fileURLWithPath: rawPath).standardizedFileURL.path
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+                  !isDirectory.boolValue else {
+                throw ComputerUseError.invalidArguments("文件不存在或是目录：\(path)")
+            }
+            guard AgentFileAccessStore.shared.canRead(path) else {
+                throw ComputerUseError.actionFailed(AgentFileAccessStore.denialMessage(path: path))
+            }
+            return URL(fileURLWithPath: path)
+        }
+    }
+
+    private func handleFileDialog(
+        action: String,
+        arguments: [String: Any],
+        application: NSRunningApplication
+    ) async throws -> String {
+        switch action {
+        case "choose_file":
+            guard let path = arguments["path"] as? String else {
+                throw ComputerUseError.invalidArguments("choose_file 缺少 path")
+            }
+            let url = try readableFileURLs([path]).first!
+            try await goToFileDialogPath(url.path)
+            pressReturnIfDialogStillActive(application)
+            return "已在文件选择器中选择 \(url.path)"
+        case "choose_files":
+            let urls = try readableFileURLs(arguments["paths"])
+            let parents = Set(urls.map { $0.deletingLastPathComponent().path })
+            guard parents.count == 1, let directory = parents.first else {
+                throw ComputerUseError.invalidArguments("多选文件必须位于同一目录")
+            }
+            try await goToFileDialogPath(directory)
+            for url in urls {
+                let target = try AccessibilityComputerUseService.shared.resolveElement(
+                    application: application,
+                    arguments: ["label": url.lastPathComponent]
+                )
+                guard let frame = target.frame else {
+                    throw ComputerUseError.actionFailed("文件行没有可用坐标：\(url.lastPathComponent)")
+                }
+                await click(
+                    point: CGPoint(x: frame.midX, y: frame.midY),
+                    button: .left,
+                    count: 1,
+                    flags: .maskCommand
+                )
+            }
+            pressReturnIfDialogStillActive(application)
+            return "已在文件选择器中选择 \(urls.count) 个文件"
+        case "choose_directory":
+            guard let rawPath = arguments["path"] as? String else {
+                throw ComputerUseError.invalidArguments("choose_directory 缺少 path")
+            }
+            let path = URL(fileURLWithPath: rawPath).standardizedFileURL.path
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else {
+                throw ComputerUseError.invalidArguments("目录不存在：\(path)")
+            }
+            guard AgentFileAccessStore.shared.canRead(path) else {
+                throw ComputerUseError.actionFailed(AgentFileAccessStore.denialMessage(path: path))
+            }
+            try await goToFileDialogPath(path)
+            pressReturnIfDialogStillActive(application)
+            return "已在目录选择器中选择 \(path)"
+        case "save_file":
+            guard let rawPath = arguments["path"] as? String else {
+                throw ComputerUseError.invalidArguments("save_file 缺少 path")
+            }
+            let url = URL(fileURLWithPath: rawPath).standardizedFileURL
+            guard AgentFileAccessStore.shared.canWrite(url.path) else {
+                throw ComputerUseError.actionFailed(AgentFileAccessStore.denialMessage(path: url.deletingLastPathComponent().path))
+            }
+            if FileManager.default.fileExists(atPath: url.path), arguments["allow_overwrite"] as? Bool != true {
+                throw ComputerUseError.actionFailed("目标已存在，未设置 allow_overwrite=true：\(url.path)")
+            }
+            try await goToFileDialogPath(url.deletingLastPathComponent().path)
+            let field = try AccessibilityComputerUseService.shared.setPreferredTextFieldValue(
+                application: application,
+                value: url.lastPathComponent
+            )
+            pressReturnIfDialogStillActive(application)
+            return "已在保存面板的“\(field)”设置文件名 \(url.lastPathComponent)"
+        default:
+            throw ComputerUseError.invalidArguments("不支持的文件面板操作")
+        }
+    }
+
+    private func goToFileDialogPath(_ path: String) async throws {
+        keyPress(code: keyCode(for: "g") ?? 5, flags: [.maskCommand, .maskShift])
+        try? await Task.sleep(for: .milliseconds(220))
+        try await withTemporaryPasteboard(strings: [path], fileURLs: []) {
+            self.keyPress(code: self.keyCode(for: "v") ?? 9, flags: .maskCommand)
+        }
+        keyPress(code: 36, flags: [])
+        try? await Task.sleep(for: .milliseconds(450))
+    }
+
+    private func pressReturnIfDialogStillActive(_ application: NSRunningApplication) {
+        guard !application.isTerminated,
+              application.isActive
+                || NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier else {
+            return
+        }
+        keyPress(code: 36, flags: [])
+    }
+
+    private func dragFilesFromFinder(
+        urls: [URL],
+        to destination: CGPoint,
+        targetApplication: NSRunningApplication,
+        durationMilliseconds: Int
+    ) async throws {
+        NSWorkspace.shared.activateFileViewerSelecting(urls)
+        try? await Task.sleep(for: .milliseconds(850))
+        let finder = try AccessibilityComputerUseService.shared.resolveApplication("com.apple.finder")
+        let selectedFrame = try AccessibilityComputerUseService.shared.selectedElementFrame(
+            application: finder,
+            preferredLabel: urls.first?.lastPathComponent
+        )
+        let start = CGPoint(x: selectedFrame.midX, y: selectedFrame.midY)
+        movePointer(to: start)
+        postMouse(type: .leftMouseDown, point: start, button: .left)
+        heldButtons.insert(.left)
+        try? await Task.sleep(for: .milliseconds(180))
+        let launchPoint = CGPoint(x: start.x + 18, y: start.y + 12)
+        CGEvent(
+            mouseEventSource: CGEventSource(stateID: .hidSystemState),
+            mouseType: .leftMouseDragged,
+            mouseCursorPosition: launchPoint,
+            mouseButton: .left
+        )?.post(tap: .cghidEventTap)
+        try? await Task.sleep(for: .milliseconds(220))
+        targetApplication.activate()
+        try? await Task.sleep(for: .milliseconds(350))
+        let steps = max(12, min(durationMilliseconds / 16, 120))
+        for step in 1...steps {
+            let raw = CGFloat(step) / CGFloat(steps)
+            let progress = raw * raw * (3 - 2 * raw)
+            let point = CGPoint(
+                x: launchPoint.x + (destination.x - launchPoint.x) * progress,
+                y: launchPoint.y + (destination.y - launchPoint.y) * progress
+            )
+            CGEvent(
+                mouseEventSource: CGEventSource(stateID: .hidSystemState),
+                mouseType: .leftMouseDragged,
+                mouseCursorPosition: point,
+                mouseButton: .left
+            )?.post(tap: .cghidEventTap)
+            try? await Task.sleep(for: .milliseconds(max(4, durationMilliseconds / steps)))
+        }
+        postMouse(type: .leftMouseUp, point: destination, button: .left)
+        heldButtons.remove(.left)
     }
 
     private func keyPress(code: CGKeyCode, flags: CGEventFlags) {
@@ -1813,6 +2395,13 @@ private final class NativeInputService {
         let values: [String: CGKeyCode] = [
             "return": 36, "enter": 36, "tab": 48, "space": 49, "delete": 51,
             "escape": 53, "left": 123, "right": 124, "down": 125, "up": 126,
+            "home": 115, "end": 119, "page_up": 116, "pageup": 116,
+            "page_down": 121, "pagedown": 121, "forward_delete": 117,
+            "help": 114, "clear": 71, "f1": 122, "f2": 120, "f3": 99,
+            "f4": 118, "f5": 96, "f6": 97, "f7": 98, "f8": 100,
+            "f9": 101, "f10": 109, "f11": 103, "f12": 111,
+            "f13": 105, "f14": 107, "f15": 113, "f16": 106,
+            "f17": 64, "f18": 79, "f19": 80, "f20": 90,
             "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6,
             "x": 7, "c": 8, "v": 9, "b": 11, "q": 12, "w": 13, "e": 14,
             "r": 15, "y": 16, "t": 17, "1": 18, "2": 19, "3": 20, "4": 21,
@@ -1821,7 +2410,34 @@ private final class NativeInputService {
             "l": 37, "j": 38, "'": 39, "k": 40, ";": 41, "\\": 42, ",": 43,
             "/": 44, "n": 45, "m": 46, ".": 47, "`": 50
         ]
-        return values[key.lowercased()]
+        let normalized = key.lowercased()
+        if normalized.count == 1, let layoutCode = currentLayoutKeyCode(for: normalized) {
+            return layoutCode
+        }
+        return values[normalized]
+    }
+
+    private func currentLayoutKeyCode(for character: String) -> CGKeyCode? {
+        for rawCode in UInt16(0)..<UInt16(128) {
+            guard let event = CGEvent(
+                keyboardEventSource: CGEventSource(stateID: .combinedSessionState),
+                virtualKey: CGKeyCode(rawCode),
+                keyDown: true
+            ) else { continue }
+            var length = 0
+            var characters = [UniChar](repeating: 0, count: 8)
+            characters.withUnsafeMutableBufferPointer { buffer in
+                event.keyboardGetUnicodeString(
+                    maxStringLength: buffer.count,
+                    actualStringLength: &length,
+                    unicodeString: buffer.baseAddress
+                )
+            }
+            guard length > 0 else { continue }
+            let produced = String(utf16CodeUnits: characters, count: length).lowercased()
+            if produced == character { return CGKeyCode(rawCode) }
+        }
+        return nil
     }
 
     private func eventFlags(_ modifiers: [String]) -> CGEventFlags {
@@ -1843,6 +2459,114 @@ private final class NativeInputService {
     private func intValue(_ value: Any?) -> Int32? {
         guard let number = doubleValue(value) else { return nil }
         return Int32(clamping: Int(number))
+    }
+}
+
+private struct UIActionRecoveryOutcome {
+    let recovered: Bool
+    let verification: UIActionVerificationResult?
+    let summary: String
+}
+
+@MainActor
+private final class UIActionRecoveryCoordinator {
+    static let shared = UIActionRecoveryCoordinator()
+
+    func recover(
+        arguments: [String: Any],
+        before: UIObservationState,
+        application: NSRunningApplication,
+        expectation: UIActionExpectation,
+        timeoutMilliseconds: Int
+    ) async -> UIActionRecoveryOutcome {
+        let policy = arguments["recovery_policy"] as? String ?? "safe_retry"
+        guard policy != "none" else {
+            NativeInputService.shared.releaseHeldButtons()
+            return UIActionRecoveryOutcome(
+                recovered: false,
+                verification: nil,
+                summary: "recovery_policy=none"
+            )
+        }
+
+        try? await DesktopApplicationReliabilityService.shared.activateAndWait(application)
+        let refreshed = await DesktopObservationService.shared.observe(
+            applicationIdentifier: application.bundleIdentifier ?? application.localizedName,
+            includeScreenshot: true,
+            includeAccessibility: true,
+            maxDepth: 10,
+            maxNodes: 800,
+            forceOCR: true
+        )
+        let changed = refreshed.state.materiallyDiffers(from: before)
+        let beforeEvaluation = expectation.evaluate(state: before, stateChanged: false)
+        var refreshedEvaluation = expectation.evaluate(state: refreshed.state, stateChanged: changed)
+        if expectation.hasExplicitCondition,
+           expectation.verifyChange,
+           beforeEvaluation.satisfied,
+           refreshedEvaluation.satisfied,
+           !changed {
+            refreshedEvaluation = UIActionVerificationEvaluation(
+                satisfied: false,
+                unmetConditions: ["预期状态在操作前已存在，恢复观察仍未发现变化"]
+            )
+        }
+        if refreshedEvaluation.satisfied {
+            return UIActionRecoveryOutcome(
+                recovered: true,
+                verification: nil,
+                summary: "recovery_result=late_success\nrecovery_strategy=reactivate+full_ax+forced_ocr"
+            )
+        }
+
+        let maxAttempts = max(0, min((arguments["max_recovery_attempts"] as? NSNumber)?.intValue ?? 1, 1))
+        guard policy == "safe_retry",
+              maxAttempts > 0,
+              UIActionReplayPolicy.isSafelyReplayable(arguments: arguments),
+              !UIActionRiskPolicy.requiresConfirmation(arguments: arguments) else {
+            NativeInputService.shared.releaseHeldButtons()
+            return UIActionRecoveryOutcome(
+                recovered: false,
+                verification: nil,
+                summary: [
+                    "recovery_result=not_replayed",
+                    "recovery_strategy=reactivate+full_ax+forced_ocr",
+                    "recovery_reason=action_not_safely_replayable",
+                    "recovery_unmet=\(refreshedEvaluation.unmetConditions.joined(separator: "；"))"
+                ].joined(separator: "\n")
+            )
+        }
+
+        do {
+            let replayResult = try await NativeInputService.shared.perform(
+                arguments: arguments,
+                application: application,
+                currentState: refreshed.state
+            )
+            let verification = await UIActionVerifier.shared.verify(
+                before: refreshed.state,
+                application: application,
+                expectation: expectation,
+                timeoutMilliseconds: timeoutMilliseconds
+            )
+            if !verification.passed { NativeInputService.shared.releaseHeldButtons() }
+            return UIActionRecoveryOutcome(
+                recovered: verification.passed,
+                verification: verification,
+                summary: [
+                    "recovery_result=\(verification.passed ? "safe_retry_succeeded" : "safe_retry_failed")",
+                    "recovery_attempts=1",
+                    "recovery_action=\(replayResult)"
+                ].joined(separator: "\n")
+            )
+        } catch {
+            NativeInputService.shared.releaseHeldButtons()
+            return UIActionRecoveryOutcome(
+                recovered: false,
+                verification: nil,
+                summary: "recovery_result=failed\nrecovery_error=\(error.localizedDescription)"
+            )
+        }
     }
 }
 
@@ -1902,12 +2626,12 @@ final class ObserveDesktopTool: AgentTool {
 final class PerformUIActionTool: AgentTool {
     let definition = AgentToolDefinition(
         name: "perform_ui_action",
-        description: "对 macOS 应用执行单步界面操作。优先使用稳定 element_handle；同名控件用 scope_handle、window_handle、row_label 或 occurrence 缩小范围。AX 不足时使用 visual_handle。原始坐标必须携带 coordinate_observation_id，界面变化时会拒绝操作并主动重新观察。",
+        description: "执行完整 macOS 界面动作：AX 按压/设值、鼠标移动/悬停/按住/释放/点击/精确拖拽、分段惯性滚动、布局自适应键盘、剪贴板、文件选择与保存面板、层级菜单和跨应用文件传递。动作后自动验证；失败时强制 OCR 重新观察，仅对可安全重放的幂等动作自动恢复。",
         parameters: [
             "type": "object",
             "properties": [
                 "application": ["type": "string", "description": "应用名称或 bundle identifier"],
-                "action": ["type": "string", "enum": ["press", "set_value", "click", "double_click", "right_click", "scroll", "drag", "key_press", "type_text"]],
+                "action": ["type": "string", "enum": ["press", "set_value", "click", "double_click", "right_click", "mouse_move", "hover", "mouse_down", "mouse_up", "scroll", "drag", "key_press", "key_sequence", "type_text", "paste_text", "paste_files", "drag_files", "select_menu", "choose_file", "choose_files", "choose_directory", "save_file"]],
                 "element_handle": ["type": "string", "description": "observe_desktop 返回的 AX 元素句柄"],
                 "label": ["type": "string", "description": "控件名称；也用于向用户说明高风险操作"],
                 "role": ["type": "string", "description": "可选 AX role，用于缩小同名控件范围"],
@@ -1920,10 +2644,21 @@ final class PerformUIActionTool: AgentTool {
                 "visual_handle": ["type": "string", "description": "AX 不足时 observe_desktop OCR 返回的视觉文本句柄"],
                 "coordinate_observation_id": ["type": "string", "description": "使用原始坐标时必须提供的最近观察 ID"],
                 "text": ["type": "string", "description": "set_value 或 type_text 的文本"],
+                "path": ["type": "string", "description": "单文件、目录或保存目标的绝对路径"],
+                "paths": ["type": "array", "items": ["type": "string"], "description": "要粘贴、拖放或多选的文件绝对路径"],
+                "allow_overwrite": ["type": "boolean", "description": "save_file 是否允许覆盖已存在目标，默认 false"],
+                "menu_path": ["type": "array", "items": ["type": "string"], "description": "从顶层到最终菜单项的层级路径"],
                 "x": ["type": "number"], "y": ["type": "number"],
                 "to_x": ["type": "number"], "to_y": ["type": "number"],
                 "delta_x": ["type": "integer"], "delta_y": ["type": "integer"],
+                "button": ["type": "string", "enum": ["left", "right", "middle"]],
+                "steps": ["type": "integer", "description": "滚动或拖拽的分段数"],
+                "duration_ms": ["type": "integer", "description": "移动、滚动或拖拽总时长"],
+                "hold_ms": ["type": "integer", "description": "悬停时长或拖拽前按住时长"],
+                "inertia": ["type": "boolean", "description": "滚动后是否附加递减惯性事件"],
                 "key": ["type": "string", "description": "key_press 的按键，例如 return/tab/escape/a"],
+                "keys": ["type": "array", "items": ["type": "string"], "description": "key_sequence 的按键序列"],
+                "interval_ms": ["type": "integer", "description": "key_sequence 按键间隔"],
                 "modifiers": ["type": "array", "items": ["type": "string", "enum": ["command", "shift", "option", "control"]]],
                 "expected_text": ["type": "string", "description": "操作后必须出现的可访问文本"],
                 "expected_element": ["type": "string", "description": "操作后必须出现的控件名称"],
@@ -1931,6 +2666,8 @@ final class PerformUIActionTool: AgentTool {
                 "expected_window_title": ["type": "string", "description": "操作后必须出现的窗口标题"],
                 "expected_focused_element": ["type": "string", "description": "操作后必须获得焦点的元素"],
                 "expected_selected_element": ["type": "string", "description": "操作后必须处于选中状态的行、树节点、列表项或控件"],
+                "recovery_policy": ["type": "string", "enum": ["safe_retry", "observe_only", "none"], "description": "验证失败后的恢复策略，默认 safe_retry；高风险或非幂等动作即使选择 safe_retry 也不会重放"],
+                "max_recovery_attempts": ["type": "integer", "description": "安全动作最多自动重放次数，当前最大 1"],
                 "verify_change": ["type": "boolean", "description": "是否要求操作后界面状态发生变化，默认 true；显式设为 false 才允许预期条件在操作前已经成立"],
                 "verification_timeout_ms": ["type": "integer", "description": "操作后等待验证的毫秒数，默认 2500，最大 10000"]
             ],
@@ -1948,6 +2685,9 @@ final class PerformUIActionTool: AgentTool {
         let application = arguments["application"] as? String ?? "目标应用"
         let action = arguments["action"] as? String ?? "界面操作"
         let target = arguments["label"] as? String ?? {
+            if let path = arguments["path"] as? String { return path }
+            if let paths = arguments["paths"] as? [String] { return paths.joined(separator: ", ") }
+            if let menuPath = arguments["menu_path"] as? [String] { return menuPath.joined(separator: " > ") }
             if let x = arguments["x"], let y = arguments["y"] { return "坐标 (\(x), \(y))" }
             return arguments["element_handle"] as? String ?? "当前焦点"
         }()
@@ -1962,9 +2702,16 @@ final class PerformUIActionTool: AgentTool {
             var resolvedApplication: NSRunningApplication?
             do {
                 let applicationName = arguments["application"] as? String
-                let application = try AccessibilityComputerUseService.shared.resolveApplication(applicationName)
+                let requestedApplication = try AccessibilityComputerUseService.shared.resolveApplication(applicationName)
+                let action = arguments["action"] as? String ?? ""
+                let fileDialogActions = ["choose_file", "choose_files", "choose_directory", "save_file"]
+                let application = fileDialogActions.contains(action)
+                    ? DesktopApplicationReliabilityService.shared.interactionApplication(fallback: requestedApplication)
+                    : requestedApplication
                 resolvedApplication = application
-                try await DesktopApplicationReliabilityService.shared.activateAndWait(application)
+                if application.processIdentifier == requestedApplication.processIdentifier {
+                    try await DesktopApplicationReliabilityService.shared.activateAndWait(application)
+                }
                 let before = await UIActionVerifier.shared.captureState(
                     application: application,
                     followFocusedApplication: false
@@ -1978,21 +2725,37 @@ final class PerformUIActionTool: AgentTool {
                 let timeout = (arguments["verification_timeout_ms"] as? NSNumber)?.intValue ?? 2_500
                 let verification = await UIActionVerifier.shared.verify(
                     before: before,
-                    application: application,
+                    application: requestedApplication,
                     expectation: expectation,
                     timeoutMilliseconds: timeout
                 )
+                let recovery: UIActionRecoveryOutcome?
+                if verification.passed {
+                    recovery = nil
+                } else {
+                    recovery = await UIActionRecoveryCoordinator.shared.recover(
+                        arguments: arguments,
+                        before: before,
+                        application: requestedApplication,
+                        expectation: expectation,
+                        timeoutMilliseconds: timeout
+                    )
+                }
+                let effectiveVerification = recovery?.verification ?? verification
+                let completed = verification.passed || recovery?.recovered == true
                 let observation = await DesktopObservationService.shared.observe(
-                    applicationIdentifier: verification.observedApplicationIdentifier
-                        ?? application.bundleIdentifier
-                        ?? application.localizedName,
+                    applicationIdentifier: effectiveVerification.observedApplicationIdentifier
+                        ?? requestedApplication.bundleIdentifier
+                        ?? requestedApplication.localizedName,
                     includeScreenshot: true,
                     includeAccessibility: true,
                     maxDepth: 6,
-                    maxNodes: 240
+                    maxNodes: 240,
+                    forceOCR: recovery != nil
                 )
-                let result = "\(actionResult)\n\n自动验证：\n\(verification.summary)\n\n操作后状态：\n\(observation.text)"
-                if verification.passed {
+                let recoverySummary = recovery.map { "\n\n自动恢复：\n\($0.summary)" } ?? ""
+                let result = "\(actionResult)\n\n自动验证：\neffective_completion=\(completed)\n\(effectiveVerification.summary)\(recoverySummary)\n\n操作后状态：\n\(observation.text)"
+                if completed {
                     completion(.success(result, imagePaths: observation.imagePaths))
                 } else {
                     completion(.failure("操作已发出，但自动验证未通过。\n\n\(result)", imagePaths: observation.imagePaths))
