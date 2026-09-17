@@ -17,8 +17,6 @@ struct PetInputView: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            Image(systemName: "sparkles")
-                .foregroundStyle(.secondary)
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
                 .focused(isFocused)
