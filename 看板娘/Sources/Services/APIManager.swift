@@ -404,6 +404,8 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         - 修改多个文件或操作外部应用前，先调用 present_action_plan；文本覆盖的差异会由确认界面展示。
         - 需要产出 Office/PDF 文件时使用 write_document；用户要求反悔时使用 undo_last_file_operation。
         - 优先使用 open_application、Shortcuts 和结构化工具；仅在必要时使用 AppleScript/辅助功能。
+        - 没有专用工具时，使用 observe_desktop 观察界面，再用 perform_ui_action 执行单步操作；优先按 element_handle 或控件名称定位，仅在无法语义定位时使用坐标。
+        - 每次界面操作后根据新的截图和 Accessibility 状态验证结果；不要把事件已发出当成任务已完成。
         """]
         
         if let agentContent = loadAgentContent() {

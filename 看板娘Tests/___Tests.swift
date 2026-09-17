@@ -63,6 +63,23 @@ struct AgentFoundationTests {
         }
     }
 
+    @MainActor
+    private final class ImageObservationTool: AgentTool {
+        let definition = AgentToolDefinition(
+            name: "image_observation",
+            description: "image observation test",
+            parameters: ["type": "object", "properties": [:]]
+        )
+        let requiresConfirmation = false
+        func approvalSummary(arguments: [String: Any]) -> String { "observe" }
+        func execute(
+            arguments: [String: Any],
+            completion: @escaping @MainActor (AgentToolExecutionResult) -> Void
+        ) {
+            completion(.success("observed", imagePaths: ["/tmp/desktop-observation.png"]))
+        }
+    }
+
     @Test
     func toolCallArgumentsAndOpenAIMessageEncodingRoundTrip() throws {
         let call = AgentToolCall(
@@ -106,11 +123,65 @@ struct AgentFoundationTests {
         #expect(names.contains("run_shortcut"))
         #expect(names.contains("run_applescript"))
         #expect(names.contains("control_application"))
+        #expect(names.contains("observe_desktop"))
+        #expect(names.contains("perform_ui_action"))
         #expect(names.contains("present_action_plan"))
         #expect(names.contains("undo_last_file_operation"))
         #expect(names.contains("run_command"))
         #expect(names.contains("switch_pet_character"))
         #expect(names.contains("run_automation"))
+    }
+
+    @Test @MainActor
+    func desktopToolImagesAreFedBackAfterTheToolResult() {
+        let client = FakeModelClient()
+        client.responses = [
+            AgentModelResponse(
+                content: "",
+                toolCalls: [AgentToolCall(id: "call-observe", name: "image_observation", arguments: "{}")]
+            ),
+            AgentModelResponse(content: "完成", toolCalls: [])
+        ]
+        let registry = AgentToolRegistry()
+        registry.register(ImageObservationTool())
+        let runtime = AgentRuntime(
+            apiManager: client,
+            registry: registry,
+            systemPromptProvider: { "system" }
+        )
+
+        runtime.send("observe")
+
+        #expect(client.requests.count == 2)
+        let secondRequest = client.requests[1]
+        #expect(secondRequest[secondRequest.count - 2].role == .tool)
+        #expect(secondRequest.last?.role == .user)
+        #expect(secondRequest.last?.contextKind == .desktopObservation)
+        #expect(secondRequest.last?.imageAttachments?.first?.path == "/tmp/desktop-observation.png")
+    }
+
+    @Test @MainActor
+    func uiActionConfirmationUsesClientSideRiskPolicy() {
+        let tool = PerformUIActionTool()
+
+        #expect(tool.requiresConfirmation(arguments: [
+            "application": "Messages", "action": "press", "label": "Send"
+        ]))
+        #expect(tool.requiresConfirmation(arguments: [
+            "application": "Finder", "action": "click", "x": 10, "y": 20
+        ]))
+        #expect(tool.requiresConfirmation(arguments: [
+            "application": "Messages", "action": "press", "element_handle": "stale-handle"
+        ]))
+        #expect(!tool.requiresConfirmation(arguments: [
+            "application": "Finder", "action": "press", "label": "Downloads"
+        ]))
+        #expect(!tool.requiresConfirmation(arguments: [
+            "application": "Safari", "action": "scroll", "delta_y": -400
+        ]))
+        #expect(!tool.requiresConfirmation(arguments: [
+            "application": "TextEdit", "action": "type_text", "text": "delete is only text here"
+        ]))
     }
 
     @Test

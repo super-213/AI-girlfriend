@@ -163,7 +163,9 @@ struct AgentContextManager {
         var unitStart = bodyStart
 
         for index in bodyStart..<messages.endIndex {
-            guard messages[index].role == .user, index > unitStart else { continue }
+            guard messages[index].role == .user,
+                  messages[index].contextKind != .desktopObservation,
+                  index > unitStart else { continue }
             ranges.append(unitStart..<index)
             unitStart = index
         }

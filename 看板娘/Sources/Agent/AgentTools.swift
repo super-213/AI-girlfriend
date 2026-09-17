@@ -61,6 +61,8 @@ final class AgentToolRegistry {
         registry.register(RunShortcutTool())
         registry.register(RunAppleScriptTool())
         registry.register(ControlApplicationTool())
+        registry.register(ObserveDesktopTool())
+        registry.register(PerformUIActionTool())
         registry.register(PresentActionPlanTool())
         registry.register(UndoLastFileOperationTool())
         registry.register(RunCommandTool())

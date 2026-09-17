@@ -50,6 +50,7 @@ final class AgentRuntime {
     private let maxIterations: Int
     private var iterationCount = 0
     private var pendingCalls: [AgentToolCall] = []
+    private var pendingObservationImagePaths: [String] = []
     private var pendingApproval: (call: AgentToolCall, tool: any AgentTool, arguments: [String: Any])?
     private var previousContextMeasurement: AgentContextMeasurement?
     private var inFlightEstimatedTokens: Int?
@@ -60,7 +61,7 @@ final class AgentRuntime {
     init(
         apiManager: any AgentModelClient = APIManager(),
         registry: AgentToolRegistry = .standard(),
-        maxIterations: Int = 8,
+        maxIterations: Int = 16,
         contextCompactionPolicy: AgentContextCompactionPolicy = .standard,
         enabledSkillNameResolver: @escaping (String) -> String? = {
             SkillLibrary.enabledSkill(named: $0)?.name
@@ -108,6 +109,7 @@ final class AgentRuntime {
         runToken = UUID()
         apiManager.cancelStreamRequest()
         pendingCalls.removeAll()
+        pendingObservationImagePaths.removeAll()
         pendingApproval = nil
         previousContextMeasurement = nil
         inFlightEstimatedTokens = nil
@@ -237,6 +239,18 @@ final class AgentRuntime {
     private func executeNextToolCall() {
         guard isRunning else { return }
         guard !pendingCalls.isEmpty else {
+            if !pendingObservationImagePaths.isEmpty {
+                // Desktop screenshots are ephemeral observations. Keep their textual
+                // history, but only send the latest bitmap on subsequent requests.
+                for index in messages.indices where messages[index].contextKind == .desktopObservation {
+                    messages[index].imageAttachments = nil
+                }
+                messages.append(.desktopObservation(
+                    "以下图像是桌面观察工具在上一步操作后捕获的最新界面。请将它与工具返回的 Accessibility 状态一起用于判断下一步。",
+                    imagePaths: pendingObservationImagePaths
+                ))
+                pendingObservationImagePaths.removeAll()
+            }
             requestModel()
             return
         }
@@ -305,6 +319,7 @@ final class AgentRuntime {
                 call: call,
                 content: self.contextManager.boundedToolResult(result.modelContent)
             ))
+            self.pendingObservationImagePaths.append(contentsOf: result.imagePaths)
             self.onToolFinished?(call.name, result)
             AgentToolAuditStore.shared.record(
                 toolName: call.name,

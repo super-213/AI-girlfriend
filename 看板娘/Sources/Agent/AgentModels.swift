@@ -18,6 +18,7 @@ enum AgentMessageRole: String, Codable {
 
 enum AgentMessageContextKind: String, Codable {
     case compactionSummary
+    case desktopObservation
 }
 
 enum AgentRequestPurpose: String {
@@ -102,6 +103,15 @@ struct AgentMessage: Codable, Equatable {
         AgentMessage(
             role: .user,
             content: content,
+            imageAttachments: imagePaths.isEmpty ? nil : imagePaths.map { AgentImageAttachment(path: $0) }
+        )
+    }
+
+    static func desktopObservation(_ content: String, imagePaths: [String]) -> AgentMessage {
+        AgentMessage(
+            role: .user,
+            content: content,
+            contextKind: .desktopObservation,
             imageAttachments: imagePaths.isEmpty ? nil : imagePaths.map { AgentImageAttachment(path: $0) }
         )
     }
@@ -346,13 +356,14 @@ enum AgentCacheMetricsStore {
 struct AgentToolExecutionResult: Equatable {
     let content: String
     let isError: Bool
+    let imagePaths: [String]
 
-    static func success(_ content: String) -> AgentToolExecutionResult {
-        AgentToolExecutionResult(content: content, isError: false)
+    static func success(_ content: String, imagePaths: [String] = []) -> AgentToolExecutionResult {
+        AgentToolExecutionResult(content: content, isError: false, imagePaths: imagePaths)
     }
 
     static func failure(_ content: String) -> AgentToolExecutionResult {
-        AgentToolExecutionResult(content: content, isError: true)
+        AgentToolExecutionResult(content: content, isError: true, imagePaths: [])
     }
 
     var modelContent: String {
