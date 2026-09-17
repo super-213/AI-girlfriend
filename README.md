@@ -122,7 +122,7 @@ Computer Use 的长期目标是形成“观察当前界面 → 判断下一步 �
 - `write_document`：结构化生成 PDF、DOCX、XLSX 或 PPTX
 - `list_shortcuts` / `run_shortcut`：查看并运行 macOS 快捷指令
 - `run_applescript` / `control_application`：经确认执行 AppleScript 或辅助功能操作
-- `observe_desktop` / `perform_ui_action`：观察屏幕与 Accessibility 元素，执行单步点击、输入、滚动、拖拽或快捷键，并在操作后再次观察
+- `observe_desktop` / `perform_ui_action`：观察屏幕与 Accessibility 元素，维持跨观察的稳定窗口/元素身份和 AX 增量变化，理解表格、树、列表、滚动区域、WebView、焦点、选中、禁用与弹窗状态；AX 稀疏时自动用 OCR 补足，动作后再按预期状态自动验证
 - `present_action_plan` / `undo_last_file_operation`：变更计划审批与最近文件操作撤销
 - `run_command`：按用户配置的命令权限策略执行非交互式 Shell 命令
 - `list_pet_characters` / `switch_pet_character`：桌宠角色查询与切换

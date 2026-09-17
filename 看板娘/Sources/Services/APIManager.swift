@@ -406,6 +406,10 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         - 优先使用 open_application、Shortcuts 和结构化工具；仅在必要时使用 AppleScript/辅助功能。
         - 没有专用工具时，使用 observe_desktop 观察界面，再用 perform_ui_action 执行单步操作；优先按 element_handle 或控件名称定位，仅在无法语义定位时使用坐标。
         - 每次界面操作后根据新的截图和 Accessibility 状态验证结果；不要把事件已发出当成任务已完成。
+        - 调用 perform_ui_action 时尽量提供 expected_text、expected_element、expected_element_absent 或 expected_window_title；客户端会轮询界面直到满足条件或超时。
+        - 多个控件同名时不要猜测：优先用 element_handle，或提供 scope_handle、window_handle、row_label、role 或 occurrence。表格行、树节点、列表项和弹窗都要保留所属作用域。
+        - AX 树信息不足时使用 observe_desktop 返回的 OCR visual_handle。仅使用原始坐标时必须同时传入 coordinate_observation_id；如果客户端拒绝过期坐标，必须根据新观察重新定位。
+        - 如果高风险操作已发出但验证失败，先重新观察并说明不确定性，不要自动重复发送、删除、付款、覆盖或提交动作。
         """]
         
         if let agentContent = loadAgentContent() {

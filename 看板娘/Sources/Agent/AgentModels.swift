@@ -362,8 +362,8 @@ struct AgentToolExecutionResult: Equatable {
         AgentToolExecutionResult(content: content, isError: false, imagePaths: imagePaths)
     }
 
-    static func failure(_ content: String) -> AgentToolExecutionResult {
-        AgentToolExecutionResult(content: content, isError: true, imagePaths: [])
+    static func failure(_ content: String, imagePaths: [String] = []) -> AgentToolExecutionResult {
+        AgentToolExecutionResult(content: content, isError: true, imagePaths: imagePaths)
     }
 
     var modelContent: String {

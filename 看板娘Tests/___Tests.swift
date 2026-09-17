@@ -105,6 +105,13 @@ struct AgentFoundationTests {
         let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(object["ok"] as? Bool == true)
         #expect(object["result"] as? String == "星期一")
+
+        let failedObservation = AgentToolExecutionResult.failure(
+            "verification failed",
+            imagePaths: ["/tmp/post-action.png"]
+        )
+        #expect(failedObservation.isError)
+        #expect(failedObservation.imagePaths == ["/tmp/post-action.png"])
     }
 
     @Test @MainActor
@@ -182,6 +189,241 @@ struct AgentFoundationTests {
         #expect(!tool.requiresConfirmation(arguments: [
             "application": "TextEdit", "action": "type_text", "text": "delete is only text here"
         ]))
+    }
+
+    @Test
+    func uiActionExpectationChecksTextElementsAbsenceAndWindowTitle() {
+        let expectation = UIActionExpectation(arguments: [
+            "expected_text": "Saved successfully",
+            "expected_element": "Done",
+            "expected_element_absent": "Cancel",
+            "expected_window_title": "Report"
+        ])
+        let state = UIObservationState(
+            applicationIdentifier: "com.example.Editor",
+            accessibilityFingerprint: "after",
+            screenshotSignature: nil,
+            searchableText: "The document was saved successfully.",
+            elementLabels: ["Done", "Share"],
+            windowTitles: ["Report — Editor"]
+        )
+
+        let evaluation = expectation.evaluate(state: state, stateChanged: true)
+
+        #expect(evaluation.satisfied)
+        #expect(evaluation.unmetConditions.isEmpty)
+    }
+
+    @Test
+    func uiActionExpectationReportsEveryUnmetCondition() {
+        let expectation = UIActionExpectation(arguments: [
+            "expected_text": "Export complete",
+            "expected_element": "Close",
+            "expected_element_absent": "Progress",
+            "expected_window_title": "Finished"
+        ])
+        let state = UIObservationState(
+            applicationIdentifier: "com.example.Editor",
+            accessibilityFingerprint: "same",
+            screenshotSignature: nil,
+            searchableText: "Exporting",
+            elementLabels: ["Progress"],
+            windowTitles: ["Export"]
+        )
+
+        let evaluation = expectation.evaluate(state: state, stateChanged: false)
+
+        #expect(!evaluation.satisfied)
+        #expect(evaluation.unmetConditions.count == 4)
+    }
+
+    @Test
+    func uiActionExpectationDoesNotTreatMissingAccessibilityAsElementAbsence() {
+        let expectation = UIActionExpectation(arguments: [
+            "expected_element_absent": "Delete confirmation"
+        ])
+        let screenshotOnlyState = UIObservationState(
+            applicationIdentifier: "com.example.Editor",
+            accessibilityFingerprint: nil,
+            screenshotSignature: [UInt8](repeating: 20, count: 96)
+        )
+
+        let evaluation = expectation.evaluate(state: screenshotOnlyState, stateChanged: true)
+
+        #expect(!evaluation.satisfied)
+        #expect(evaluation.unmetConditions.contains(where: { $0.contains("Accessibility") }))
+    }
+
+    @Test
+    func uiActionExpectationCanExplicitlyAllowAnUnchangedInterface() {
+        let expectation = UIActionExpectation(arguments: ["verify_change": false])
+        let state = UIObservationState(
+            applicationIdentifier: "com.example.Editor",
+            accessibilityFingerprint: "same"
+        )
+
+        #expect(expectation.evaluate(state: state, stateChanged: false).satisfied)
+    }
+
+    @Test
+    func observationStateDetectsMeaningfulVisualAndApplicationChanges() {
+        let baseline = UIObservationState(
+            applicationIdentifier: "com.example.Source",
+            accessibilityFingerprint: "same",
+            screenshotSignature: [UInt8](repeating: 10, count: 96)
+        )
+        let tinyVisualChange = UIObservationState(
+            applicationIdentifier: "com.example.Source",
+            accessibilityFingerprint: "same",
+            screenshotSignature: [UInt8](repeating: 12, count: 96)
+        )
+        let meaningfulVisualChange = UIObservationState(
+            applicationIdentifier: "com.example.Source",
+            accessibilityFingerprint: "same",
+            screenshotSignature: [UInt8](repeating: 40, count: 96)
+        )
+        let applicationChange = UIObservationState(
+            applicationIdentifier: "com.apple.systempreferences",
+            accessibilityFingerprint: "same",
+            screenshotSignature: [UInt8](repeating: 10, count: 96)
+        )
+
+        #expect(!tinyVisualChange.materiallyDiffers(from: baseline))
+        #expect(meaningfulVisualChange.materiallyDiffers(from: baseline))
+        #expect(applicationChange.materiallyDiffers(from: baseline))
+    }
+
+    @Test
+    func stableElementIdentitySurvivesWindowTitleAndObservationChanges() {
+        let firstKey = UIStableElementIdentity.stableKey(
+            applicationIdentifier: "com.example.Editor",
+            parentHandle: "ax-app",
+            role: "AXWindow",
+            subrole: "AXStandardWindow",
+            identifier: nil,
+            label: "Draft.txt",
+            siblingIndex: 0,
+            windowRuntimeIdentity: 42
+        )
+        let laterKey = UIStableElementIdentity.stableKey(
+            applicationIdentifier: "com.example.Editor",
+            parentHandle: "ax-app",
+            role: "AXWindow",
+            subrole: "AXStandardWindow",
+            identifier: nil,
+            label: "Final.txt — Edited",
+            siblingIndex: 0,
+            windowRuntimeIdentity: 42
+        )
+
+        #expect(firstKey == laterKey)
+        #expect(UIStableElementIdentity.handle(for: firstKey) == UIStableElementIdentity.handle(for: laterKey))
+    }
+
+    @Test
+    func scopedElementResolutionRejectsAmbiguousNamesAndUsesRowScope() {
+        let first = UIElementSemanticRecord(
+            handle: "ax-edit-first",
+            parentHandle: "ax-row-1",
+            ancestorHandles: ["ax-window", "ax-table", "ax-row-1"],
+            windowHandle: "ax-window",
+            role: "AXButton",
+            label: "Edit",
+            identifier: nil,
+            frame: CGRect(x: 10, y: 20, width: 40, height: 20),
+            enabled: true,
+            focused: false,
+            selected: false,
+            modal: false,
+            ancestorLabels: ["Orders", "Order 1001"]
+        )
+        let second = UIElementSemanticRecord(
+            handle: "ax-edit-second",
+            parentHandle: "ax-row-2",
+            ancestorHandles: ["ax-window", "ax-table", "ax-row-2"],
+            windowHandle: "ax-window",
+            role: "AXButton",
+            label: "Edit",
+            identifier: nil,
+            frame: CGRect(x: 10, y: 60, width: 40, height: 20),
+            enabled: true,
+            focused: false,
+            selected: true,
+            modal: false,
+            ancestorLabels: ["Orders", "Order 1002"]
+        )
+
+        let ambiguous = UIElementScopeResolver.resolve(
+            records: [first, second],
+            query: UIElementScopeQuery(label: "Edit")
+        )
+        let scoped = UIElementScopeResolver.resolve(
+            records: [first, second],
+            query: UIElementScopeQuery(label: "Edit", rowLabel: "1002")
+        )
+        let selected = UIElementScopeResolver.resolve(
+            records: [first, second],
+            query: UIElementScopeQuery(label: "Edit", selectedOnly: true)
+        )
+
+        if case .ambiguous(let matches) = ambiguous {
+            #expect(matches.count == 2)
+        } else {
+            Issue.record("Expected ambiguous same-name controls")
+        }
+        #expect(scoped == .match(second))
+        #expect(selected == .match(second))
+    }
+
+    @Test
+    func explicitOccurrenceDisambiguatesControlsInsideAScope() {
+        let records = (1...3).map { index in
+            UIElementSemanticRecord(
+                handle: "ax-item-\(index)",
+                parentHandle: "ax-list",
+                ancestorHandles: ["ax-window", "ax-list"],
+                windowHandle: "ax-window",
+                role: "AXStaticText",
+                label: "Result",
+                identifier: nil,
+                frame: CGRect(x: 0, y: CGFloat(index * 30), width: 80, height: 20),
+                enabled: true,
+                focused: false,
+                selected: false,
+                modal: false,
+                ancestorLabels: ["Search results"]
+            )
+        }
+
+        let resolution = UIElementScopeResolver.resolve(
+            records: records,
+            query: UIElementScopeQuery(label: "Result", scopeHandle: "ax-list", occurrence: 2)
+        )
+
+        #expect(resolution == .match(records[1]))
+    }
+
+    @Test
+    func expectationCanUseOCRTextAndFocusedOrSelectedState() {
+        let ocrExpectation = UIActionExpectation(arguments: ["expected_text": "Export complete"])
+        let focusExpectation = UIActionExpectation(arguments: [
+            "expected_focused_element": "Search",
+            "expected_selected_element": "Order 1002"
+        ])
+        let state = UIObservationState(
+            applicationIdentifier: "com.example.WebApp",
+            accessibilityFingerprint: "ax",
+            screenshotSignature: nil,
+            searchableText: "",
+            elementLabels: ["Search", "Order 1002"],
+            windowTitles: ["Orders"],
+            ocrText: "Export complete",
+            focusedElementLabel: "Search field",
+            selectedElementLabels: ["Order 1002"]
+        )
+
+        #expect(ocrExpectation.evaluate(state: state, stateChanged: true).satisfied)
+        #expect(focusExpectation.evaluate(state: state, stateChanged: true).satisfied)
     }
 
     @Test
