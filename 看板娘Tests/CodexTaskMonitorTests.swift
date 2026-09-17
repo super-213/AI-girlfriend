@@ -83,24 +83,6 @@ struct CodexTaskMonitorTests {
         #expect(subagentParser.task.phase == .completed)
     }
 
-    @Test @MainActor func codexStatusIsAmbientAndDoesNotBlockPetConversation() {
-        let coordinator = PetStateCoordinator()
-        let codexID = UUID()
-        let conversationID = UUID()
-
-        coordinator.send(.codexActivityChanged(codexID, .working))
-        #expect(coordinator.snapshot.source == .codex)
-        #expect(coordinator.snapshot.activityState == .working)
-
-        coordinator.send(.conversationStarted(conversationID))
-        #expect(coordinator.snapshot.source == .conversation)
-        #expect(coordinator.snapshot.runID == conversationID)
-
-        coordinator.send(.codexActivityChanged(codexID, .working))
-        #expect(coordinator.snapshot.source == .conversation)
-        #expect(coordinator.snapshot.runID == conversationID)
-    }
-
     private func json(_ object: [String: Any]) -> String {
         let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
         return String(data: data, encoding: .utf8)!

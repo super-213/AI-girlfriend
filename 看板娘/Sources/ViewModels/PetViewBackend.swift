@@ -64,8 +64,7 @@ final class PetViewBackend: ObservableObject {
     }
 
     var isBusy: Bool {
-        let ownsForegroundTask = stateCoordinator.snapshot.source != .codex && stateCoordinator.isBusy
-        return isRecognizingTrigger || isExecutingCommand || isCompactingContext || ownsForegroundTask
+        isRecognizingTrigger || isExecutingCommand || isCompactingContext || stateCoordinator.isBusy
     }
 
     var isReacting: Bool {
@@ -99,13 +98,11 @@ final class PetViewBackend: ObservableObject {
         didSet {
             guard oldValue != nil, activeRequestID == nil else { return }
             Task { @MainActor [weak self] in
-                self?.resumeCodexStateIfPossible()
                 self?.showPendingCodexAnnouncementIfPossible()
             }
         }
     }
     private var activeRequestKind: AgentRequestKind?
-    private var codexRunIDs: [String: UUID] = [:]
     private var pendingCodexAnnouncements: [String] = []
     private var hasReceivedStreamContent = false
     private lazy var streamTextCoalescer = StreamingTextCoalescer { [weak self] text in
@@ -544,13 +541,6 @@ final class PetViewBackend: ObservableObject {
     }
 
     private func bindCodexMonitor() {
-        codexTaskMonitor.$activeTasks
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.resumeCodexStateIfPossible()
-            }
-            .store(in: &cancellables)
-
         codexTaskMonitor.$lastEvent
             .compactMap { $0 }
             .receive(on: DispatchQueue.main)
@@ -560,44 +550,13 @@ final class PetViewBackend: ObservableObject {
             .store(in: &cancellables)
     }
 
-    private func resumeCodexStateIfPossible() {
-        guard activeRequestID == nil,
-              !isRecognizingTrigger,
-              !isExecutingCommand,
-              !isCompactingContext,
-              let task = codexTaskMonitor.activeTasks.first else { return }
-
-        let state: PetActivityState
-        switch task.phase {
-        case .thinking: state = .thinking
-        case .working: state = .working
-        case .waitingForInput: state = .needsInput
-        case .completed, .aborted, .failed: return
-        }
-        stateCoordinator.send(.codexActivityChanged(runID(for: task.id), state))
-    }
-
     private func handleCodexEvent(_ event: CodexTaskMonitorEvent) {
-        let task: CodexTaskSnapshot
+        guard case .completed(let task) = event else { return }
         let announcement: String
-        switch event {
-        case .completed(let completedTask):
-            task = completedTask
-            stateCoordinator.send(.codexCompleted(runID(for: task.id)))
-            if let response = task.finalResponse, !response.isEmpty {
-                announcement = "Codex 已完成「\(task.title)」：\n\n\(response)"
-            } else {
-                announcement = "Codex 已完成「\(task.title)」。"
-            }
-        case .aborted(let abortedTask):
-            task = abortedTask
-            stateCoordinator.send(.codexAborted(runID(for: task.id)))
-            announcement = "Codex 任务「\(task.title)」已中断。"
-        case .failed(let failedTask):
-            task = failedTask
-            let message = task.finalResponse ?? "Codex 运行时出现错误"
-            stateCoordinator.send(.codexFailed(runID(for: task.id), message))
-            announcement = "Codex 任务「\(task.title)」失败：\(message)"
+        if let response = task.finalResponse, !response.isEmpty {
+            announcement = "Codex 已完成「\(task.title)」：\n\n\(response)"
+        } else {
+            announcement = "Codex 已完成「\(task.title)」。"
         }
 
         guard activeRequestID == nil, !isRecognizingTrigger, !isExecutingCommand, !isCompactingContext else {
@@ -619,14 +578,6 @@ final class PetViewBackend: ObservableObject {
     private func presentCodexAnnouncement(_ message: String) {
         streamedResponse = message
         revealOutputBox(autoHideAfter: max(configuredBubbleDuration, 12))
-    }
-
-    private func runID(for taskID: String) -> UUID {
-        if let id = UUID(uuidString: taskID) { return id }
-        if let existing = codexRunIDs[taskID] { return existing }
-        let id = UUID()
-        codexRunIDs[taskID] = id
-        return id
     }
 
     private func refreshCurrentAsset() {
