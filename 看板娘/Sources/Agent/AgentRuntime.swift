@@ -75,7 +75,7 @@ final class AgentRuntime {
         self.systemPromptProvider = systemPromptProvider
     }
 
-    func send(_ rawText: String) {
+    func send(_ rawText: String, imagePaths: [String] = []) {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         guard !isRunning else {
@@ -86,7 +86,7 @@ final class AgentRuntime {
         if messages.isEmpty {
             messages.append(.system(makeSystemPrompt()))
         }
-        messages.append(.user(text))
+        messages.append(.user(text, imagePaths: imagePaths))
         iterationCount = 0
         isRunning = true
         requestModel()
@@ -119,12 +119,22 @@ final class AgentRuntime {
     func approvePendingTool() {
         guard let pendingApproval else { return }
         self.pendingApproval = nil
+        AgentToolAuditStore.shared.record(
+            toolName: pendingApproval.call.name,
+            summary: pendingApproval.tool.approvalSummary(arguments: pendingApproval.arguments),
+            status: .approved
+        )
         execute(pendingApproval.call, with: pendingApproval.tool, arguments: pendingApproval.arguments)
     }
 
     func declinePendingTool() {
         guard let pendingApproval else { return }
         self.pendingApproval = nil
+        AgentToolAuditStore.shared.record(
+            toolName: pendingApproval.call.name,
+            summary: pendingApproval.tool.approvalSummary(arguments: pendingApproval.arguments),
+            status: .declined
+        )
         let result = AgentToolExecutionResult.failure("用户拒绝执行该工具")
         messages.append(.tool(
             call: pendingApproval.call,
@@ -260,6 +270,11 @@ final class AgentRuntime {
 
         if tool.requiresConfirmation(arguments: arguments) {
             pendingApproval = (call, tool, arguments)
+            AgentToolAuditStore.shared.record(
+                toolName: call.name,
+                summary: tool.approvalSummary(arguments: arguments),
+                status: .requested
+            )
             onApprovalRequested?(
                 AgentPendingApproval(
                     toolName: call.name,
@@ -277,6 +292,12 @@ final class AgentRuntime {
         arguments: [String: Any]
     ) {
         let token = runToken
+        let summary = tool.approvalSummary(arguments: arguments)
+        AgentToolAuditStore.shared.record(
+            toolName: call.name,
+            summary: summary,
+            status: .running
+        )
         onToolStarted?(call.name)
         tool.execute(arguments: arguments) { [weak self] result in
             guard let self, self.runToken == token, self.isRunning else { return }
@@ -285,6 +306,12 @@ final class AgentRuntime {
                 content: self.contextManager.boundedToolResult(result.modelContent)
             ))
             self.onToolFinished?(call.name, result)
+            AgentToolAuditStore.shared.record(
+                toolName: call.name,
+                summary: summary,
+                status: result.isError ? .failed : .succeeded,
+                detail: result.content
+            )
             self.executeNextToolCall()
         }
     }

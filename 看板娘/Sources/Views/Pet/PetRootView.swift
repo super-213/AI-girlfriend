@@ -84,6 +84,8 @@ struct PetRootView: View {
     @AppStorage("overlapRatio") private var overlapRatio: Double = 0.3
     @AppStorage("commandConfirmationStyle") private var commandConfirmationStyle = "nearPet"
     @AppStorage(PetHorizontalPosition.storageKey) private var horizontalPosition = PetHorizontalPosition.defaultValue
+    @AppStorage(AgentWorkspaceSettings.showCloudTransferNoticeKey) private var showCloudTransferNotice = false
+    @AppStorage(AgentWorkspaceSettings.showDirectoryAccessStatusKey) private var showDirectoryAccessStatus = false
 
     @State private var isHoveringPet = false
     @State private var isHoveringInput = false
@@ -155,11 +157,21 @@ struct PetRootView: View {
                 }
 
                 if !petViewBackend.pendingAttachments.isEmpty {
-                    PetAttachmentTrayView(
-                        attachments: petViewBackend.pendingAttachments,
-                        onRemove: petViewBackend.removeAttachment,
-                        onClear: petViewBackend.clearAttachments
-                    )
+                    VStack(spacing: 5) {
+                        PetAttachmentTrayView(
+                            attachments: petViewBackend.pendingAttachments,
+                            onRemove: petViewBackend.removeAttachment,
+                            onClear: petViewBackend.clearAttachments
+                        )
+                        if showCloudTransferNotice && AgentWorkspaceSettings.isCloudModel() {
+                            Label("附件将由云端模型处理", systemImage: "icloud.and.arrow.up")
+                                .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                        }
+                        if showDirectoryAccessStatus && AgentFileAccessStore.shared.requiresAuthorization {
+                            Label("已授权本轮附件", systemImage: "folder.badge.checkmark")
+                                .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                        }
+                    }
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
 

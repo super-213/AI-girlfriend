@@ -165,7 +165,11 @@ final class PetViewBackend: ObservableObject {
                 userInstruction: trimmedInput,
                 attachments: attachments
             )
-            continueChatProcessing(prompt, runID: runID)
+            continueChatProcessing(
+                prompt,
+                runID: runID,
+                imagePaths: attachments.filter(\.isImage).map(\.path)
+            )
             return
         }
 
@@ -220,6 +224,7 @@ final class PetViewBackend: ObservableObject {
             added += 1
         }
         if added > 0 {
+            AgentFileAccessStore.shared.grantSessionAccess(to: urls)
             noteUserActivity()
             stateCoordinator.send(.interaction(.attention, 1.2))
         }
@@ -347,14 +352,14 @@ final class PetViewBackend: ObservableObject {
         showOutputBox = false
     }
 
-    private func continueChatProcessing(_ input: String, runID: UUID) {
+    private func continueChatProcessing(_ input: String, runID: UUID, imagePaths: [String] = []) {
         activeRequestID = runID
         activeRequestKind = .conversation
         streamTextCoalescer.reset()
         streamedResponse = ""
         hasReceivedStreamContent = false
         revealOutputBox(autoHideAfter: 30)
-        agentRuntime.send(input)
+        agentRuntime.send(input, imagePaths: imagePaths)
     }
 
     private func configureAgentRuntime() {

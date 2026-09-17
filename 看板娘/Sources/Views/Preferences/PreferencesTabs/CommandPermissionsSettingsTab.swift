@@ -3,11 +3,18 @@
 //  看板娘
 //
 
+import AppKit
 import SwiftUI
 
 struct CommandPermissionsSettingsTab: View {
     @AppStorage(CommandPermissionStorage.modeKey) private var storedMode = CommandPermissionStorage.defaultMode.rawValue
     @AppStorage(CommandPermissionStorage.blacklistKey) private var blacklist = CommandPermissionStorage.defaultBlacklist
+    @AppStorage(AgentWorkspaceSettings.requireDirectoryAuthorizationKey) private var requireDirectoryAuthorization = false
+    @AppStorage(AgentWorkspaceSettings.showCloudTransferNoticeKey) private var showCloudTransferNotice = false
+    @AppStorage(AgentWorkspaceSettings.showDirectoryAccessStatusKey) private var showDirectoryAccessStatus = false
+    @AppStorage(AgentWorkspaceSettings.showToolAuditInConversationKey) private var showToolAuditInConversation = false
+    @StateObject private var fileAccess = AgentFileAccessStore.shared
+    @StateObject private var auditStore = AgentToolAuditStore.shared
     @State private var showAllowAllConfirmation = false
 
     private var selectedMode: CommandPermissionMode {
@@ -22,6 +29,8 @@ struct CommandPermissionsSettingsTab: View {
 
                 permissionNotice
                 modeCard
+                fileWorkspaceCard
+                auditCard
 
                 if selectedMode == .blacklist {
                     blacklistCard
@@ -44,6 +53,84 @@ struct CommandPermissionsSettingsTab: View {
         } message: {
             Text("Agent 将不再请求确认，并能以你的用户权限修改或删除本机文件、安装软件和启动其他进程。")
         }
+    }
+
+    private var fileWorkspaceCard: some View {
+        CommandPermissionCard(title: "文件与工具", systemImage: "folder.badge.gearshape") {
+            Toggle("限制 Agent 仅访问已授权目录", isOn: $requireDirectoryAuthorization)
+            Text("拖入的文件会获得本次会话权限；下方目录会持久允许读取和保存结果。")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+
+            if requireDirectoryAuthorization {
+                VStack(spacing: 6) {
+                    ForEach(fileAccess.authorizedDirectories, id: \.self) { path in
+                        HStack {
+                            Image(systemName: "folder.fill").foregroundStyle(.secondary)
+                            Text(path).font(.system(size: 11)).lineLimit(1).help(path)
+                            Spacer()
+                            Button { fileAccess.removeAuthorizedDirectory(path) } label: {
+                                Image(systemName: "minus.circle")
+                            }.buttonStyle(.plain).help("移除授权")
+                        }
+                    }
+                    if fileAccess.authorizedDirectories.isEmpty {
+                        Text("尚未添加目录").font(.system(size: 11)).foregroundStyle(.tertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                Button("添加授权目录…", systemImage: "folder.badge.plus", action: chooseAuthorizedDirectory)
+            }
+
+            Divider()
+            Text("可选的会话内提示").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+            Toggle("云端模型处理附件时显示传输提示", isOn: $showCloudTransferNotice)
+            Toggle("在输入区显示目录授权状态", isOn: $showDirectoryAccessStatus)
+            Toggle("在对话中显示工具成功记录", isOn: $showToolAuditInConversation)
+            Text("这些展示项默认关闭，不影响实际权限、审批和审计记录。")
+                .font(.system(size: 11)).foregroundStyle(.tertiary)
+        }
+    }
+
+    private var auditCard: some View {
+        CommandPermissionCard(title: "工具审计", systemImage: "checklist.checked") {
+            HStack {
+                Text("记录最近的工具请求、批准与结果，无需在对话里持续展示。")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                Spacer()
+                Button("清空", role: .destructive) { auditStore.clear() }
+                    .disabled(auditStore.entries.isEmpty)
+            }
+            if auditStore.entries.isEmpty {
+                Text("暂无记录").font(.system(size: 11)).foregroundStyle(.tertiary)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(auditStore.entries.prefix(30)) { entry in
+                        HStack(alignment: .top, spacing: 8) {
+                            Circle()
+                                .fill(entry.status == .failed ? Color.red : (entry.status == .succeeded ? Color.green : Color.secondary))
+                                .frame(width: 7, height: 7).padding(.top, 5)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(entry.toolName) · \(entry.status.title)").font(.system(size: 11, weight: .semibold))
+                                Text(entry.summary).font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(2)
+                            }
+                            Spacer()
+                            Text(entry.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(.system(size: 9.5)).foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func chooseAuthorizedDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        panel.prompt = "允许访问"
+        guard panel.runModal() == .OK else { return }
+        panel.urls.forEach(fileAccess.addAuthorizedDirectory)
     }
 
     private var permissionNotice: some View {

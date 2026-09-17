@@ -396,7 +396,15 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     
     private func buildAugmentedSystemPrompt(basePrompt: String? = nil) -> String {
         let resolvedPrompt = basePrompt ?? systemPrompt
-        var attachments: [String] = []
+        var attachments: [String] = ["""
+        ## 桌面 Agent 行为约定
+        - 根据用户的自然语言意图选择工具，不要仅靠关键词匹配。
+        - 查找文件后优先返回 search_files 结果，让用户在原生结果卡片中选择。
+        - 用户添加的图片会作为真实多模态输入；直接观察图像，需要文字细节时再使用 read_document OCR。
+        - 修改多个文件或操作外部应用前，先调用 present_action_plan；文本覆盖的差异会由确认界面展示。
+        - 需要产出 Office/PDF 文件时使用 write_document；用户要求反悔时使用 undo_last_file_operation。
+        - 优先使用 open_application、Shortcuts 和结构化工具；仅在必要时使用 AppleScript/辅助功能。
+        """]
         
         if let agentContent = loadAgentContent() {
             attachments.append("## agent.md\n\(agentContent)")

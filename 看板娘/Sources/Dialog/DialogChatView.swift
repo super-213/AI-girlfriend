@@ -17,6 +17,9 @@ struct DialogChatView: View {
     @State private var isInputFocused = false
     @State private var inputEditorHeight: CGFloat = DialogTextEditor.minimumHeight
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var isFileDropTargeted = false
+    @AppStorage(AgentWorkspaceSettings.showCloudTransferNoticeKey) private var showCloudTransferNotice = false
+    @AppStorage(AgentWorkspaceSettings.showDirectoryAccessStatusKey) private var showDirectoryAccessStatus = false
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -49,15 +52,13 @@ struct DialogChatView: View {
             inputEditorHeight = DialogTextEditor.minimumHeight
             isInputFocused = true
         }
-        .alert("工具调用确认", isPresented: $viewModel.showToolConfirmation) {
-            Button("执行", role: .none) {
-                viewModel.approvePendingTool()
-            }
-            Button("取消", role: .cancel) {
-                viewModel.declinePendingTool()
-            }
-        } message: {
-            Text("Agent 请求执行：\(viewModel.pendingToolSummary)")
+        .sheet(isPresented: $viewModel.showToolConfirmation) {
+            DialogToolConfirmationSheet(
+                summary: viewModel.pendingToolSummary,
+                onApprove: viewModel.approvePendingTool,
+                onDecline: viewModel.declinePendingTool
+            )
+            .interactiveDismissDisabled()
         }
     }
 
@@ -133,6 +134,25 @@ struct DialogChatView: View {
         }
         .navigationTitle(viewModel.selectedConversationTitle)
         .background(Color(nsColor: .windowBackgroundColor))
+        .overlay {
+            if isFileDropTargeted {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(DesignColors.primary, style: StrokeStyle(lineWidth: 2, dash: [7]))
+                    .padding(12)
+                    .overlay {
+                        Label("松开以添加文件", systemImage: "arrow.down.doc.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(.regularMaterial, in: Capsule())
+                    }
+                    .allowsHitTesting(false)
+            }
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            viewModel.attachFiles(urls)
+            return !urls.isEmpty
+        } isTargeted: { isFileDropTargeted = $0 }
     }
 
     private var messageArea: some View {
@@ -221,6 +241,26 @@ struct DialogChatView: View {
         VStack(alignment: .leading, spacing: 8) {
             if !viewModel.queuedMessages.isEmpty {
                 queuedMessagesView
+            }
+
+            if !viewModel.pendingAttachments.isEmpty {
+                PetAttachmentTrayView(
+                    attachments: viewModel.pendingAttachments,
+                    onRemove: viewModel.removeAttachment,
+                    onClear: viewModel.clearAttachments
+                )
+
+                if showCloudTransferNotice && AgentWorkspaceSettings.isCloudModel() {
+                    Label("附件内容将由当前云端模型处理", systemImage: "icloud.and.arrow.up")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            if showDirectoryAccessStatus && AgentFileAccessStore.shared.requiresAuthorization {
+                Label("仅可访问已授权目录和本轮附件", systemImage: "folder.badge.checkmark")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.tertiary)
             }
 
             HStack(alignment: .bottom, spacing: 10) {
@@ -383,6 +423,16 @@ struct DialogChatView: View {
 
     private var composerActions: some View {
         HStack(spacing: 6) {
+            Button(action: chooseAttachments) {
+                Image(systemName: "paperclip")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 32, height: 32)
+                    .background(Color.primary.opacity(0.075), in: Circle())
+            }
+            .buttonStyle(DialogPressButtonStyle())
+            .help("添加文件或文件夹")
+            .accessibilityLabel("添加附件")
+
             if viewModel.isRequesting && !viewModel.isExecutingTool {
                 stopButton
             } else if viewModel.isExecutingTool {
@@ -440,6 +490,10 @@ struct DialogChatView: View {
             }
             .padding(.horizontal, 3)
 
+            if !message.attachments.isEmpty {
+                attachmentHistory(for: message.attachments)
+            }
+
             Group {
                 if message.content.isEmpty && viewModel.isRequesting {
                     HStack(spacing: 8) {
@@ -471,6 +525,13 @@ struct DialogChatView: View {
                 }
             }
             .frame(maxWidth: 560, alignment: isUser ? .trailing : .leading)
+
+            ForEach(message.artifacts) { artifact in
+                DialogFileResultsCard(artifact: artifact) { paths in
+                    viewModel.attachResultFiles(paths)
+                    isInputFocused = true
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
     }
@@ -492,10 +553,46 @@ struct DialogChatView: View {
 
     private var canSend: Bool {
         !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !viewModel.pendingAttachments.isEmpty
     }
 
     private var inputPlaceholder: String {
-        viewModel.isBusy ? "继续输入，回车加入队列…" : "给看板娘发送消息…"
+        if !viewModel.pendingAttachments.isEmpty { return "输入如何分析或处理附件…" }
+        return viewModel.isBusy ? "继续输入，回车加入队列…" : "给看板娘发送消息…"
+    }
+
+    private func chooseAttachments() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        panel.prompt = "添加"
+        guard panel.runModal() == .OK else { return }
+        viewModel.attachFiles(panel.urls)
+        isInputFocused = true
+    }
+
+    private func attachmentHistory(for attachments: [LocalFileAttachment]) -> some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 6) {
+                ForEach(attachments) { attachment in
+                Button {
+                    NSWorkspace.shared.open(URL(fileURLWithPath: attachment.path))
+                } label: {
+                    Label(attachment.displayName, systemImage: attachment.isDirectory ? "folder.fill" : (attachment.isImage ? "photo.fill" : "doc.fill"))
+                        .lineLimit(1)
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.horizontal, 9)
+                        .frame(height: 27)
+                        .background(Color.primary.opacity(0.07), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .help(attachment.path)
+                }
+            }
+        }
+        .scrollIndicators(.hidden)
+        .frame(maxWidth: 560, alignment: .trailing)
     }
 
     private func queueStatusText(prefix: String) -> String {
@@ -591,6 +688,112 @@ struct DialogChatView: View {
         } else {
             proxy.scrollTo(lastID, anchor: .bottom)
         }
+    }
+}
+
+private struct DialogToolConfirmationSheet: View {
+    let summary: String
+    let onApprove: () -> Void
+    let onDecline: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("确认操作", systemImage: "checkmark.shield.fill")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(DesignColors.warning)
+            Text("执行前请检查计划、受影响路径或内容差异。")
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+            ScrollView([.vertical, .horizontal]) {
+                Text(summary)
+                    .font(.system(size: 12, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+            }
+            .frame(minHeight: 120, maxHeight: 320)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.1)))
+            HStack {
+                Button("复制") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(summary, forType: .string)
+                }
+                Spacer()
+                Button("取消", role: .cancel, action: onDecline)
+                Button("执行", action: onApprove).buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(22)
+        .frame(minWidth: 520, idealWidth: 620, minHeight: 260)
+    }
+}
+
+private struct DialogFileResultsCard: View {
+    let artifact: DialogArtifact
+    let onAttach: ([String]) -> Void
+    @State private var selectedPaths = Set<String>()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label(artifact.title, systemImage: "doc.text.magnifyingglass")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Text("已选 \(selectedPaths.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 2) {
+                ForEach(artifact.files.prefix(50)) { file in
+                    HStack(spacing: 9) {
+                        Button {
+                            if selectedPaths.contains(file.path) { selectedPaths.remove(file.path) }
+                            else { selectedPaths.insert(file.path) }
+                        } label: {
+                            Image(systemName: selectedPaths.contains(file.path) ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(selectedPaths.contains(file.path) ? DesignColors.primary : Color.secondary)
+                        }
+                        .buttonStyle(.plain)
+
+                        Image(systemName: file.isDirectory ? "folder.fill" : "doc.fill")
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(file.name).lineLimit(1)
+                            Text(file.path).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                        }
+                        Spacer()
+                        Button("打开") { NSWorkspace.shared.open(URL(fileURLWithPath: file.path)) }
+                            .buttonStyle(.borderless)
+                        Button {
+                            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.path)])
+                        } label: { Image(systemName: "finder") }
+                            .buttonStyle(.borderless)
+                            .help("在 Finder 中显示")
+                    }
+                    .font(.system(size: 12))
+                    .padding(.horizontal, 8)
+                    .frame(height: 38)
+                    .contentShape(Rectangle())
+                }
+            }
+
+            HStack {
+                Button(selectedPaths.count == artifact.files.count ? "取消全选" : "全选") {
+                    selectedPaths = selectedPaths.count == artifact.files.count
+                        ? [] : Set(artifact.files.map(\.path))
+                }
+                .buttonStyle(.borderless)
+                Spacer()
+                Button("添加到输入") { onAttach(Array(selectedPaths)) }
+                    .disabled(selectedPaths.isEmpty)
+            }
+            .font(.system(size: 12, weight: .medium))
+        }
+        .padding(12)
+        .frame(maxWidth: 620, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.primary.opacity(0.1)))
     }
 }
 

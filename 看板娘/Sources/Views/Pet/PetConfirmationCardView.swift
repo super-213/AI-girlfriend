@@ -17,13 +17,13 @@ struct PetConfirmationCardView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.orange)
 
-            ScrollView(.horizontal) {
+            ScrollView([.horizontal, .vertical]) {
                 Text(summary)
                     .font(.system(size: 12, design: .monospaced))
                     .textSelection(.enabled)
                     .padding(9)
             }
-            .frame(maxWidth: .infinity, minHeight: 38, maxHeight: 72)
+            .frame(maxWidth: .infinity, minHeight: 38, maxHeight: 120)
             .background(.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
 
             HStack {

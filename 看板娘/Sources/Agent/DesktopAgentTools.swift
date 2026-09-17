@@ -27,6 +27,11 @@ struct LocalFileAttachment: Identifiable, Equatable, Codable {
             : standardizedURL.lastPathComponent
         isDirectory = isDirectoryValue.boolValue
     }
+
+    var isImage: Bool {
+        ["png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tif", "tiff", "bmp"]
+            .contains(URL(fileURLWithPath: path).pathExtension.lowercased())
+    }
 }
 
 enum FileAttachmentPromptBuilder {
@@ -232,13 +237,24 @@ final class SearchFilesTool: AgentTool {
             completion(.failure("搜索关键词不能为空"))
             return
         }
-        let directory = (arguments["directory"] as? String)
+        var directory = (arguments["directory"] as? String)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .flatMap { $0.isEmpty ? nil : $0 }
         let fileExtension = (arguments["file_extension"] as? String)?
             .trimmingCharacters(in: CharacterSet(charactersIn: ". "))
             .lowercased()
         let limit = min(max(arguments["limit"] as? Int ?? 20, 1), 100)
+
+        if AgentFileAccessStore.shared.requiresAuthorization, directory == nil {
+            let authorized = AgentFileAccessStore.shared.authorizedDirectories
+            if authorized.count == 1 {
+                directory = authorized[0]
+            } else {
+                let detail = authorized.isEmpty ? "尚未授权任何目录" : "请在以下目录中选择一个：\n" + authorized.joined(separator: "\n")
+                completion(.failure("已启用目录授权，搜索时需要指定一个已授权目录。\(detail)"))
+                return
+            }
+        }
 
         if let directory, !directory.isEmpty {
             var isDirectory: ObjCBool = false
@@ -247,11 +263,16 @@ final class SearchFilesTool: AgentTool {
                 completion(.failure("搜索目录不存在或不是目录：\(directory)"))
                 return
             }
+            guard AgentFileAccessStore.shared.canRead(directory) else {
+                completion(.failure(AgentFileAccessStore.denialMessage(path: directory)))
+                return
+            }
         }
 
+        let resolvedDirectory = directory
         DispatchQueue.global(qos: .userInitiated).async {
             var processArguments: [String] = []
-            if let directory, !directory.isEmpty {
+            if let directory = resolvedDirectory, !directory.isEmpty {
                 processArguments += ["-onlyin", directory]
             }
             let escaped = query
@@ -270,7 +291,7 @@ final class SearchFilesTool: AgentTool {
 
             if paths.count < limit {
                 let home = FileManager.default.homeDirectoryForCurrentUser
-                let fallbackRoots = directory.map { [URL(fileURLWithPath: $0, isDirectory: true)] } ?? [
+                let fallbackRoots = resolvedDirectory.map { [URL(fileURLWithPath: $0, isDirectory: true)] } ?? [
                     home.appendingPathComponent("Desktop", isDirectory: true),
                     home.appendingPathComponent("Documents", isDirectory: true),
                     home.appendingPathComponent("Downloads", isDirectory: true)
@@ -354,6 +375,10 @@ final class GetFileInfoTool: AgentTool {
             completion(.failure("缺少有效的绝对路径"))
             return
         }
+        guard AgentFileAccessStore.shared.canRead(path) else {
+            completion(.failure(AgentFileAccessStore.denialMessage(path: path)))
+            return
+        }
         let url = URL(fileURLWithPath: path)
         guard FileManager.default.fileExists(atPath: path) else {
             completion(.failure("文件不存在：\(path)"))
@@ -411,6 +436,10 @@ final class ReadDocumentTool: AgentTool {
             completion(.failure("缺少有效的绝对路径"))
             return
         }
+        guard AgentFileAccessStore.shared.canRead(path) else {
+            completion(.failure(AgentFileAccessStore.denialMessage(path: path)))
+            return
+        }
         let limit = min(max(arguments["max_characters"] as? Int ?? 50_000, 1_000), 100_000)
         DispatchQueue.global(qos: .userInitiated).async {
             let result = Self.read(path: path, limit: limit)
@@ -454,7 +483,12 @@ final class ReadDocumentTool: AgentTool {
                 content = (0..<document.pageCount).compactMap { index in
                     document.page(at: index)?.string.map { "## 第 \(index + 1) 页\n\($0)" }
                 }.joined(separator: "\n\n")
-            case "doc", "docx", "odt", "rtf", "rtfd", "html", "htm", "webarchive":
+            case "docx", "xlsx", "pptx":
+                guard let extracted = OfficeDocumentExtractor.extract(path: path, extension: ext), !extracted.isEmpty else {
+                    return .failure("无法解析该 Office 文档的结构化内容")
+                }
+                content = extracted
+            case "doc", "odt", "rtf", "rtfd", "html", "htm", "webarchive":
                 let converted = DirectProcessRunner.run(
                     executable: "/usr/bin/textutil",
                     arguments: ["-convert", "txt", "-stdout", "--", path]
@@ -511,13 +545,17 @@ final class OpenFileTool: AgentTool {
     let definition = AgentToolDefinition(
         name: "open_file",
         description: "使用 macOS 默认应用打开一个已确定的本机文件或目录。",
-        parameters: pathParameters,
-        )
+        parameters: pathParameters
+    )
     let requiresConfirmation = false
     func approvalSummary(arguments: [String: Any]) -> String { "打开 \(arguments["path"] as? String ?? "")" }
     func execute(arguments: [String: Any], completion: @escaping @MainActor (AgentToolExecutionResult) -> Void) {
         guard let path = absolutePath(arguments["path"]), FileManager.default.fileExists(atPath: path) else {
             completion(.failure("文件不存在或路径无效"))
+            return
+        }
+        guard AgentFileAccessStore.shared.canRead(path) else {
+            completion(.failure(AgentFileAccessStore.denialMessage(path: path)))
             return
         }
         completion(NSWorkspace.shared.open(URL(fileURLWithPath: path))
@@ -538,6 +576,10 @@ final class RevealInFinderTool: AgentTool {
     func execute(arguments: [String: Any], completion: @escaping @MainActor (AgentToolExecutionResult) -> Void) {
         guard let path = absolutePath(arguments["path"]), FileManager.default.fileExists(atPath: path) else {
             completion(.failure("文件不存在或路径无效"))
+            return
+        }
+        guard AgentFileAccessStore.shared.canRead(path) else {
+            completion(.failure(AgentFileAccessStore.denialMessage(path: path)))
             return
         }
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
@@ -563,7 +605,10 @@ final class WriteTextFileTool: AgentTool {
     )
     let requiresConfirmation = true
     func approvalSummary(arguments: [String: Any]) -> String {
-        "写入文件 \(arguments["path"] as? String ?? "")"
+        guard let path = absolutePath(arguments["path"]),
+              let content = arguments["content"] as? String else { return "写入文件" }
+        let old = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+        return "写入文件 \(path)\n\n\(TextDiffPreview.make(old: old, new: content))"
     }
     func execute(arguments: [String: Any], completion: @escaping @MainActor (AgentToolExecutionResult) -> Void) {
         guard let path = absolutePath(arguments["path"]), let content = arguments["content"] as? String else {
@@ -576,12 +621,24 @@ final class WriteTextFileTool: AgentTool {
             return
         }
         let url = URL(fileURLWithPath: path)
+        guard AgentFileAccessStore.shared.canWrite(path) else {
+            completion(.failure(AgentFileAccessStore.denialMessage(path: url.deletingLastPathComponent().path)))
+            return
+        }
         guard FileManager.default.fileExists(atPath: url.deletingLastPathComponent().path) else {
             completion(.failure("目标目录不存在"))
             return
         }
         do {
+            let existed = FileManager.default.fileExists(atPath: path)
+            let backupPath = existed ? try AgentFileUndoStore.shared.prepareBackup(for: path) : nil
             try Data(content.utf8).write(to: url, options: .atomic)
+            AgentFileUndoStore.shared.push(
+                kind: existed ? .restoreBackup : .removeCreated,
+                originalPath: path,
+                backupPath: backupPath,
+                summary: "写入 \(url.lastPathComponent)"
+            )
             completion(.success("已写入 \(path)，\(content.utf8.count) 字节"))
         } catch {
             completion(.failure("写入失败：\(error.localizedDescription)"))
@@ -601,7 +658,7 @@ final class CopyFileTool: AgentTool {
         "复制 \(arguments["source"] as? String ?? "") 到 \(arguments["destination"] as? String ?? "")"
     }
     func execute(arguments: [String: Any], completion: @escaping @MainActor (AgentToolExecutionResult) -> Void) {
-        performFileOperation(arguments: arguments, verb: "复制", operation: FileManager.default.copyItem, completion: completion)
+        performFileOperation(arguments: arguments, verb: "复制", undoKind: .removeCreated, operation: FileManager.default.copyItem, completion: completion)
     }
 }
 
@@ -617,7 +674,7 @@ final class MoveFileTool: AgentTool {
         "移动 \(arguments["source"] as? String ?? "") 到 \(arguments["destination"] as? String ?? "")"
     }
     func execute(arguments: [String: Any], completion: @escaping @MainActor (AgentToolExecutionResult) -> Void) {
-        performFileOperation(arguments: arguments, verb: "移动", operation: FileManager.default.moveItem, completion: completion)
+        performFileOperation(arguments: arguments, verb: "移动", undoKind: .moveBack, operation: FileManager.default.moveItem, completion: completion)
     }
 }
 
@@ -649,6 +706,7 @@ private func absolutePath(_ value: Any?) -> String? {
 private func performFileOperation(
     arguments: [String: Any],
     verb: String,
+    undoKind: AgentUndoRecord.Kind,
     operation: (URL, URL) throws -> Void,
     completion: @escaping @MainActor (AgentToolExecutionResult) -> Void
 ) {
@@ -661,14 +719,42 @@ private func performFileOperation(
         completion(.failure("源项目不存在"))
         return
     }
+    guard AgentFileAccessStore.shared.canRead(source) else {
+        completion(.failure(AgentFileAccessStore.denialMessage(path: source)))
+        return
+    }
+    guard AgentFileAccessStore.shared.canWrite(destination) else {
+        completion(.failure(AgentFileAccessStore.denialMessage(path: URL(fileURLWithPath: destination).deletingLastPathComponent().path)))
+        return
+    }
     guard !FileManager.default.fileExists(atPath: destination) else {
         completion(.failure("目标已存在，为避免覆盖已停止操作"))
         return
     }
     do {
         try operation(URL(fileURLWithPath: source), URL(fileURLWithPath: destination))
+        AgentFileUndoStore.shared.push(
+            kind: undoKind,
+            originalPath: undoKind == .moveBack ? source : destination,
+            currentPath: undoKind == .moveBack ? destination : nil,
+            summary: "\(verb) \(URL(fileURLWithPath: source).lastPathComponent)"
+        )
         completion(.success("已\(verb)到 \(destination)"))
     } catch {
         completion(.failure("\(verb)失败：\(error.localizedDescription)"))
+    }
+}
+
+private enum TextDiffPreview {
+    static func make(old: String, new: String) -> String {
+        guard old != new else { return "内容无变化" }
+        let oldLines = old.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let newLines = new.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var lines = ["--- 当前", "+++ 将要写入"]
+        for line in oldLines.prefix(18) { lines.append("- \(line)") }
+        if oldLines.count > 18 { lines.append("… 已省略 \(oldLines.count - 18) 行") }
+        for line in newLines.prefix(18) { lines.append("+ \(line)") }
+        if newLines.count > 18 { lines.append("… 已省略 \(newLines.count - 18) 行") }
+        return lines.joined(separator: "\n")
     }
 }

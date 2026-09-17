@@ -18,21 +18,44 @@ struct DialogMessage: Identifiable, Equatable, Codable {
     let id: UUID
     let role: Role
     var content: String
+    var attachments: [LocalFileAttachment]
+    var artifacts: [DialogArtifact]
 
-    init(id: UUID = UUID(), role: Role, content: String) {
+    init(
+        id: UUID = UUID(),
+        role: Role,
+        content: String,
+        attachments: [LocalFileAttachment] = [],
+        artifacts: [DialogArtifact] = []
+    ) {
         self.id = id
         self.role = role
         self.content = content
+        self.attachments = attachments
+        self.artifacts = artifacts
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, role, content, attachments, artifacts }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        role = try container.decode(Role.self, forKey: .role)
+        content = try container.decode(String.self, forKey: .content)
+        attachments = try container.decodeIfPresent([LocalFileAttachment].self, forKey: .attachments) ?? []
+        artifacts = try container.decodeIfPresent([DialogArtifact].self, forKey: .artifacts) ?? []
     }
 }
 
 struct QueuedDialogMessage: Identifiable, Equatable {
     let id: UUID
     let content: String
+    let attachments: [LocalFileAttachment]
 
-    init(id: UUID = UUID(), content: String) {
+    init(id: UUID = UUID(), content: String, attachments: [LocalFileAttachment] = []) {
         self.id = id
         self.content = content
+        self.attachments = attachments
     }
 }
 
@@ -88,6 +111,7 @@ final class DialogChatViewModel: ObservableObject {
     @Published private(set) var selectedConversationID: UUID
     @Published var messages: [DialogMessage]
     @Published var inputText: String = ""
+    @Published private(set) var pendingAttachments: [LocalFileAttachment] = []
     @Published private(set) var queuedMessages: [QueuedDialogMessage] = []
     @Published var isRequesting: Bool = false
     @Published var showToolConfirmation: Bool = false
@@ -150,24 +174,43 @@ final class DialogChatViewModel: ObservableObject {
 
     func send(_ rawText: String) {
         let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty || !pendingAttachments.isEmpty else { return }
 
         inputText = ""
+        let attachments = pendingAttachments
+        pendingAttachments = []
         if isBusy {
-            queuedMessages.append(QueuedDialogMessage(content: trimmed))
+            queuedMessages.append(QueuedDialogMessage(content: trimmed, attachments: attachments))
             return
         }
 
-        sendImmediately(trimmed)
+        sendImmediately(trimmed, attachments: attachments)
     }
 
     func deleteQueuedMessage(_ messageID: UUID) {
         queuedMessages.removeAll(where: { $0.id == messageID })
     }
 
-    private func sendImmediately(_ text: String) {
-        messages.append(DialogMessage(role: .user, content: text))
-        agentRuntime.send(text)
+    func attachFiles(_ urls: [URL]) {
+        let incoming = urls.filter(\.isFileURL).map { LocalFileAttachment(url: $0) }
+        guard !incoming.isEmpty else { return }
+        AgentFileAccessStore.shared.grantSessionAccess(to: urls)
+        let known = Set(pendingAttachments.map(\.path))
+        pendingAttachments.append(contentsOf: incoming.filter { !known.contains($0.path) })
+    }
+
+    func removeAttachment(_ id: UUID) { pendingAttachments.removeAll { $0.id == id } }
+    func clearAttachments() { pendingAttachments.removeAll() }
+
+    func attachResultFiles(_ paths: [String]) {
+        attachFiles(paths.map { URL(fileURLWithPath: $0) })
+    }
+
+    private func sendImmediately(_ text: String, attachments: [LocalFileAttachment]) {
+        let visibleText = text.isEmpty ? "请分析这些附件" : text
+        messages.append(DialogMessage(role: .user, content: visibleText, attachments: attachments))
+        let prompt = FileAttachmentPromptBuilder.prompt(userInstruction: visibleText, attachments: attachments)
+        agentRuntime.send(prompt, imagePaths: attachments.filter(\.isImage).map(\.path))
         synchronizeSelectedConversation(persist: true)
     }
 
@@ -177,6 +220,7 @@ final class DialogChatViewModel: ObservableObject {
         synchronizeSelectedConversation(persist: true, updateTimestamp: false)
         if messages.isEmpty {
             inputText = ""
+            pendingAttachments = []
             return
         }
 
@@ -186,6 +230,7 @@ final class DialogChatViewModel: ObservableObject {
         selectedConversationID = conversation.id
         messages = []
         inputText = ""
+        pendingAttachments = []
         activeAssistantID = nil
         agentRuntime.startNewConversation()
         persistConversations()
@@ -201,6 +246,7 @@ final class DialogChatViewModel: ObservableObject {
         selectedConversationID = conversationID
         messages = conversation.messages
         inputText = ""
+        pendingAttachments = []
         activeAssistantID = nil
         showToolConfirmation = false
         pendingToolSummary = ""
@@ -222,6 +268,7 @@ final class DialogChatViewModel: ObservableObject {
             selectedConversationID = next.id
             messages = next.messages
             inputText = ""
+            pendingAttachments = []
             activeAssistantID = nil
             agentRuntime.restoreConversation(next.agentHistory)
         }
@@ -309,6 +356,10 @@ final class DialogChatViewModel: ObservableObject {
                     role: .tool,
                     content: "工具 \(name) 执行失败：\(result.content)"
                 ))
+            } else if let artifact = Self.artifact(toolName: name, result: result.content) {
+                self.messages.append(DialogMessage(role: .tool, content: "", artifacts: [artifact]))
+            } else if self.defaults.bool(forKey: AgentWorkspaceSettings.showToolAuditInConversationKey) {
+                self.messages.append(DialogMessage(role: .tool, content: "工具 \(name) 已完成"))
             }
         }
         agentRuntime.onApprovalRequested = { [weak self] approval in
@@ -348,7 +399,7 @@ final class DialogChatViewModel: ObservableObject {
     private func sendNextQueuedMessageIfPossible() {
         guard !isBusy, !queuedMessages.isEmpty else { return }
         let next = queuedMessages.removeFirst()
-        sendImmediately(next.content)
+        sendImmediately(next.content, attachments: next.attachments)
     }
 
     private func appendAssistantStatus(_ status: String) {
@@ -396,5 +447,23 @@ final class DialogChatViewModel: ObservableObject {
             return []
         }
         return conversations
+    }
+
+    private static func artifact(toolName: String, result: String) -> DialogArtifact? {
+        guard toolName == "search_files",
+              let data = result.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let values = object["results"] as? [[String: Any]] else { return nil }
+        let files = values.compactMap { value -> AgentFileResult? in
+            guard let path = value["path"] as? String else { return nil }
+            return AgentFileResult(
+                name: value["name"] as? String ?? URL(fileURLWithPath: path).lastPathComponent,
+                path: path,
+                isDirectory: value["is_directory"] as? Bool ?? false,
+                sizeBytes: value["size_bytes"] as? Int,
+                modifiedAt: value["modified_at"] as? String
+            )
+        }
+        return DialogArtifact(kind: .fileResults, title: "找到 \(files.count) 个结果", files: files)
     }
 }

@@ -6,6 +6,8 @@
 //
 
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 
 enum AgentMessageRole: String, Codable {
     case system
@@ -37,6 +39,52 @@ struct AgentToolCall: Codable, Equatable, Identifiable {
     }
 }
 
+struct AgentImageAttachment: Codable, Equatable, Identifiable {
+    let id: UUID
+    let path: String
+
+    init(id: UUID = UUID(), path: String) {
+        self.id = id
+        self.path = URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
+    var mimeType: String {
+        switch URL(fileURLWithPath: path).pathExtension.lowercased() {
+        case "jpg", "jpeg": return "image/jpeg"
+        case "gif": return "image/gif"
+        case "webp": return "image/webp"
+        case "heic", "heif": return "image/heic"
+        case "tif", "tiff": return "image/tiff"
+        default: return "image/png"
+        }
+    }
+
+    func base64Payload() -> String? {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+        if data.count <= 10 * 1_024 * 1_024 {
+            return data.base64EncodedString()
+        }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: 2_048,
+                kCGImageSourceCreateThumbnailWithTransform: true
+              ] as CFDictionary),
+              let mutableData = CFDataCreateMutable(nil, 0),
+              let destination = CGImageDestinationCreateWithData(
+                mutableData,
+                UTType.jpeg.identifier as CFString,
+                1,
+                nil
+              ) else { return nil }
+        CGImageDestinationAddImage(destination, thumbnail, [
+            kCGImageDestinationLossyCompressionQuality: 0.84
+        ] as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return (mutableData as Data).base64EncodedString()
+    }
+}
+
 struct AgentMessage: Codable, Equatable {
     let role: AgentMessageRole
     var content: String?
@@ -44,13 +92,18 @@ struct AgentMessage: Codable, Equatable {
     var toolCallID: String?
     var name: String?
     var contextKind: AgentMessageContextKind?
+    var imageAttachments: [AgentImageAttachment]?
 
     static func system(_ content: String) -> AgentMessage {
         AgentMessage(role: .system, content: content)
     }
 
-    static func user(_ content: String) -> AgentMessage {
-        AgentMessage(role: .user, content: content)
+    static func user(_ content: String, imagePaths: [String] = []) -> AgentMessage {
+        AgentMessage(
+            role: .user,
+            content: content,
+            imageAttachments: imagePaths.isEmpty ? nil : imagePaths.map { AgentImageAttachment(path: $0) }
+        )
     }
 
     static func assistant(content: String?, toolCalls: [AgentToolCall] = []) -> AgentMessage {
@@ -80,7 +133,20 @@ struct AgentMessage: Codable, Equatable {
 
     func jsonObject() -> [String: Any] {
         var object: [String: Any] = ["role": role.rawValue]
-        if let content {
+        if role == .user, let imageAttachments, !imageAttachments.isEmpty {
+            var parts: [[String: Any]] = []
+            if let content, !content.isEmpty {
+                parts.append(["type": "text", "text": content])
+            }
+            for image in imageAttachments {
+                guard let payload = image.base64Payload() else { continue }
+                parts.append([
+                    "type": "image_url",
+                    "image_url": ["url": "data:\(image.mimeType);base64,\(payload)"]
+                ])
+            }
+            object["content"] = parts
+        } else if let content {
             object["content"] = content
         } else if role == .assistant {
             object["content"] = NSNull()
@@ -105,6 +171,9 @@ struct AgentMessage: Codable, Equatable {
     func ollamaJSONObject() -> [String: Any] {
         var object: [String: Any] = ["role": role.rawValue]
         if let content { object["content"] = content }
+        if role == .user, let imageAttachments, !imageAttachments.isEmpty {
+            object["images"] = imageAttachments.compactMap { $0.base64Payload() }
+        }
         if let toolCalls, !toolCalls.isEmpty {
             object["tool_calls"] = toolCalls.map { call in
                 let arguments = (try? call.decodedArguments()) ?? [:]

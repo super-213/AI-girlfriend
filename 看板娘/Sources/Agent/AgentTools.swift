@@ -56,6 +56,13 @@ final class AgentToolRegistry {
         registry.register(WriteTextFileTool())
         registry.register(CopyFileTool())
         registry.register(MoveFileTool())
+        registry.register(WriteDocumentTool())
+        registry.register(ListShortcutsTool())
+        registry.register(RunShortcutTool())
+        registry.register(RunAppleScriptTool())
+        registry.register(ControlApplicationTool())
+        registry.register(PresentActionPlanTool())
+        registry.register(UndoLastFileOperationTool())
         registry.register(RunCommandTool())
         registry.register(ListCharactersTool())
         registry.register(SwitchCharacterTool())
@@ -180,6 +187,10 @@ private final class ListDirectoryTool: AgentTool {
         let path = (arguments["path"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedPath = path.flatMap { $0.isEmpty ? nil : $0 }
             ?? FileManager.default.currentDirectoryPath
+        guard AgentFileAccessStore.shared.canRead(resolvedPath) else {
+            completion(.failure(AgentFileAccessStore.denialMessage(path: resolvedPath)))
+            return
+        }
         do {
             let entries = try FileManager.default.contentsOfDirectory(atPath: resolvedPath).sorted()
             let limited = Array(entries.prefix(500))
@@ -217,6 +228,10 @@ private final class ReadFileTool: AgentTool {
     ) {
         guard let path = arguments["path"] as? String, !path.isEmpty else {
             completion(.failure("缺少 path"))
+            return
+        }
+        guard AgentFileAccessStore.shared.canRead(path) else {
+            completion(.failure(AgentFileAccessStore.denialMessage(path: path)))
             return
         }
         do {

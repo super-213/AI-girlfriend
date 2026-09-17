@@ -28,7 +28,13 @@
 - 🖱️ **桌面级交互**：透明区域整窗穿透、Alpha 命中拖拽、位置恢复、动态窗口尺寸和屏幕边界约束
 - 🤖 **AI 对话**：支持智谱清言、OpenAI-Compatible、Ollama（流式输出）
 - 📎 **拖放文件任务**：把文件或目录拖到角色上，再输入分析、整理或处理指令
+- 💬 **完整附件对话**：对话窗口支持文件选择、拖放、附件历史与图片多模态理解
 - 🖥️ **桌面行动**：结构化打开应用、Spotlight 搜索、打开文件与 Finder 定位
+- 🗂️ **原生结果卡片**：文件搜索结果可多选、打开、Finder 定位或再次加入输入
+- 📄 **结构化文档**：读取和生成 XLSX、DOCX、PPTX 与 PDF（PPTX 写出使用 Keynote）
+- 🧩 **macOS 应用自动化**：通过 Shortcuts、AppleScript 和辅助功能执行经确认的跨应用操作
+- ↩️ **计划、差异与撤销**：变更前展示操作计划/文本差异，并可撤销最近的文件操作
+- 🔐 **低打扰安全界面**：云端文件提示、目录授权状态和对话内工具日志可在偏好设置中独立开关，完整审计始终保留在设置页
 - 🪟 **悬浮对话窗**：`Ctrl + T` 呼出独立无边框聊天窗口
 - 🧠 **技能注入**：支持 Codex Agent Skill 标准目录（`SKILL.md` + 可选 `scripts/` 等资源），并兼容旧版单 `.md` 技能
 - ⏱️ **自动化流程**：在偏好设置中创建常用提示词，按一次、15 分钟、小时、天、周、月、年等频率自动发送给模型
@@ -84,6 +90,10 @@
 - `search_files` / `open_file` / `reveal_in_finder`：Spotlight 搜索、打开文件和 Finder 定位
 - `open_application`：按应用名称或 bundle identifier 启动 macOS 应用
 - `write_text_file` / `copy_file` / `move_file`：经用户确认后写入、复制或移动文件
+- `write_document`：结构化生成 PDF、DOCX、XLSX 或 PPTX
+- `list_shortcuts` / `run_shortcut`：查看并运行 macOS 快捷指令
+- `run_applescript` / `control_application`：经确认执行 AppleScript 或辅助功能操作
+- `present_action_plan` / `undo_last_file_operation`：变更计划审批与最近文件操作撤销
 - `run_command`：按用户配置的命令权限策略执行非交互式 Shell 命令
 - `list_pet_characters` / `switch_pet_character`：桌宠角色查询与切换
 - `list_automations` / `run_automation`：自动化查询与执行
