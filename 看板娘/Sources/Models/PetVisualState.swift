@@ -88,6 +88,7 @@ enum PetStateSource: String, Codable, Equatable {
     case audio
     case userInteraction
     case companion
+    case codex
 }
 
 enum PetTransientEffect: String, Codable, Equatable {
@@ -156,6 +157,10 @@ enum PetStateEvent: Equatable {
     case audioStarted(UUID)
     case audioCompleted(UUID)
     case listeningChanged(Bool)
+    case codexActivityChanged(UUID, PetActivityState)
+    case codexCompleted(UUID)
+    case codexFailed(UUID, String)
+    case codexAborted(UUID)
     case interaction(PetTransientEffect, TimeInterval?)
     case idleTimeoutReached
     case resetToIdle
@@ -230,6 +235,20 @@ final class PetStateCoordinator: ObservableObject {
             completeIfCurrent(runID: id, source: .audio, at: date)
         case .listeningChanged(let isListening):
             updateListening(isListening, at: date)
+        case .codexActivityChanged(let id, let state):
+            guard state == .thinking || state == .working || state == .needsInput else { return }
+            guard snapshot.source == .codex || !isBusy else { return }
+            if snapshot.source == .codex, snapshot.runID != id {
+                resetToIdle(at: date)
+            }
+            setActivity(state, source: .codex, runID: id, at: date, startsNewRun: true)
+        case .codexCompleted(let id):
+            completeIfCurrent(runID: id, source: .codex, at: date)
+        case .codexFailed(let id, let message):
+            failIfCurrent(runID: id, source: .codex, message: message, at: date)
+        case .codexAborted(let id):
+            guard snapshot.source == .codex, snapshot.runID == id else { return }
+            resetToIdle(at: date)
         case .interaction(let effect, let preferredDuration):
             showTransient(effect, duration: preferredDuration ?? (effect == .clicked ? 1.8 : 2.2), at: date)
         case .idleTimeoutReached:
@@ -263,6 +282,7 @@ final class PetStateCoordinator: ObservableObject {
 
         if startsNewRun,
            snapshot.isProtectedForegroundTask,
+           snapshot.source != .codex,
            snapshot.runID != runID,
            state.priority <= snapshot.activityState.priority {
             return

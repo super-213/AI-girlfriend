@@ -66,6 +66,7 @@ Computer Use 的长期目标是形成“观察当前界面 → 判断下一步 �
 - 🔐 **低打扰安全界面**：云端文件提示、目录授权状态和对话内工具日志可在偏好设置中独立开关，完整审计始终保留在设置页
 - 🪟 **悬浮对话窗**：`Ctrl + T` 呼出独立无边框聊天窗口
 - 🧠 **技能注入**：支持 Codex Agent Skill 标准目录（`SKILL.md` + 可选 `scripts/` 等资源），并兼容旧版单 `.md` 技能
+- 🛰️ **Codex 任务感知**：只读监听 Codex CLI / Desktop 本地 rollout，同步思考、执行和等待输入状态；任务完成后立即由桌宠弹出最终回复
 - ⏱️ **自动化流程**：在偏好设置中创建常用提示词，按一次、15 分钟、小时、天、周、月、年等频率自动发送给模型
 - 🧾 **命令执行管道**：模型可生成命令，客户端二次确认并执行安全命令
 - 🧩 **结构化控制 API**：通过 `PetControlService` 提供 sendMessage、switchCharacter、runAutomation、updateSettings、importSkill 等稳定 Swift API
@@ -129,6 +130,7 @@ Computer Use 的长期目标是形成“观察当前界面 → 判断下一步 �
 - `run_command`：按用户配置的命令权限策略执行非交互式 Shell 命令
 - `list_pet_characters` / `switch_pet_character`：桌宠角色查询与切换
 - `list_automations` / `run_automation`：自动化查询与执行
+- `get_codex_task_status`：查询当前运行中的 Codex 任务、状态、工作目录和正在调用的工具
 
 `AgentTool` 协议与 `AgentToolRegistry` 支持继续注册结构化工具。Runtime 支持多工具调用、结果回灌、未知工具/参数错误反馈、取消、最大迭代限制和人在回路确认。Qwen/OpenAI-compatible、智谱和 Ollama 分别在 `APIManager` 中适配为统一的 `AgentMessage`/`AgentToolCall`。
 

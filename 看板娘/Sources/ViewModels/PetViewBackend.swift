@@ -64,7 +64,8 @@ final class PetViewBackend: ObservableObject {
     }
 
     var isBusy: Bool {
-        isRecognizingTrigger || isExecutingCommand || isCompactingContext || stateCoordinator.isBusy
+        let ownsForegroundTask = stateCoordinator.snapshot.source != .codex && stateCoordinator.isBusy
+        return isRecognizingTrigger || isExecutingCommand || isCompactingContext || ownsForegroundTask
     }
 
     var isReacting: Bool {
@@ -82,6 +83,7 @@ final class PetViewBackend: ObservableObject {
     }
     private let automationStore: AutomationStore
     private let triggerDispatcher: TriggerDispatcher
+    private let codexTaskMonitor: CodexTaskMonitor
     private let assetResolver = PetAssetResolver()
     private var outputBoxHideTimer: AnyCancellable?
     private var periodicAutoActionTimer: AnyCancellable?
@@ -91,8 +93,18 @@ final class PetViewBackend: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var notificationObservers: [NSObjectProtocol] = []
 
-    private var activeRequestID: UUID?
+    private var activeRequestID: UUID? {
+        didSet {
+            guard oldValue != nil, activeRequestID == nil else { return }
+            Task { @MainActor [weak self] in
+                self?.resumeCodexStateIfPossible()
+                self?.showPendingCodexAnnouncementIfPossible()
+            }
+        }
+    }
     private var activeRequestKind: AgentRequestKind?
+    private var codexRunIDs: [String: UUID] = [:]
+    private var pendingCodexAnnouncements: [String] = []
     private var hasReceivedStreamContent = false
     private lazy var streamTextCoalescer = StreamingTextCoalescer { [weak self] text in
         self?.appendStreamedResponse(text)
@@ -102,11 +114,13 @@ final class PetViewBackend: ObservableObject {
         apiManager: APIManager = APIManager(),
         automationStore: AutomationStore = .shared,
         triggerDispatcher: TriggerDispatcher = .shared,
+        codexTaskMonitor: CodexTaskMonitor = .shared,
         stateCoordinator: PetStateCoordinator? = nil
     ) {
         self.apiManager = apiManager
         self.automationStore = automationStore
         self.triggerDispatcher = triggerDispatcher
+        self.codexTaskMonitor = codexTaskMonitor
         self.stateCoordinator = stateCoordinator ?? PetStateCoordinator()
 
         currentCharacter = Self.initialCharacter()
@@ -114,6 +128,8 @@ final class PetViewBackend: ObservableObject {
         refreshConversationStyle()
         configureAgentRuntime()
         bindState()
+        bindCodexMonitor()
+        codexTaskMonitor.start()
         registerNotifications()
         observeAutomationChanges()
         scheduleNextAutomationAction()
@@ -505,6 +521,92 @@ final class PetViewBackend: ObservableObject {
                 self?.scheduleIdleSleepIfNeeded()
             }
             .store(in: &cancellables)
+    }
+
+    private func bindCodexMonitor() {
+        codexTaskMonitor.$activeTasks
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.resumeCodexStateIfPossible()
+            }
+            .store(in: &cancellables)
+
+        codexTaskMonitor.$lastEvent
+            .compactMap { $0 }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] event in
+                self?.handleCodexEvent(event)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func resumeCodexStateIfPossible() {
+        guard activeRequestID == nil,
+              !isRecognizingTrigger,
+              !isExecutingCommand,
+              !isCompactingContext,
+              let task = codexTaskMonitor.activeTasks.first else { return }
+
+        let state: PetActivityState
+        switch task.phase {
+        case .thinking: state = .thinking
+        case .working: state = .working
+        case .waitingForInput: state = .needsInput
+        case .completed, .aborted, .failed: return
+        }
+        stateCoordinator.send(.codexActivityChanged(runID(for: task.id), state))
+    }
+
+    private func handleCodexEvent(_ event: CodexTaskMonitorEvent) {
+        let task: CodexTaskSnapshot
+        let announcement: String
+        switch event {
+        case .completed(let completedTask):
+            task = completedTask
+            stateCoordinator.send(.codexCompleted(runID(for: task.id)))
+            if let response = task.finalResponse, !response.isEmpty {
+                announcement = "Codex 已完成「\(task.title)」：\n\n\(response)"
+            } else {
+                announcement = "Codex 已完成「\(task.title)」。"
+            }
+        case .aborted(let abortedTask):
+            task = abortedTask
+            stateCoordinator.send(.codexAborted(runID(for: task.id)))
+            announcement = "Codex 任务「\(task.title)」已中断。"
+        case .failed(let failedTask):
+            task = failedTask
+            let message = task.finalResponse ?? "Codex 运行时出现错误"
+            stateCoordinator.send(.codexFailed(runID(for: task.id), message))
+            announcement = "Codex 任务「\(task.title)」失败：\(message)"
+        }
+
+        guard activeRequestID == nil, !isRecognizingTrigger, !isExecutingCommand, !isCompactingContext else {
+            pendingCodexAnnouncements.append(announcement)
+            return
+        }
+        presentCodexAnnouncement(announcement)
+    }
+
+    private func showPendingCodexAnnouncementIfPossible() {
+        guard activeRequestID == nil,
+              !isRecognizingTrigger,
+              !isExecutingCommand,
+              !isCompactingContext,
+              !pendingCodexAnnouncements.isEmpty else { return }
+        presentCodexAnnouncement(pendingCodexAnnouncements.removeFirst())
+    }
+
+    private func presentCodexAnnouncement(_ message: String) {
+        streamedResponse = message
+        revealOutputBox(autoHideAfter: max(configuredBubbleDuration, 12))
+    }
+
+    private func runID(for taskID: String) -> UUID {
+        if let id = UUID(uuidString: taskID) { return id }
+        if let existing = codexRunIDs[taskID] { return existing }
+        let id = UUID()
+        codexRunIDs[taskID] = id
+        return id
     }
 
     private func refreshCurrentAsset() {

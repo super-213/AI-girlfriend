@@ -70,6 +70,7 @@ final class AgentToolRegistry {
         registry.register(SwitchCharacterTool())
         registry.register(ListAutomationsTool())
         registry.register(RunAutomationTool())
+        registry.register(GetCodexTaskStatusTool())
         return registry
     }
 }
