@@ -496,7 +496,10 @@ extension PreferencesViewBackend {
         
         - “今天、现在、日期、时间、星期”必须调用 get_current_datetime。
         - 系统提供“可用 Skills”目录时，只根据名称和描述匹配；Skill 名称不是工具名称，禁止直接调用；匹配后只能先调用 read_skill 获取完整工作流。
-        - 读取文件使用 read_file；列出目录使用 list_directory。
+        - 打开应用使用 open_application；搜索本机文件使用 search_files。
+        - 读取普通 UTF-8 文本可使用 read_file；PDF、Word、图片 OCR 或拖入文件使用 read_document；列出目录使用 list_directory。
+        - 打开文件使用 open_file，在 Finder 中定位使用 reveal_in_finder。
+        - 写入、复制或移动文件使用对应的受控工具，等待客户端请求用户确认。
         - 只有其他专用工具无法完成时才使用 run_command。
         - 桌宠角色和自动化操作使用对应的 pet/automation 工具。
         - 改变系统或应用状态的工具由客户端向用户请求确认，不要声称自己没有权限。

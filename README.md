@@ -1,6 +1,6 @@
 # 看板娘（macOS 桌面宠物应用）
 
-一个基于 SwiftUI 开发的 macOS 桌面宠物应用，支持 AI 对话、角色切换、音乐搜索、技能注入（agent/skill）、命令执行确认，以及面向外部 Agent 的结构化控制服务。
+一个拥有角色外形、常驻 macOS 桌面的本地 AI Agent。你可以让它打开应用、搜索本机文件、执行受控任务，或把文件直接拖给角色后交代分析与处理指令。任务进度会通过角色动作呈现，空闲时则保留角色原有的互动与情绪价值。
 
 ## 📋 目录
 
@@ -27,6 +27,8 @@
 - 🧭 **状态驱动桌宠**：支持 idle、thinking、talking、working、waitingForConfirmation、success、error、sleeping 等 13 种状态
 - 🖱️ **桌面级交互**：透明区域整窗穿透、Alpha 命中拖拽、位置恢复、动态窗口尺寸和屏幕边界约束
 - 🤖 **AI 对话**：支持智谱清言、OpenAI-Compatible、Ollama（流式输出）
+- 📎 **拖放文件任务**：把文件或目录拖到角色上，再输入分析、整理或处理指令
+- 🖥️ **桌面行动**：结构化打开应用、Spotlight 搜索、打开文件与 Finder 定位
 - 🪟 **悬浮对话窗**：`Ctrl + T` 呼出独立无边框聊天窗口
 - 🧠 **技能注入**：支持 Codex Agent Skill 标准目录（`SKILL.md` + 可选 `scripts/` 等资源），并兼容旧版单 `.md` 技能
 - ⏱️ **自动化流程**：在偏好设置中创建常用提示词，按一次、15 分钟、小时、天、周、月、年等频率自动发送给模型
@@ -78,6 +80,10 @@
 
 - `get_current_datetime`：读取本机日期、时间、星期和时区
 - `list_directory` / `read_file`：目录和文本文件读取
+- `read_document` / `get_file_info`：读取 PDF、Word、图片 OCR 等文档内容及元数据
+- `search_files` / `open_file` / `reveal_in_finder`：Spotlight 搜索、打开文件和 Finder 定位
+- `open_application`：按应用名称或 bundle identifier 启动 macOS 应用
+- `write_text_file` / `copy_file` / `move_file`：经用户确认后写入、复制或移动文件
 - `run_command`：按用户配置的命令权限策略执行非交互式 Shell 命令
 - `list_pet_characters` / `switch_pet_character`：桌宠角色查询与切换
 - `list_automations` / `run_automation`：自动化查询与执行

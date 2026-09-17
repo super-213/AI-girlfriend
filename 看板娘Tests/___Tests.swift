@@ -96,9 +96,46 @@ struct AgentFoundationTests {
         #expect(names.contains("get_current_datetime"))
         #expect(names.contains("read_skill"))
         #expect(names.contains("read_file"))
+        #expect(names.contains("read_document"))
+        #expect(names.contains("search_files"))
+        #expect(names.contains("open_application"))
+        #expect(names.contains("open_file"))
+        #expect(names.contains("write_text_file"))
         #expect(names.contains("run_command"))
         #expect(names.contains("switch_pet_character"))
         #expect(names.contains("run_automation"))
+    }
+
+    @Test
+    func draggedFilePromptPreservesInstructionAndExactPaths() {
+        let attachment = LocalFileAttachment(url: URL(fileURLWithPath: "/tmp/项目需求.pdf"))
+        let prompt = FileAttachmentPromptBuilder.prompt(
+            userInstruction: "总结风险并生成 Markdown",
+            attachments: [attachment]
+        )
+
+        #expect(prompt.contains("总结风险并生成 Markdown"))
+        #expect(prompt.contains("/tmp/项目需求.pdf"))
+        #expect(prompt.contains("read_document"))
+        #expect(prompt.contains("新建、覆盖、移动或复制文件"))
+    }
+
+    @Test @MainActor
+    func readDocumentToolExtractsDroppedUTF8Text() async throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kanban-agent-\(UUID().uuidString).md")
+        try Data("拖入文件分析测试".utf8).write(to: url, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let result = await withCheckedContinuation { continuation in
+            ReadDocumentTool().execute(arguments: ["path": url.path]) { result in
+                continuation.resume(returning: result)
+            }
+        }
+
+        #expect(result.isError == false)
+        #expect(result.content.contains("拖入文件分析测试"))
+        #expect(result.content.contains(url.path))
     }
 
     @Test @MainActor

@@ -43,6 +43,7 @@ final class PetViewBackend: ObservableObject {
     @Published private(set) var isRecognizingTrigger = false
     @Published private(set) var isCompactingContext = false
     @Published var showOutputBox = false
+    @Published private(set) var pendingAttachments: [LocalFileAttachment] = []
 
     let stateCoordinator: PetStateCoordinator
     let streamedResponseStore = PetStreamedResponseStore()
@@ -156,6 +157,18 @@ final class PetViewBackend: ObservableObject {
         activeRequestID = runID
         streamedResponse = ""
         revealOutputBox(autoHideAfter: 30)
+
+        let attachments = pendingAttachments
+        if !attachments.isEmpty {
+            pendingAttachments.removeAll()
+            let prompt = FileAttachmentPromptBuilder.prompt(
+                userInstruction: trimmedInput,
+                attachments: attachments
+            )
+            continueChatProcessing(prompt, runID: runID)
+            return
+        }
+
         isRecognizingTrigger = true
 
         triggerDispatcher.handleUserInput(
@@ -192,6 +205,33 @@ final class PetViewBackend: ObservableObject {
                 }
             }
         )
+    }
+
+    @discardableResult
+    func attachFiles(_ urls: [URL]) -> Int {
+        var added = 0
+        for url in urls {
+            guard url.isFileURL else { continue }
+            let attachment = LocalFileAttachment(url: url)
+            guard FileManager.default.fileExists(atPath: attachment.path),
+                  !pendingAttachments.contains(where: { $0.path == attachment.path }),
+                  pendingAttachments.count < 8 else { continue }
+            pendingAttachments.append(attachment)
+            added += 1
+        }
+        if added > 0 {
+            noteUserActivity()
+            stateCoordinator.send(.interaction(.attention, 1.2))
+        }
+        return added
+    }
+
+    func removeAttachment(id: UUID) {
+        pendingAttachments.removeAll { $0.id == id }
+    }
+
+    func clearAttachments() {
+        pendingAttachments.removeAll()
     }
 
     func submitAutomation(_ automation: AutomationFlow) {

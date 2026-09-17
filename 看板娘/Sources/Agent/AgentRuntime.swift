@@ -371,6 +371,10 @@ final class AgentRuntime {
 
         ## 工具调用规则
         你拥有客户端提供的结构化工具。需要实时信息或外部操作时必须调用合适的工具，不要声称自己没有权限。
+        打开应用使用 open_application；搜索本机文件使用 search_files，不要优先使用 Shell。
+        读取文本以外的常见文档、图片 OCR 或用户拖入的文件时使用 read_document。
+        文件搜索结果不唯一时，先向用户列出候选项并请其选择，不要自行打开或修改某个结果。
+        新建、覆盖、复制或移动文件使用受控文件工具，并在用户确认后执行。
         “可用 Skills”中的 name 只是工作流标识，不是工具名称；禁止直接调用 Skill name。
         用户任务匹配 Skill 时，只能先调用 read_skill，并将 Skill name 放入 name 参数。
         工具结果会作为 tool message 返回；根据结果继续处理，直到给出最终答复。

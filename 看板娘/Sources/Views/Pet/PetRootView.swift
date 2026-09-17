@@ -90,6 +90,7 @@ struct PetRootView: View {
     @State private var keepInputVisible = false
     @State private var hasInputText = false
     @State private var showQuickMenu = false
+    @State private var isFileDropTargeted = false
     @State private var hasAppeared = false
     @FocusState private var isInputFocused: Bool
 
@@ -103,6 +104,7 @@ struct PetRootView: View {
 
     private var shouldShowInput: Bool {
         isHoveringPet || isHoveringInput || isInputFocused || keepInputVisible || hasInputText
+            || !petViewBackend.pendingAttachments.isEmpty
     }
 
     private var usesNearbyConfirmation: Bool {
@@ -152,13 +154,22 @@ struct PetRootView: View {
                         .transition(.scale(scale: 0.9).combined(with: .opacity))
                 }
 
+                if !petViewBackend.pendingAttachments.isEmpty {
+                    PetAttachmentTrayView(
+                        attachments: petViewBackend.pendingAttachments,
+                        onRemove: petViewBackend.removeAttachment,
+                        onClear: petViewBackend.clearAttachments
+                    )
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+
                 // 始终保留输入框的布局槽。悬浮不改变根视图的固有尺寸；用户通过
                 // Option 调整窗口时，由窗口控制器在固有尺寸之外统一缩放整套界面。
                 ZStack(alignment: .bottom) {
                     if shouldShowInput {
                         PetInputView(
                             isFocused: $isInputFocused,
-                            placeholder: petViewBackend.conversationStyle.inputPlaceholder,
+                            placeholder: inputPlaceholder,
                             isDisabled: coordinator.snapshot.activityState == .waitingForConfirmation,
                             onHover: { isHoveringInput = $0 },
                             onTextPresenceChanged: { hasInputText = $0 },
@@ -185,6 +196,7 @@ struct PetRootView: View {
                         resolvedAsset: petViewBackend.currentResolvedAsset,
                         coordinator: coordinator,
                         horizontalPosition: horizontalPosition,
+                        isFileDropTargeted: isFileDropTargeted,
                         onHover: handlePetHover,
                         onTap: petViewBackend.handleTap,
                         onDoubleTap: { AppWindowRouter.shared.showDialog() },
@@ -198,7 +210,13 @@ struct PetRootView: View {
                         onDragChanged: { initialOrigin, delta in
                             PetWindowController.shared.dragWindow(from: initialOrigin, screenDelta: delta)
                         },
-                        onDragEnded: { PetWindowController.shared.endDragging() }
+                        onDragEnded: { PetWindowController.shared.endDragging() },
+                        onFileDrop: handleFileDrop,
+                        onFileDropTargetChanged: { targeted in
+                            withAnimation(DesignAnimation.fast) {
+                                isFileDropTargeted = targeted
+                            }
+                        }
                     )
                     .equatable()
                 }
@@ -254,6 +272,12 @@ struct PetRootView: View {
         )
     }
 
+    private var inputPlaceholder: String {
+        let count = petViewBackend.pendingAttachments.count
+        guard count > 0 else { return petViewBackend.conversationStyle.inputPlaceholder }
+        return "想让我怎么处理这 \(count) 个项目？"
+    }
+
     private func submitInput(_ text: String) {
         petViewBackend.submitExternalInput(text)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
@@ -266,6 +290,15 @@ struct PetRootView: View {
         isHoveringInput = false
         hasInputText = false
         keepInputVisible = false
+        petViewBackend.clearAttachments()
+    }
+
+    private func handleFileDrop(_ urls: [URL]) {
+        let added = petViewBackend.attachFiles(urls)
+        guard added > 0 else { return }
+        showQuickMenu = false
+        keepInputVisible = true
+        isInputFocused = true
     }
 
     private func handlePetHover(_ hovering: Bool) {

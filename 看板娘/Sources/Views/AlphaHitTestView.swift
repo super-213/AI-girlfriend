@@ -16,6 +16,16 @@ import AppKit
 class AlphaHitTestNSView: NSView, PetInteractiveRegion {
     override var isFlipped: Bool { true }
 
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        registerForDraggedTypes([.fileURL])
+    }
+
     var alphaMask: PetImageAlphaMask?
     var displayScale: CGFloat = 1
     var displayOffset: CGSize = .zero
@@ -33,6 +43,10 @@ class AlphaHitTestNSView: NSView, PetInteractiveRegion {
     var onDragChanged: ((NSPoint, NSPoint) -> Void)?
 
     var onDragEnded: (() -> Void)?
+
+    var onFileDrop: (([URL]) -> Void)?
+
+    var onFileDropTargetChanged: ((Bool) -> Void)?
     
     /// 鼠标悬停状态变化回调（仅在非透明区域触发）
     var onHover: ((Bool) -> Void)?
@@ -46,6 +60,7 @@ class AlphaHitTestNSView: NSView, PetInteractiveRegion {
     private var initialMouseLocation: NSPoint?
     private var initialWindowOrigin: NSPoint?
     private var didDrag = false
+    private var isAcceptingFileDrop = false
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -155,6 +170,55 @@ class AlphaHitTestNSView: NSView, PetInteractiveRegion {
     override func rightMouseDown(with event: NSEvent) {
         onRightClick?()
     }
+
+    // MARK: - 文件拖放
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        updateFileDropTarget(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        updateFileDropTarget(sender)
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        setAcceptingFileDrop(false)
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        updateFileDropTarget(sender) == .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        defer { setAcceptingFileDrop(false) }
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [
+            .urlReadingFileURLsOnly: true
+        ]
+        guard let objects = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: options
+        ) as? [NSURL] else { return false }
+        let urls = objects.map { $0 as URL }.filter(\.isFileURL)
+        guard !urls.isEmpty else { return false }
+        onFileDrop?(urls)
+        return true
+    }
+
+    private func updateFileDropTarget(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let point = convert(sender.draggingLocation, from: nil)
+        let accepts = isPointOpaque(point) && sender.draggingPasteboard.canReadObject(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        )
+        setAcceptingFileDrop(accepts)
+        return accepts ? .copy : []
+    }
+
+    private func setAcceptingFileDrop(_ accepting: Bool) {
+        guard isAcceptingFileDrop != accepting else { return }
+        isAcceptingFileDrop = accepting
+        onFileDropTargetChanged?(accepting)
+    }
     
     // MARK: - Alpha 检测核心逻辑
     
@@ -233,6 +297,10 @@ struct AlphaHitTestOverlay: NSViewRepresentable {
 
     var onDragEnded: (() -> Void)?
 
+    var onFileDrop: (([URL]) -> Void)?
+
+    var onFileDropTargetChanged: ((Bool) -> Void)?
+
     func makeNSView(context: Context) -> AlphaHitTestNSView {
         let view = AlphaHitTestNSView()
         view.alphaMask = alphaMask
@@ -246,6 +314,8 @@ struct AlphaHitTestOverlay: NSViewRepresentable {
         view.onDragBegan = onDragBegan
         view.onDragChanged = onDragChanged
         view.onDragEnded = onDragEnded
+        view.onFileDrop = onFileDrop
+        view.onFileDropTargetChanged = onFileDropTargetChanged
         return view
     }
 
@@ -265,6 +335,8 @@ struct AlphaHitTestOverlay: NSViewRepresentable {
         nsView.onDragBegan = onDragBegan
         nsView.onDragChanged = onDragChanged
         nsView.onDragEnded = onDragEnded
+        nsView.onFileDrop = onFileDrop
+        nsView.onFileDropTargetChanged = onFileDropTargetChanged
         if hitGeometryChanged {
             Task { @MainActor in
                 PetWindowHitTestCoordinator.shared.refreshMousePolicy()

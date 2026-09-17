@@ -35,7 +35,7 @@ struct AboutTab: View {
                     .foregroundColor(DesignColors.textSecondary)
 
                 // 应用描述
-                Text("一个可爱的桌面 AI 伴侣")
+                Text("一个拥有角色外形、能在本地执行任务的桌面 Agent")
                     .font(DesignFonts.body)
                     .foregroundColor(DesignColors.textPrimary)
                     .padding(.top, DesignSpacing.xs)

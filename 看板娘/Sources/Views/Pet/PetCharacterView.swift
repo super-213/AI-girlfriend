@@ -239,6 +239,7 @@ struct PetCharacterView: View, @MainActor Equatable {
     let resolvedAsset: PetResolvedAsset?
     @ObservedObject var coordinator: PetStateCoordinator
     let horizontalPosition: Double
+    let isFileDropTargeted: Bool
     let onHover: (Bool) -> Void
     let onTap: () -> Void
     let onDoubleTap: () -> Void
@@ -246,6 +247,8 @@ struct PetCharacterView: View, @MainActor Equatable {
     let onDragBegan: () -> Void
     let onDragChanged: (NSPoint, NSPoint) -> Void
     let onDragEnded: () -> Void
+    let onFileDrop: ([URL]) -> Void
+    let onFileDropTargetChanged: (Bool) -> Void
     @ObservedObject private var artworkMetadataCache = PetArtworkMetadataCache.shared
 
     static func == (lhs: PetCharacterView, rhs: PetCharacterView) -> Bool {
@@ -253,6 +256,7 @@ struct PetCharacterView: View, @MainActor Equatable {
             && lhs.resolvedAsset == rhs.resolvedAsset
             && lhs.coordinator === rhs.coordinator
             && lhs.horizontalPosition == rhs.horizontalPosition
+            && lhs.isFileDropTargeted == rhs.isFileDropTargeted
     }
 
     var body: some View {
@@ -267,6 +271,23 @@ struct PetCharacterView: View, @MainActor Equatable {
                 state: coordinator.snapshot.renderedState,
                 effect: coordinator.transientEffect
             )
+            if isFileDropTargeted {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 28, style: .continuous)
+                            .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [7, 5]))
+                    )
+                    .padding(10)
+
+                Label("松开交给我", systemImage: "tray.and.arrow.down.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 8)
+                    .background(.regularMaterial, in: Capsule())
+                    .shadow(color: .black.opacity(0.16), radius: 10, y: 4)
+            }
         }
         .offset(x: artworkAlignmentOffset)
         .frame(width: 280, height: 280)
@@ -285,7 +306,9 @@ struct PetCharacterView: View, @MainActor Equatable {
                 onRightClick: onRightClick,
                 onDragBegan: onDragBegan,
                 onDragChanged: onDragChanged,
-                onDragEnded: onDragEnded
+                onDragEnded: onDragEnded,
+                onFileDrop: onFileDrop,
+                onFileDropTargetChanged: onFileDropTargetChanged
             )
         )
         .accessibilityLabel("\(character.name)，\(coordinator.snapshot.renderedState.displayName)")
