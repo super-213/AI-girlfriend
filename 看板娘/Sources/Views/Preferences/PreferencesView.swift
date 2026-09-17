@@ -26,6 +26,7 @@ struct PreferencesView: View {
     @AppStorage("petSleepMinutes") private var sleepMinutes: Double = 6
     @AppStorage("commandConfirmationStyle") private var commandConfirmationStyle = "nearPet"
     @AppStorage("bubbleAutoHideDuration") private var bubbleAutoHideDuration: Double = 15
+    @AppStorage(PetConversationRetention.storageKey) private var petConversationRetentionMinutes = PetConversationRetention.defaultMinutes
 
     @State private var petContentScale = Double(PetWindowController.shared.contentScale)
     @State private var originalPetContentScale = Double(PetWindowController.shared.contentScale)
@@ -72,7 +73,7 @@ struct PreferencesView: View {
                       let section = PreferencesViewBackend.PreferenceSection(rawValue: rawValue) else { return }
                 backend.selectedSection = section
             }
-            .onChange(of: [systemPrompt, String(overlapRatio), String(petHorizontalPosition)]) { _, _ in
+            .onChange(of: [systemPrompt, String(overlapRatio), String(petHorizontalPosition), String(petConversationRetentionMinutes)]) { _, _ in
                 checkChanges()
             }
             .onChange(of: petContentScale) { _, newValue in
@@ -208,6 +209,7 @@ extension PreferencesView {
                 petHorizontalPosition: $petHorizontalPosition,
                 petContentScale: $petContentScale,
                 sleepMinutes: $sleepMinutes,
+                petConversationRetentionMinutes: $petConversationRetentionMinutes,
                 commandConfirmationStyle: $commandConfirmationStyle,
                 bubbleAutoHideDuration: $bubbleAutoHideDuration,
                 character: petViewBackend.currentCharacter,
@@ -318,7 +320,8 @@ extension PreferencesView {
                     apiUrl: apiUrl,
                     provider: provider,
                     overlapRatio: overlapRatio,
-                    petHorizontalPosition: petHorizontalPosition
+                    petHorizontalPosition: petHorizontalPosition,
+                    petConversationRetentionMinutes: petConversationRetentionMinutes
                 )
             },
             onDismiss: {
@@ -360,6 +363,7 @@ extension PreferencesView {
     private func cancelChanges() {
         overlapRatio = backend.temporaryOverlapRatio
         petHorizontalPosition = backend.temporaryPetHorizontalPosition
+        petConversationRetentionMinutes = backend.temporaryPetConversationRetentionMinutes
         petContentScale = originalPetContentScale
         PetWindowController.shared.setContentScale(CGFloat(originalPetContentScale), persist: false)
         backend.cancelChanges()
@@ -369,6 +373,7 @@ extension PreferencesView {
     private func handleAppear() {
         backend.selectedSection = AppWindowRouter.shared.pendingPreferenceSection
         petHorizontalPosition = PetHorizontalPosition.clamped(petHorizontalPosition)
+        petConversationRetentionMinutes = PetConversationRetention.normalized(petConversationRetentionMinutes)
         let currentContentScale = Double(PetWindowController.shared.contentScale)
         petContentScale = currentContentScale
         originalPetContentScale = currentContentScale
@@ -402,7 +407,8 @@ extension PreferencesView {
             apiUrl: apiUrl,
             provider: provider,
             overlapRatio: overlapRatio,
-            petHorizontalPosition: petHorizontalPosition
+            petHorizontalPosition: petHorizontalPosition,
+            petConversationRetentionMinutes: petConversationRetentionMinutes
         )
         let characterIDs = allCharacters.map(\.id)
         let styles = PetConversationStyleStore.styles(for: characterIDs)
@@ -421,7 +427,8 @@ extension PreferencesView {
             apiUrl: apiUrl,
             provider: provider,
             overlapRatio: overlapRatio,
-            petHorizontalPosition: petHorizontalPosition
+            petHorizontalPosition: petHorizontalPosition,
+            petConversationRetentionMinutes: petConversationRetentionMinutes
         )
     }
     

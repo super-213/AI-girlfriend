@@ -235,7 +235,7 @@ PetViewBackend.submitInput()
 视图实时渲染
 ```
 
-临时桌宠气泡和 Ctrl+T 完整对话共享同一套工具注册表与 Agent 循环。区别是临时气泡在每次新输入前调用 `startNewConversation()`，因此不会跨输入保存聊天历史，但单次任务内部的多轮工具调用上下文会完整保留。
+临时桌宠气泡和 Ctrl+T 完整对话共享同一套工具注册表与 Agent 循环。桌宠气泡会保留跨输入的聊天与工具调用上下文，默认在最后一次对话结束 30 分钟后销毁；可在偏好设置中将保留时长设为 5 分钟到 24 小时，或选择不销毁。设置页提示词自动化使用独立临时上下文，不会污染桌宠会话。
 
 ### 2. Agent/Skill 注入流程
 
@@ -498,6 +498,7 @@ apiKey: "ollama" // 本地模式通常不会校验
 | `provider` | String | 服务商标识 |
 | `overlapRatio` | Double | 布局重叠比例 |
 | `petSleepMinutes` | Double | 空闲多久进入休息，0 表示关闭 |
+| `petConversationRetentionMinutes` | Double | 桌宠对话上下文保留时长，5–1440 分钟，0 表示不销毁 |
 | `commandConfirmationStyle` | String | `nearPet` 或 `systemAlert` |
 | `bubbleAutoHideDuration` | Double | 回复气泡自动收起秒数 |
 

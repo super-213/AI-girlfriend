@@ -90,6 +90,8 @@ final class PetViewBackend: ObservableObject {
     private var assetRotationTimer: AnyCancellable?
     private var automationTimer: Timer?
     private var sleepTimer: Timer?
+    private var conversationExpirationTimer: Timer?
+    private var petConversationSession = PetConversationSession()
     private var cancellables = Set<AnyCancellable>()
     private var notificationObservers: [NSObjectProtocol] = []
 
@@ -146,6 +148,7 @@ final class PetViewBackend: ObservableObject {
             assetRotationTimer?.cancel()
             automationTimer?.invalidate()
             sleepTimer?.invalidate()
+            conversationExpirationTimer?.invalidate()
         }
     }
 
@@ -168,7 +171,6 @@ final class PetViewBackend: ObservableObject {
         }
 
         noteUserActivity()
-        agentRuntime.startNewConversation()
         let runID = UUID()
         activeRequestID = runID
         streamedResponse = ""
@@ -302,6 +304,7 @@ final class PetViewBackend: ObservableObject {
 
     func cancelActiveRequest() {
         guard activeRequestID != nil || isRecognizingTrigger || isExecutingCommand || isCompactingContext else { return }
+        let cancelledKind = activeRequestKind
         streamTextCoalescer.reset()
         agentRuntime.cancel()
         apiManager.cancelStreamRequest()
@@ -315,6 +318,9 @@ final class PetViewBackend: ObservableObject {
         stateCoordinator.send(.resetToIdle)
         streamedResponse = "已停止当前任务。"
         revealOutputBox(autoHideAfter: 6)
+        if cancelledKind == .conversation {
+            recordPetConversationAndScheduleExpiration()
+        }
     }
 
     func handleTap() {
@@ -369,6 +375,7 @@ final class PetViewBackend: ObservableObject {
     }
 
     private func continueChatProcessing(_ input: String, runID: UUID, imagePaths: [String] = []) {
+        restorePetConversationForNextInput()
         activeRequestID = runID
         activeRequestKind = .conversation
         streamTextCoalescer.reset()
@@ -470,8 +477,14 @@ final class PetViewBackend: ObservableObject {
                 }
             }
             self.revealOutputBox(autoHideAfter: self.configuredBubbleDuration)
+            if kind == .conversation {
+                self.petConversationSession.record(history: self.agentRuntime.messages, at: .now)
+            }
             self.activeRequestID = nil
             self.activeRequestKind = nil
+            if kind == .conversation {
+                self.schedulePetConversationExpiration()
+            }
         }
         agentRuntime.onError = { [weak self] error in
             guard let self, let runID = self.activeRequestID else { return }
@@ -483,7 +496,8 @@ final class PetViewBackend: ObservableObject {
             self.pendingCommand = ""
             self.streamedResponse = "请求失败：\(message)"
             self.revealOutputBox(autoHideAfter: 15)
-            switch self.activeRequestKind {
+            let kind = self.activeRequestKind
+            switch kind {
             case .conversation:
                 self.stateCoordinator.send(.conversationFailed(runID, message))
             case .automation:
@@ -491,8 +505,14 @@ final class PetViewBackend: ObservableObject {
             case nil:
                 return
             }
+            if kind == .conversation {
+                self.petConversationSession.record(history: self.agentRuntime.messages, at: .now)
+            }
             self.activeRequestID = nil
             self.activeRequestKind = nil
+            if kind == .conversation {
+                self.schedulePetConversationExpiration()
+            }
         }
     }
 
@@ -722,6 +742,67 @@ final class PetViewBackend: ObservableObject {
             : max(defaults.double(forKey: "bubbleAutoHideDuration"), 5)
     }
 
+    private func restorePetConversationForNextInput(at date: Date = .now) {
+        conversationExpirationTimer?.invalidate()
+        conversationExpirationTimer = nil
+        let history = petConversationSession.historyForNextInput(
+            at: date,
+            timeout: PetConversationRetention.timeout()
+        )
+        agentRuntime.restoreConversation(history)
+    }
+
+    private func recordPetConversationAndScheduleExpiration(at date: Date = .now) {
+        petConversationSession.record(history: agentRuntime.messages, at: date)
+        schedulePetConversationExpiration(at: date)
+    }
+
+    private func schedulePetConversationExpiration(at date: Date = .now) {
+        conversationExpirationTimer?.invalidate()
+        conversationExpirationTimer = nil
+
+        // A running foreground conversation owns the Runtime and resets the
+        // inactivity clock when it finishes.
+        guard activeRequestKind != .conversation else { return }
+        let timeout = PetConversationRetention.timeout()
+        petConversationSession.expireIfNeeded(at: date, timeout: timeout)
+        guard let remaining = petConversationSession.remainingLifetime(at: date, timeout: timeout) else {
+            clearRuntimeIfPetConversationExpired()
+            return
+        }
+        guard remaining > 0 else {
+            petConversationSession.destroy()
+            clearRuntimeIfPetConversationExpired()
+            return
+        }
+
+        let timer = Timer(timeInterval: remaining, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.expirePetConversationIfNeeded() }
+        }
+        timer.tolerance = min(max(remaining * 0.02, 1), 60)
+        RunLoop.main.add(timer, forMode: .common)
+        conversationExpirationTimer = timer
+    }
+
+    private func expirePetConversationIfNeeded(at date: Date = .now) {
+        conversationExpirationTimer?.invalidate()
+        conversationExpirationTimer = nil
+        petConversationSession.expireIfNeeded(
+            at: date,
+            timeout: PetConversationRetention.timeout()
+        )
+        if petConversationSession.isEmpty {
+            clearRuntimeIfPetConversationExpired()
+        } else {
+            schedulePetConversationExpiration(at: date)
+        }
+    }
+
+    private func clearRuntimeIfPetConversationExpired() {
+        guard petConversationSession.isEmpty, activeRequestID == nil else { return }
+        agentRuntime.startNewConversation()
+    }
+
     private var interactionDuration: TimeInterval? {
         guard let asset = currentCharacter.interactionAssets.first else { return nil }
         if let preferredDuration = asset.preferredDuration { return preferredDuration }
@@ -762,6 +843,7 @@ final class PetViewBackend: ObservableObject {
             Task { @MainActor in
                 self?.refreshConversationStyle()
                 self?.scheduleIdleSleepIfNeeded()
+                self?.schedulePetConversationExpiration()
             }
         })
     }

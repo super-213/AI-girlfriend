@@ -16,6 +16,7 @@ struct PreferencesData: Equatable {
     var provider: String
     var overlapRatio: Double
     var petHorizontalPosition: Double
+    var petConversationRetentionMinutes: Double
     var staticMessages: [String]
     
     static let `default` = PreferencesData(
@@ -26,6 +27,7 @@ struct PreferencesData: Equatable {
         provider: "zhipu",
         overlapRatio: 0.3,
         petHorizontalPosition: PetHorizontalPosition.defaultValue,
+        petConversationRetentionMinutes: PetConversationRetention.defaultMinutes,
         staticMessages: []
     )
     
@@ -38,6 +40,7 @@ struct PreferencesData: Equatable {
         provider: "ollama",
         overlapRatio: 0.3,
         petHorizontalPosition: PetHorizontalPosition.defaultValue,
+        petConversationRetentionMinutes: PetConversationRetention.defaultMinutes,
         staticMessages: []
     )
 }

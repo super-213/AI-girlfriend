@@ -13,6 +13,7 @@ struct LayoutSettingsTab: View {
     @Binding var petHorizontalPosition: Double
     @Binding var petContentScale: Double
     @Binding var sleepMinutes: Double
+    @Binding var petConversationRetentionMinutes: Double
     @Binding var commandConfirmationStyle: String
     @Binding var bubbleAutoHideDuration: Double
 
@@ -72,6 +73,39 @@ struct LayoutSettingsTab: View {
 
             Divider()
 
+            VStack(alignment: .leading, spacing: DesignSpacing.sm) {
+                HStack(spacing: DesignSpacing.lg) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs) {
+                        Text("桌宠对话上下文")
+                            .font(.system(size: 13, weight: .medium))
+                        Text("超过设定时间没有继续对话时，自动开始新会话。")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Toggle("不销毁", isOn: conversationNeverExpires)
+                        .toggleStyle(.switch)
+                        .fixedSize()
+                }
+
+                if petConversationRetentionMinutes > 0 {
+                    settingTitle(
+                        "保留时长",
+                        detail: PetConversationRetention.description(for: petConversationRetentionMinutes)
+                    )
+                    Slider(
+                        value: conversationRetentionBinding,
+                        in: PetConversationRetention.minimumMinutes...PetConversationRetention.maximumMinutes,
+                        step: PetConversationRetention.stepMinutes
+                    )
+                    .accessibilityValue(PetConversationRetention.description(for: petConversationRetentionMinutes))
+                }
+            }
+
+            Divider()
+
             HStack(spacing: DesignSpacing.lg) {
                 Text("系统命令确认位置")
                     .font(.system(size: 13, weight: .medium))
@@ -107,6 +141,26 @@ struct LayoutSettingsTab: View {
                 .foregroundStyle(.secondary)
                 .contentTransition(.numericText())
         }
+    }
+
+    private var conversationNeverExpires: Binding<Bool> {
+        Binding(
+            get: { petConversationRetentionMinutes == 0 },
+            set: { neverExpires in
+                petConversationRetentionMinutes = neverExpires
+                    ? 0
+                    : PetConversationRetention.defaultMinutes
+            }
+        )
+    }
+
+    private var conversationRetentionBinding: Binding<Double> {
+        Binding(
+            get: {
+                max(petConversationRetentionMinutes, PetConversationRetention.minimumMinutes)
+            },
+            set: { petConversationRetentionMinutes = PetConversationRetention.normalized($0) }
+        )
     }
 }
 
