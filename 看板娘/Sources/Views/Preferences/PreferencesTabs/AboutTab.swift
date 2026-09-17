@@ -11,6 +11,10 @@ import SwiftUI
 struct AboutTab: View {
     let currentCharacterName: String
     let onClose: () -> Void
+
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "--"
+    }
     
     var body: some View {
         ScrollView {
@@ -30,7 +34,7 @@ struct AboutTab: View {
                     .foregroundColor(DesignColors.textPrimary)
 
                 // 版本信息
-                Text("版本 1.0.0")
+                Text("版本 \(appVersion)")
                     .font(DesignFonts.caption)
                     .foregroundColor(DesignColors.textSecondary)
 
