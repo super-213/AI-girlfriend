@@ -175,8 +175,8 @@ struct PetRootView: View {
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
 
-                // 始终保留输入框的布局槽。悬浮不改变根视图的固有尺寸；用户通过
-                // Option 调整窗口时，由窗口控制器在固有尺寸之外统一缩放整套界面。
+                // 始终保留输入框的布局槽。命令选择器作为输入视图的正常布局内容
+                // 向上展开，因此会被计入窗口固有高度，不会越过 NSHostingView。
                 ZStack(alignment: .bottom) {
                     if shouldShowInput {
                         PetInputView(
@@ -195,7 +195,6 @@ struct PetRootView: View {
                 .frame(
                     maxWidth: .infinity,
                     minHeight: PetPanelLayoutMetrics.inputHeight,
-                    maxHeight: PetPanelLayoutMetrics.inputHeight,
                     alignment: .bottom
                 )
                 .animation(DesignAnimation.fast, value: shouldShowInput)

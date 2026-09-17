@@ -16,6 +16,7 @@ struct AgentInvocationPicker: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @State private var hoveredOptionID: AgentInvocationOption.ID?
 
     static func preferredHeight(optionCount: Int, compact: Bool = false) -> CGFloat {
         if optionCount == 0 { return compact ? 78 : 90 }
@@ -120,6 +121,7 @@ struct AgentInvocationPicker: View {
 
     private func optionRow(_ option: AgentInvocationOption, index: Int) -> some View {
         let isSelected = index == selectedIndex
+        let isHovered = hoveredOptionID == option.id
 
         return Button {
             selectedIndex = index
@@ -158,12 +160,16 @@ struct AgentInvocationPicker: View {
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             .background(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(isSelected ? DesignColors.primary.opacity(0.11) : Color.clear)
+                    .fill(
+                        isSelected
+                            ? DesignColors.primary.opacity(0.11)
+                            : (isHovered ? Color.primary.opacity(0.055) : Color.clear)
+                    )
             )
         }
         .buttonStyle(.plain)
         .onHover { hovering in
-            if hovering { selectedIndex = index }
+            hoveredOptionID = hovering ? option.id : nil
         }
         .accessibilityLabel(option.token)
         .accessibilityHint(option.description)

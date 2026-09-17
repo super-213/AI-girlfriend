@@ -20,6 +20,43 @@ struct PetInputView: View {
     @State private var invocationPickerSuppressed = false
 
     var body: some View {
+        VStack(spacing: 7) {
+            if let query = activeInvocationQuery {
+                AgentInvocationPicker(
+                    kind: query.kind,
+                    options: filteredInvocationOptions,
+                    selectedIndex: $invocationSelection,
+                    compact: true,
+                    onSelect: selectInvocation
+                )
+                .frame(
+                    height: AgentInvocationPicker.preferredHeight(
+                        optionCount: filteredInvocationOptions.count,
+                        compact: true
+                    )
+                )
+                .frame(maxWidth: .infinity)
+                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
+            }
+
+            inputBar
+        }
+        .disabled(isDisabled)
+        .onHover(perform: onHover)
+        .onChange(of: text.isEmpty) { oldValue, newValue in
+            guard oldValue != newValue else { return }
+            onTextPresenceChanged(!newValue)
+        }
+        .onChange(of: text) { oldValue, newValue in
+            guard oldValue != newValue else { return }
+            invocationSelection = 0
+            invocationPickerSuppressed = false
+        }
+        .animation(DesignAnimation.spring, value: activeInvocationQuery)
+        .petInteractiveRegion()
+    }
+
+    private var inputBar: some View {
         HStack(spacing: 9) {
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
@@ -65,42 +102,7 @@ struct PetInputView: View {
         )
         .background(.regularMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(.white.opacity(0.28), lineWidth: 0.8))
-        .overlay(alignment: .topLeading) {
-            if let query = activeInvocationQuery {
-                AgentInvocationPicker(
-                    kind: query.kind,
-                    options: filteredInvocationOptions,
-                    selectedIndex: $invocationSelection,
-                    compact: true,
-                    onSelect: selectInvocation
-                )
-                .frame(
-                    height: AgentInvocationPicker.preferredHeight(
-                        optionCount: filteredInvocationOptions.count,
-                        compact: true
-                    )
-                )
-                .offset(y: -AgentInvocationPicker.preferredHeight(
-                    optionCount: filteredInvocationOptions.count,
-                    compact: true
-                ) - 7)
-                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
-            }
-        }
         .shadow(color: .black.opacity(0.12), radius: 12, y: 5)
-        .disabled(isDisabled)
-        .onHover(perform: onHover)
-        .onChange(of: text.isEmpty) { oldValue, newValue in
-            guard oldValue != newValue else { return }
-            onTextPresenceChanged(!newValue)
-        }
-        .onChange(of: text) { oldValue, newValue in
-            guard oldValue != newValue else { return }
-            invocationSelection = 0
-            invocationPickerSuppressed = false
-        }
-        .animation(DesignAnimation.spring, value: activeInvocationQuery)
-        .petInteractiveRegion()
     }
 
     private var activeInvocationQuery: AgentInvocationQuery? {
