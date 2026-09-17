@@ -18,6 +18,8 @@ struct DialogChatView: View {
     @State private var inputEditorHeight: CGFloat = DialogTextEditor.minimumHeight
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isFileDropTargeted = false
+    @State private var invocationSelection = 0
+    @State private var invocationPickerSuppressed = false
     @AppStorage(AgentWorkspaceSettings.showCloudTransferNoticeKey) private var showCloudTransferNotice = false
     @AppStorage(AgentWorkspaceSettings.showDirectoryAccessStatusKey) private var showDirectoryAccessStatus = false
 
@@ -43,14 +45,21 @@ struct DialogChatView: View {
         }
         .onAppear {
             viewModel.refreshCacheStatus()
+            viewModel.refreshInvocationOptions()
             isInputFocused = true
         }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
             viewModel.refreshCacheStatus()
+            viewModel.refreshInvocationOptions()
         }
         .onChange(of: viewModel.selectedConversationID) { _, _ in
             inputEditorHeight = DialogTextEditor.minimumHeight
             isInputFocused = true
+        }
+        .onChange(of: viewModel.inputText) { oldValue, newValue in
+            guard oldValue != newValue else { return }
+            invocationSelection = 0
+            invocationPickerSuppressed = false
         }
         .sheet(isPresented: $viewModel.showToolConfirmation) {
             DialogToolConfirmationSheet(
@@ -278,6 +287,11 @@ struct DialogChatView: View {
                         height: $inputEditorHeight,
                         isFocused: $isInputFocused,
                         isEditable: true,
+                        isInvocationPickerVisible: !filteredInvocationOptions.isEmpty
+                            && activeInvocationQuery != nil,
+                        onMoveInvocationSelection: moveInvocationSelection,
+                        onAcceptInvocation: acceptSelectedInvocation,
+                        onDismissInvocationPicker: { invocationPickerSuppressed = true },
                         onSubmit: viewModel.sendCurrentInput
                     )
                     .frame(height: inputEditorHeight)
@@ -324,6 +338,30 @@ struct DialogChatView: View {
                 )
         }
         .frame(maxWidth: 760)
+        .overlay(alignment: .topLeading) {
+            if let query = activeInvocationQuery {
+                AgentInvocationPicker(
+                    kind: query.kind,
+                    options: filteredInvocationOptions,
+                    selectedIndex: $invocationSelection,
+                    compact: false,
+                    onSelect: selectInvocation
+                )
+                .frame(
+                    height: AgentInvocationPicker.preferredHeight(
+                        optionCount: filteredInvocationOptions.count
+                    )
+                )
+                .offset(y: -AgentInvocationPicker.preferredHeight(
+                    optionCount: filteredInvocationOptions.count
+                ) - 8)
+                .transition(
+                    reduceMotion
+                        ? .opacity
+                        : .opacity.combined(with: .scale(scale: 0.98, anchor: .bottom))
+                )
+            }
+        }
         .padding(.horizontal, 26)
         .padding(.top, 8)
         .padding(.bottom, 20)
@@ -344,6 +382,41 @@ struct DialogChatView: View {
             reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1),
             value: viewModel.queuedMessages.count
         )
+        .animation(
+            reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 1),
+            value: activeInvocationQuery
+        )
+        .zIndex(10)
+    }
+
+    private var activeInvocationQuery: AgentInvocationQuery? {
+        guard !invocationPickerSuppressed else { return nil }
+        return AgentInvocationParser.query(in: viewModel.inputText)
+    }
+
+    private var filteredInvocationOptions: [AgentInvocationOption] {
+        guard let query = activeInvocationQuery else { return [] }
+        return AgentInvocationParser.filteredOptions(
+            for: query,
+            in: viewModel.invocationOptions
+        )
+    }
+
+    private func moveInvocationSelection(_ delta: Int) {
+        let count = filteredInvocationOptions.count
+        guard count > 0 else { return }
+        invocationSelection = (invocationSelection + delta + count) % count
+    }
+
+    private func acceptSelectedInvocation() {
+        guard filteredInvocationOptions.indices.contains(invocationSelection) else { return }
+        selectInvocation(filteredInvocationOptions[invocationSelection])
+    }
+
+    private func selectInvocation(_ option: AgentInvocationOption) {
+        viewModel.applyInvocationOption(option)
+        invocationPickerSuppressed = false
+        isInputFocused = true
     }
 
     private var queuedMessagesView: some View {
@@ -805,6 +878,10 @@ private struct DialogTextEditor: NSViewRepresentable {
     @Binding var height: CGFloat
     @Binding var isFocused: Bool
     let isEditable: Bool
+    let isInvocationPickerVisible: Bool
+    let onMoveInvocationSelection: (Int) -> Void
+    let onAcceptInvocation: () -> Void
+    let onDismissInvocationPicker: () -> Void
     let onSubmit: () -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -904,9 +981,26 @@ private struct DialogTextEditor: NSViewRepresentable {
             _ textView: NSTextView,
             doCommandBy commandSelector: Selector
         ) -> Bool {
-            guard commandSelector == #selector(NSResponder.insertNewline(_:)) else {
-                return false
+            if parent.isInvocationPickerVisible {
+                switch commandSelector {
+                case #selector(NSResponder.moveUp(_:)):
+                    parent.onMoveInvocationSelection(-1)
+                    return true
+                case #selector(NSResponder.moveDown(_:)):
+                    parent.onMoveInvocationSelection(1)
+                    return true
+                case #selector(NSResponder.cancelOperation(_:)):
+                    parent.onDismissInvocationPicker()
+                    return true
+                case #selector(NSResponder.insertTab(_:)):
+                    parent.onAcceptInvocation()
+                    return true
+                default:
+                    break
+                }
             }
+
+            guard commandSelector == #selector(NSResponder.insertNewline(_:)) else { return false }
 
             if textView.hasMarkedText() {
                 return false
@@ -916,6 +1010,11 @@ private struct DialogTextEditor: NSViewRepresentable {
                 .intersection(.deviceIndependentFlagsMask) ?? []
             if modifiers.contains(.shift) {
                 return false
+            }
+
+            if parent.isInvocationPickerVisible {
+                parent.onAcceptInvocation()
+                return true
             }
 
             parent.onSubmit()

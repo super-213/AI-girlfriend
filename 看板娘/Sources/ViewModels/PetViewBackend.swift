@@ -44,6 +44,7 @@ final class PetViewBackend: ObservableObject {
     @Published private(set) var isCompactingContext = false
     @Published var showOutputBox = false
     @Published private(set) var pendingAttachments: [LocalFileAttachment] = []
+    @Published private(set) var invocationOptions: [AgentInvocationOption] = []
 
     let stateCoordinator: PetStateCoordinator
     let streamedResponseStore = PetStreamedResponseStore()
@@ -123,6 +124,7 @@ final class PetViewBackend: ObservableObject {
         self.stateCoordinator = stateCoordinator ?? PetStateCoordinator()
 
         currentCharacter = Self.initialCharacter()
+        invocationOptions = AgentInvocationCatalog.options()
         prefetchInteractionDurations()
         refreshConversationStyle()
         configureAgentRuntime()
@@ -167,6 +169,12 @@ final class PetViewBackend: ObservableObject {
             return
         }
 
+        refreshInvocationOptions()
+        let submission = AgentInvocationParser.submission(
+            from: trimmedInput,
+            options: invocationOptions
+        )
+
         noteUserActivity()
         let runID = UUID()
         activeRequestID = runID
@@ -177,13 +185,23 @@ final class PetViewBackend: ObservableObject {
         if !attachments.isEmpty {
             pendingAttachments.removeAll()
             let prompt = FileAttachmentPromptBuilder.prompt(
-                userInstruction: trimmedInput,
+                userInstruction: submission.instruction,
                 attachments: attachments
             )
             continueChatProcessing(
                 prompt,
                 runID: runID,
-                imagePaths: attachments.filter(\.isImage).map(\.path)
+                imagePaths: attachments.filter(\.isImage).map(\.path),
+                explicitInvocation: submission.invocation
+            )
+            return
+        }
+
+        if let invocation = submission.invocation {
+            continueChatProcessing(
+                submission.instruction,
+                runID: runID,
+                explicitInvocation: invocation
             )
             return
         }
@@ -252,6 +270,10 @@ final class PetViewBackend: ObservableObject {
 
     func clearAttachments() {
         pendingAttachments.removeAll()
+    }
+
+    func refreshInvocationOptions() {
+        invocationOptions = AgentInvocationCatalog.options()
     }
 
     func submitAutomation(_ automation: AutomationFlow) {
@@ -371,7 +393,12 @@ final class PetViewBackend: ObservableObject {
         showOutputBox = false
     }
 
-    private func continueChatProcessing(_ input: String, runID: UUID, imagePaths: [String] = []) {
+    private func continueChatProcessing(
+        _ input: String,
+        runID: UUID,
+        imagePaths: [String] = [],
+        explicitInvocation: AgentInvocation? = nil
+    ) {
         restorePetConversationForNextInput()
         activeRequestID = runID
         activeRequestKind = .conversation
@@ -379,7 +406,11 @@ final class PetViewBackend: ObservableObject {
         streamedResponse = ""
         hasReceivedStreamContent = false
         revealOutputBox(autoHideAfter: 30)
-        agentRuntime.send(input, imagePaths: imagePaths)
+        agentRuntime.send(
+            input,
+            imagePaths: imagePaths,
+            explicitInvocation: explicitInvocation
+        )
     }
 
     private func configureAgentRuntime() {

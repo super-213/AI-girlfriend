@@ -380,6 +380,7 @@ enum AgentRuntimeError: LocalizedError {
     case invalidToolArguments(String)
     case iterationLimit
     case toolUnavailable(String)
+    case skillUnavailable(String)
 
     var errorDescription: String? {
         switch self {
@@ -391,6 +392,8 @@ enum AgentRuntimeError: LocalizedError {
             return "Agent 已达到最大工具调用轮数"
         case .toolUnavailable(let name):
             return "模型请求了未注册的工具：\(name)"
+        case .skillUnavailable(let name):
+            return "未找到已启用且有效的技能：\(name)"
         }
     }
 }

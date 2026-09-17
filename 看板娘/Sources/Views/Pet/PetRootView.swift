@@ -183,6 +183,7 @@ struct PetRootView: View {
                             isFocused: $isInputFocused,
                             placeholder: inputPlaceholder,
                             isDisabled: coordinator.snapshot.activityState == .waitingForConfirmation,
+                            invocationOptions: petViewBackend.invocationOptions,
                             onHover: { isHoveringInput = $0 },
                             onTextPresenceChanged: { hasInputText = $0 },
                             onSubmit: submitInput,
@@ -253,6 +254,7 @@ struct PetRootView: View {
             PetWindowController.shared.setInteractionLocked(false)
         }
         .onChange(of: isInputFocused) { _, focused in
+            if focused { petViewBackend.refreshInvocationOptions() }
             synchronizeWindowForListeningChange(focused: focused)
             petViewBackend.handleInputFocusChanged(focused)
         }

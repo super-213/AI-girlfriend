@@ -10,6 +10,7 @@ struct AgentFoundationTests {
         var responses: [AgentModelResponse] = []
         private(set) var requests: [[AgentMessage]] = []
         private(set) var requestPurposes: [AgentRequestPurpose] = []
+        private(set) var requestedToolNames: [[String]] = []
 
         func sendAgentStreamRequest(
             messages: [AgentMessage],
@@ -21,6 +22,7 @@ struct AgentFoundationTests {
         ) {
             requests.append(messages)
             requestPurposes.append(purpose)
+            requestedToolNames.append(tools.map(\.name))
             let response = responses.removeFirst()
             if !response.content.isEmpty { onReceive(response.content) }
             onComplete(response)
@@ -137,6 +139,92 @@ struct AgentFoundationTests {
         #expect(names.contains("run_command"))
         #expect(names.contains("switch_pet_character"))
         #expect(names.contains("run_automation"))
+    }
+
+    @Test
+    func invocationParserRecognizesAndRemovesOnlyValidLeadingTokens() {
+        let options = [
+            AgentInvocationOption(kind: .tool, name: "read_file", description: "读取文件"),
+            AgentInvocationOption(kind: .skill, name: "weather", description: "查询天气")
+        ]
+
+        #expect(AgentInvocationParser.query(in: "/re") == AgentInvocationQuery(kind: .tool, term: "re"))
+        #expect(AgentInvocationParser.query(in: "$we") == AgentInvocationQuery(kind: .skill, term: "we"))
+        #expect(AgentInvocationParser.query(in: "/read_file 任务") == nil)
+
+        let tool = AgentInvocationParser.submission(
+            from: "/read_file 读取桌面的说明.txt",
+            options: options
+        )
+        #expect(tool.visibleText == "/read_file 读取桌面的说明.txt")
+        #expect(tool.instruction == "读取桌面的说明.txt")
+        #expect(tool.invocation == AgentInvocation(kind: .tool, name: "read_file"))
+
+        let skill = AgentInvocationParser.submission(from: "$WEATHER 上海", options: options)
+        #expect(skill.instruction == "上海")
+        #expect(skill.invocation == AgentInvocation(kind: .skill, name: "weather"))
+
+        let unknown = AgentInvocationParser.submission(from: "/unknown 保持原样", options: options)
+        #expect(unknown.instruction == "/unknown 保持原样")
+        #expect(unknown.invocation == nil)
+    }
+
+    @Test @MainActor
+    func explicitToolKeepsTheFullCatalogAndAddsVisibleAgentContext() {
+        let client = FakeModelClient()
+        client.responses = [
+            AgentModelResponse(
+                content: "",
+                toolCalls: [AgentToolCall(id: "forced-echo", name: "echo", arguments: #"{"value":"ok"}"#)]
+            ),
+            AgentModelResponse(content: "完成", toolCalls: [])
+        ]
+        let registry = AgentToolRegistry()
+        registry.register(EchoTool())
+        registry.register(TestReadSkillTool())
+        let runtime = AgentRuntime(
+            apiManager: client,
+            registry: registry,
+            systemPromptProvider: { "system" }
+        )
+
+        runtime.send(
+            "执行回显",
+            explicitInvocation: AgentInvocation(kind: .tool, name: "echo")
+        )
+
+        #expect(Set(client.requestedToolNames[0]) == ["echo", "read_skill"])
+        #expect(Set(client.requestedToolNames[1]) == ["echo", "read_skill"])
+        #expect(client.requests.first?.last?.content?.contains("explicit-tool-context") == true)
+        #expect(client.requests.first?.last?.content?.contains("name=\"echo\"") == true)
+        #expect(client.requests.first?.last?.content?.contains("不要因此排除其他工具") == true)
+    }
+
+    @Test @MainActor
+    func explicitlyMentionedSkillIsLoadedBeforeTheFirstModelRequest() {
+        let client = FakeModelClient()
+        client.responses = [AgentModelResponse(content: "上海天气结果", toolCalls: [])]
+        let registry = AgentToolRegistry()
+        registry.register(TestReadSkillTool())
+        registry.register(EchoTool())
+        let runtime = AgentRuntime(
+            apiManager: client,
+            registry: registry,
+            enabledSkillNameResolver: { $0.caseInsensitiveCompare("weather") == .orderedSame ? "weather" : nil },
+            systemPromptProvider: { "system" }
+        )
+
+        runtime.send(
+            "上海天气",
+            explicitInvocation: AgentInvocation(kind: .skill, name: "weather")
+        )
+
+        #expect(client.requests.count == 1)
+        #expect(Set(client.requestedToolNames[0]) == ["echo", "read_skill"])
+        #expect(client.requests[0][2].toolCalls?.first?.name == "read_skill")
+        #expect(client.requests[0][3].name == "read_skill")
+        #expect(client.requests[0][3].content?.contains("skill:weather") == true)
+        #expect(runtime.messages.last?.content == "上海天气结果")
     }
 
     @Test @MainActor

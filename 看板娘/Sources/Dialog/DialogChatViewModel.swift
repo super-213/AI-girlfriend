@@ -50,11 +50,21 @@ struct DialogMessage: Identifiable, Equatable, Codable {
 struct QueuedDialogMessage: Identifiable, Equatable {
     let id: UUID
     let content: String
+    let instruction: String
+    let invocation: AgentInvocation?
     let attachments: [LocalFileAttachment]
 
-    init(id: UUID = UUID(), content: String, attachments: [LocalFileAttachment] = []) {
+    init(
+        id: UUID = UUID(),
+        content: String,
+        instruction: String? = nil,
+        invocation: AgentInvocation? = nil,
+        attachments: [LocalFileAttachment] = []
+    ) {
         self.id = id
         self.content = content
+        self.instruction = instruction ?? content
+        self.invocation = invocation
         self.attachments = attachments
     }
 }
@@ -119,6 +129,7 @@ final class DialogChatViewModel: ObservableObject {
     @Published var isExecutingTool: Bool = false
     @Published private(set) var isCompactingContext: Bool = false
     @Published private(set) var cacheStatus: DialogCacheStatus
+    @Published private(set) var invocationOptions: [AgentInvocationOption]
 
     private static let conversationsStorageKey = "dialog.conversations.v1"
     private static let selectedConversationStorageKey = "dialog.selectedConversation.v1"
@@ -163,6 +174,7 @@ final class DialogChatViewModel: ObservableObject {
         selectedConversationID = initialSelection
         messages = initialConversation.messages
         cacheStatus = DialogCacheStatus.load(from: defaults)
+        invocationOptions = AgentInvocationCatalog.options(defaults: defaults)
 
         configureAgentRuntime()
         self.agentRuntime.restoreConversation(initialConversation.agentHistory)
@@ -175,16 +187,30 @@ final class DialogChatViewModel: ObservableObject {
     func send(_ rawText: String) {
         let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !pendingAttachments.isEmpty else { return }
+        let submission = AgentInvocationParser.submission(
+            from: trimmed,
+            options: invocationOptions
+        )
 
         inputText = ""
         let attachments = pendingAttachments
         pendingAttachments = []
         if isBusy {
-            queuedMessages.append(QueuedDialogMessage(content: trimmed, attachments: attachments))
+            queuedMessages.append(QueuedDialogMessage(
+                content: submission.visibleText,
+                instruction: submission.instruction,
+                invocation: submission.invocation,
+                attachments: attachments
+            ))
             return
         }
 
-        sendImmediately(trimmed, attachments: attachments)
+        sendImmediately(
+            submission.visibleText,
+            instruction: submission.instruction,
+            invocation: submission.invocation,
+            attachments: attachments
+        )
     }
 
     func deleteQueuedMessage(_ messageID: UUID) {
@@ -206,12 +232,33 @@ final class DialogChatViewModel: ObservableObject {
         attachFiles(paths.map { URL(fileURLWithPath: $0) })
     }
 
-    private func sendImmediately(_ text: String, attachments: [LocalFileAttachment]) {
+    private func sendImmediately(
+        _ text: String,
+        instruction: String,
+        invocation: AgentInvocation?,
+        attachments: [LocalFileAttachment]
+    ) {
         let visibleText = text.isEmpty ? "请分析这些附件" : text
         messages.append(DialogMessage(role: .user, content: visibleText, attachments: attachments))
-        let prompt = FileAttachmentPromptBuilder.prompt(userInstruction: visibleText, attachments: attachments)
-        agentRuntime.send(prompt, imagePaths: attachments.filter(\.isImage).map(\.path))
+        let modelInstruction = instruction.isEmpty ? "请分析这些附件" : instruction
+        let prompt = FileAttachmentPromptBuilder.prompt(
+            userInstruction: modelInstruction,
+            attachments: attachments
+        )
+        agentRuntime.send(
+            prompt,
+            imagePaths: attachments.filter(\.isImage).map(\.path),
+            explicitInvocation: invocation
+        )
         synchronizeSelectedConversation(persist: true)
+    }
+
+    func refreshInvocationOptions() {
+        invocationOptions = AgentInvocationCatalog.options(defaults: defaults)
+    }
+
+    func applyInvocationOption(_ option: AgentInvocationOption) {
+        inputText = AgentInvocationParser.replacingQuery(in: inputText, with: option)
     }
 
     func startNewConversation() {
@@ -399,7 +446,12 @@ final class DialogChatViewModel: ObservableObject {
     private func sendNextQueuedMessageIfPossible() {
         guard !isBusy, !queuedMessages.isEmpty else { return }
         let next = queuedMessages.removeFirst()
-        sendImmediately(next.content, attachments: next.attachments)
+        sendImmediately(
+            next.content,
+            instruction: next.instruction,
+            invocation: next.invocation,
+            attachments: next.attachments
+        )
     }
 
     private func appendAssistantStatus(_ status: String) {

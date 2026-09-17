@@ -10,17 +10,35 @@ struct PetInputView: View {
     var isFocused: FocusState<Bool>.Binding
     let placeholder: String
     let isDisabled: Bool
+    let invocationOptions: [AgentInvocationOption]
     let onHover: (Bool) -> Void
     let onTextPresenceChanged: (Bool) -> Void
     let onSubmit: (String) -> Void
     let onCancel: () -> Void
+
+    @State private var invocationSelection = 0
+    @State private var invocationPickerSuppressed = false
 
     var body: some View {
         HStack(spacing: 9) {
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
                 .focused(isFocused)
-                .onSubmit(submit)
+                .onSubmit(handleSubmit)
+                .onMoveCommand { direction in
+                    switch direction {
+                    case .up: moveInvocationSelection(-1)
+                    case .down: moveInvocationSelection(1)
+                    default: break
+                    }
+                }
+                .onExitCommand {
+                    if activeInvocationQuery != nil {
+                        invocationPickerSuppressed = true
+                    } else {
+                        cancel()
+                    }
+                }
             if !text.isEmpty {
                 Button(action: submit) {
                     Image(systemName: "arrow.up.circle.fill")
@@ -47,6 +65,28 @@ struct PetInputView: View {
         )
         .background(.regularMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(.white.opacity(0.28), lineWidth: 0.8))
+        .overlay(alignment: .topLeading) {
+            if let query = activeInvocationQuery {
+                AgentInvocationPicker(
+                    kind: query.kind,
+                    options: filteredInvocationOptions,
+                    selectedIndex: $invocationSelection,
+                    compact: true,
+                    onSelect: selectInvocation
+                )
+                .frame(
+                    height: AgentInvocationPicker.preferredHeight(
+                        optionCount: filteredInvocationOptions.count,
+                        compact: true
+                    )
+                )
+                .offset(y: -AgentInvocationPicker.preferredHeight(
+                    optionCount: filteredInvocationOptions.count,
+                    compact: true
+                ) - 7)
+                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
+            }
+        }
         .shadow(color: .black.opacity(0.12), radius: 12, y: 5)
         .disabled(isDisabled)
         .onHover(perform: onHover)
@@ -54,7 +94,43 @@ struct PetInputView: View {
             guard oldValue != newValue else { return }
             onTextPresenceChanged(!newValue)
         }
+        .onChange(of: text) { oldValue, newValue in
+            guard oldValue != newValue else { return }
+            invocationSelection = 0
+            invocationPickerSuppressed = false
+        }
+        .animation(DesignAnimation.spring, value: activeInvocationQuery)
         .petInteractiveRegion()
+    }
+
+    private var activeInvocationQuery: AgentInvocationQuery? {
+        guard !invocationPickerSuppressed else { return nil }
+        return AgentInvocationParser.query(in: text)
+    }
+
+    private var filteredInvocationOptions: [AgentInvocationOption] {
+        guard let query = activeInvocationQuery else { return [] }
+        return AgentInvocationParser.filteredOptions(for: query, in: invocationOptions)
+    }
+
+    private func moveInvocationSelection(_ delta: Int) {
+        let count = filteredInvocationOptions.count
+        guard count > 0 else { return }
+        invocationSelection = (invocationSelection + delta + count) % count
+    }
+
+    private func handleSubmit() {
+        if filteredInvocationOptions.indices.contains(invocationSelection) {
+            selectInvocation(filteredInvocationOptions[invocationSelection])
+        } else {
+            submit()
+        }
+    }
+
+    private func selectInvocation(_ option: AgentInvocationOption) {
+        text = AgentInvocationParser.replacingQuery(in: text, with: option)
+        invocationPickerSuppressed = false
+        isFocused.wrappedValue = true
     }
 
     private func submit() {

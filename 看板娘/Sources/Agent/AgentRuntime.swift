@@ -76,7 +76,11 @@ final class AgentRuntime {
         self.systemPromptProvider = systemPromptProvider
     }
 
-    func send(_ rawText: String, imagePaths: [String] = []) {
+    func send(
+        _ rawText: String,
+        imagePaths: [String] = [],
+        explicitInvocation: AgentInvocation? = nil
+    ) {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         guard !isRunning else {
@@ -87,10 +91,27 @@ final class AgentRuntime {
         if messages.isEmpty {
             messages.append(.system(makeSystemPrompt()))
         }
-        messages.append(.user(text, imagePaths: imagePaths))
+        let modelText: String
+        if let explicitInvocation, explicitInvocation.kind == .tool {
+            modelText = """
+            \(text)
+
+            <explicit-tool-context name="\(explicitInvocation.name)">
+            用户通过输入框将此工具显式附加到本轮上下文。请将它视为与当前任务可能相关的工具，但不要因此排除其他工具，也不要在不需要时强行调用它。根据任务实际需要选择一个或多个可用工具。
+            </explicit-tool-context>
+            """
+        } else {
+            modelText = text
+        }
+        messages.append(.user(modelText, imagePaths: imagePaths))
         iterationCount = 0
         isRunning = true
-        requestModel()
+
+        if let explicitInvocation, explicitInvocation.kind == .skill {
+            loadExplicitSkill(named: explicitInvocation.name)
+        } else {
+            requestModel()
+        }
     }
 
     func startNewConversation() {
@@ -191,6 +212,27 @@ final class AgentRuntime {
                 self.finishWithError(error)
             }
         )
+    }
+
+    private func loadExplicitSkill(named requestedName: String) {
+        guard let canonicalName = enabledSkillNameResolver(requestedName),
+              let tool = registry.tool(named: "read_skill"),
+              let argumentsData = try? JSONSerialization.data(
+                withJSONObject: ["name": canonicalName],
+                options: [.sortedKeys]
+              ),
+              let arguments = String(data: argumentsData, encoding: .utf8) else {
+            finishWithError(AgentRuntimeError.skillUnavailable(requestedName))
+            return
+        }
+
+        let call = AgentToolCall(
+            id: "forced-skill-\(UUID().uuidString)",
+            name: "read_skill",
+            arguments: arguments
+        )
+        messages.append(.assistant(content: nil, toolCalls: [call]))
+        execute(call, with: tool, arguments: ["name": canonicalName])
     }
 
     private func handle(_ response: AgentModelResponse) {
