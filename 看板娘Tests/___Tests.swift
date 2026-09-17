@@ -8,9 +8,19 @@ struct AgentFoundationTests {
     @MainActor
     private final class FakeModelClient: AgentModelClient {
         var responses: [AgentModelResponse] = []
+        var contextWindowTokenCount: Int?
+        var contextWindowConfigurationIdentifier = "fake-model"
         private(set) var requests: [[AgentMessage]] = []
         private(set) var requestPurposes: [AgentRequestPurpose] = []
         private(set) var requestedToolNames: [[String]] = []
+        private(set) var contextWindowLookupCount = 0
+
+        func resolveContextWindowTokenCount(
+            completion: @escaping @MainActor @Sendable (Int?) -> Void
+        ) {
+            contextWindowLookupCount += 1
+            completion(contextWindowTokenCount)
+        }
 
         func sendAgentStreamRequest(
             messages: [AgentMessage],
@@ -765,6 +775,88 @@ struct AgentFoundationTests {
         #expect(client.requests[2].last == .user("第二个问题"))
         #expect(client.requests[2].contains(where: { $0.content?.contains("第一个问题") == true }) == false)
         #expect(runtime.messages.last?.content == "新回复")
+    }
+
+    @Test @MainActor
+    func runtimeUsesEightyFivePercentOfResolvedContextWindowAsTrigger() {
+        let client = FakeModelClient()
+        client.contextWindowTokenCount = 1_000_000
+        client.responses = [
+            AgentModelResponse(content: String(repeating: "旧回复", count: 160), toolCalls: []),
+            AgentModelResponse(content: "新回复", toolCalls: [])
+        ]
+        let runtime = AgentRuntime(
+            apiManager: client,
+            registry: AgentToolRegistry(),
+            contextCompactionPolicy: AgentContextCompactionPolicy(
+                triggerTokenCount: 120,
+                targetTokenCount: 80,
+                summaryTokenReserve: 20,
+                maximumToolResultCharacters: 200,
+                maximumSummaryInputCharacters: 4_000
+            ),
+            systemPromptProvider: { "system" }
+        )
+
+        runtime.send("第一个问题")
+        runtime.send("第二个问题")
+
+        #expect(client.contextWindowLookupCount == 1)
+        #expect(client.requestPurposes == [.conversation, .conversation])
+        #expect(client.requests[1].contains(where: { $0.contextKind == .compactionSummary }) == false)
+    }
+
+    @Test
+    func contextCompactionPolicyFallsBackOrAdaptsToResolvedWindow() {
+        let fallback = AgentContextCompactionPolicy.standard
+
+        #expect(fallback.adaptingTrigger(to: nil).triggerTokenCount == 24_000)
+        #expect(fallback.adaptingTrigger(to: 1_000_000).triggerTokenCount == 850_000)
+    }
+
+    @Test
+    func qwenModelMetadataURLIsDerivedFromWorkspaceChatEndpoint() throws {
+        let url = try #require(APIManager.qwenModelCatalogURL(
+            chatCompletionsURL: "https://llm-example.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions",
+            model: "qwen3.8-27b"
+        ))
+        let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+
+        #expect(components.path == "/api/v1/models")
+        #expect(query["model"] == "qwen3.8-27b")
+        #expect(query["page_no"] == "1")
+        #expect(query["page_size"] == "20")
+    }
+
+    @Test
+    func qwenContextWindowIsParsedOnlyForTheRequestedModel() {
+        let response = Data(#"""
+        {
+          "output": {
+            "models": [
+              {
+                "model": "qwen3.8-27b",
+                "model_info": {
+                  "context_window": 1000000,
+                  "max_input_tokens": 991808
+                }
+              }
+            ]
+          }
+        }
+        """#.utf8)
+
+        #expect(APIManager.qwenContextWindowTokenCount(
+            responseData: response,
+            model: "qwen3.8-27b"
+        ) == 1_000_000)
+        #expect(APIManager.qwenContextWindowTokenCount(
+            responseData: response,
+            model: "another-model"
+        ) == nil)
     }
 
     @Test

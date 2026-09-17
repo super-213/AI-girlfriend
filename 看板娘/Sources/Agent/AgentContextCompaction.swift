@@ -8,6 +8,8 @@
 import Foundation
 
 struct AgentContextCompactionPolicy: Equatable {
+    static let dynamicTriggerRatio = 0.85
+
     /// Compact before a conservative 32K-class context becomes crowded.
     var triggerTokenCount: Int = 24_000
     /// Leave enough room for tool work and the model's next response.
@@ -17,6 +19,16 @@ struct AgentContextCompactionPolicy: Equatable {
     var maximumSummaryInputCharacters: Int = 20_000
 
     static let standard = AgentContextCompactionPolicy()
+
+    func adaptingTrigger(to contextWindowTokenCount: Int?) -> AgentContextCompactionPolicy {
+        guard let contextWindowTokenCount, contextWindowTokenCount > 0 else { return self }
+        var adapted = self
+        adapted.triggerTokenCount = max(
+            Int(Double(contextWindowTokenCount) * Self.dynamicTriggerRatio),
+            1
+        )
+        return adapted
+    }
 }
 
 struct AgentContextMeasurement: Equatable {

@@ -9,6 +9,10 @@ import Foundation
 
 @MainActor
 protocol AgentModelClient: AnyObject {
+    var contextWindowConfigurationIdentifier: String { get }
+    func resolveContextWindowTokenCount(
+        completion: @escaping @MainActor @Sendable (Int?) -> Void
+    )
     func sendAgentStreamRequest(
         messages: [AgentMessage],
         tools: [AgentToolDefinition],
@@ -18,6 +22,16 @@ protocol AgentModelClient: AnyObject {
         onError: @escaping @MainActor @Sendable (Error) -> Void
     )
     func cancelStreamRequest()
+}
+
+extension AgentModelClient {
+    var contextWindowConfigurationIdentifier: String { "context-window-unavailable" }
+
+    func resolveContextWindowTokenCount(
+        completion: @escaping @MainActor @Sendable (Int?) -> Void
+    ) {
+        completion(nil)
+    }
 }
 
 extension APIManager: AgentModelClient {}
@@ -46,7 +60,7 @@ final class AgentRuntime {
     private let registry: AgentToolRegistry
     private let systemPromptProvider: () -> String
     private let enabledSkillNameResolver: (String) -> String?
-    private let contextManager: AgentContextManager
+    private let fallbackContextCompactionPolicy: AgentContextCompactionPolicy
     private let maxIterations: Int
     private var iterationCount = 0
     private var pendingCalls: [AgentToolCall] = []
@@ -56,7 +70,19 @@ final class AgentRuntime {
     private var inFlightEstimatedTokens: Int?
     private var lastCompactionAttemptMessageCount: Int?
     private var isCompacting = false
+    private var contextWindowLookupIdentifier: String?
+    private var didResolveContextWindow = false
+    private var isResolvingContextWindow = false
+    private var resolvedContextWindowTokenCount: Int?
     private var runToken = UUID()
+
+    private var contextManager: AgentContextManager {
+        AgentContextManager(
+            policy: fallbackContextCompactionPolicy.adaptingTrigger(
+                to: resolvedContextWindowTokenCount
+            )
+        )
+    }
 
     init(
         apiManager: any AgentModelClient = APIManager(),
@@ -78,7 +104,7 @@ final class AgentRuntime {
         self.apiManager = apiManager
         self.registry = registry
         self.maxIterations = maxIterations
-        contextManager = AgentContextManager(policy: contextCompactionPolicy)
+        fallbackContextCompactionPolicy = contextCompactionPolicy
         self.enabledSkillNameResolver = enabledSkillNameResolver
         self.systemPromptProvider = systemPromptProvider
     }
@@ -143,6 +169,7 @@ final class AgentRuntime {
         inFlightEstimatedTokens = nil
         lastCompactionAttemptMessageCount = nil
         isCompacting = false
+        isResolvingContextWindow = false
         isRunning = false
     }
 
@@ -182,6 +209,9 @@ final class AgentRuntime {
         }
         refreshSystemPrompt()
 
+        if resolveContextWindowIfNeeded() {
+            return
+        }
         if startContextCompactionIfNeeded() {
             return
         }
@@ -441,6 +471,38 @@ final class AgentRuntime {
                 self.performModelRequest()
             }
         )
+        return true
+    }
+
+    private func resolveContextWindowIfNeeded() -> Bool {
+        let identifier = apiManager.contextWindowConfigurationIdentifier
+        if contextWindowLookupIdentifier != identifier {
+            contextWindowLookupIdentifier = identifier
+            didResolveContextWindow = false
+            isResolvingContextWindow = false
+            resolvedContextWindowTokenCount = nil
+            previousContextMeasurement = nil
+            lastCompactionAttemptMessageCount = nil
+        }
+
+        guard !didResolveContextWindow else { return false }
+        guard !isResolvingContextWindow else { return true }
+
+        isResolvingContextWindow = true
+        let token = runToken
+        apiManager.resolveContextWindowTokenCount { [weak self] tokenCount in
+            guard let self, self.runToken == token, self.isRunning else { return }
+            self.isResolvingContextWindow = false
+
+            guard self.apiManager.contextWindowConfigurationIdentifier == identifier else {
+                self.requestModel()
+                return
+            }
+
+            self.didResolveContextWindow = true
+            self.resolvedContextWindowTokenCount = tokenCount
+            self.requestModel()
+        }
         return true
     }
 

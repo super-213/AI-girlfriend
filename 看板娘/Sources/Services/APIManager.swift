@@ -83,8 +83,102 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     private var agentUsage: AgentTokenUsage?
     private var agentRequestPurpose: AgentRequestPurpose = .conversation
     private(set) var latestAgentTokenUsage: AgentTokenUsage?
+    private static var contextWindowTokenCache: [String: Int] = [:]
 
     // MARK: - 外部接口
+
+    var contextWindowConfigurationIdentifier: String {
+        [provider, aiModel, apiUrl]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .joined(separator: "|")
+    }
+
+    func resolveContextWindowTokenCount(
+        completion: @escaping @MainActor @Sendable (Int?) -> Void
+    ) {
+        let cacheKey = contextWindowConfigurationIdentifier
+        if let cached = Self.contextWindowTokenCache[cacheKey] {
+            completion(cached)
+            return
+        }
+
+        let model = aiModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard provider.caseInsensitiveCompare(ModelProvider.openAICompatible.rawValue) == .orderedSame,
+              let url = Self.qwenModelCatalogURL(chatCompletionsURL: apiUrl, model: model),
+              let apiKey = currentAPIKey() else {
+            completion(nil)
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 5
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        URLSession.shared.dataTask(with: request) { data, response, _ in
+            let statusCode = (response as? HTTPURLResponse)?.statusCode
+            let tokenCount = data.flatMap {
+                Self.qwenContextWindowTokenCount(responseData: $0, model: model)
+            }
+            Task { @MainActor in
+                let resolved = statusCode.map({ 200..<300 ~= $0 }) == true ? tokenCount : nil
+                if let resolved {
+                    Self.contextWindowTokenCache[cacheKey] = resolved
+                }
+                completion(resolved)
+            }
+        }.resume()
+    }
+
+    nonisolated static func qwenModelCatalogURL(
+        chatCompletionsURL: String,
+        model: String
+    ) -> URL? {
+        guard !model.isEmpty,
+              var components = URLComponents(string: chatCompletionsURL),
+              components.scheme?.lowercased() == "https",
+              components.host != nil,
+              components.path.lowercased().hasSuffix("/compatible-mode/v1/chat/completions") else {
+            return nil
+        }
+
+        components.path = "/api/v1/models"
+        components.queryItems = [
+            URLQueryItem(name: "model", value: model),
+            URLQueryItem(name: "page_no", value: "1"),
+            URLQueryItem(name: "page_size", value: "20")
+        ]
+        return components.url
+    }
+
+    nonisolated static func qwenContextWindowTokenCount(
+        responseData: Data,
+        model: String
+    ) -> Int? {
+        guard let json = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any],
+              let output = json["output"] as? [String: Any],
+              let models = output["models"] as? [[String: Any]],
+              let matched = models.first(where: {
+                  ($0["model"] as? String)?.caseInsensitiveCompare(model) == .orderedSame
+              }),
+              let modelInfo = matched["model_info"] as? [String: Any] else {
+            return nil
+        }
+
+        let value = modelInfo["context_window"]
+        let tokenCount: Int?
+        switch value {
+        case let number as NSNumber:
+            tokenCount = number.intValue
+        case let string as String:
+            tokenCount = Int(string)
+        default:
+            tokenCount = nil
+        }
+        guard let tokenCount, tokenCount > 0 else { return nil }
+        return tokenCount
+    }
     
     /// 发送流式请求到AI API
     /// - Parameters:
