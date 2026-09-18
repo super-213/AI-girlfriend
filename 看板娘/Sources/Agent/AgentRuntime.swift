@@ -96,6 +96,7 @@ final class AgentRuntime {
         contextCompactionPolicy: AgentContextCompactionPolicy = .standard,
         runConfiguration: RunConfiguration = RunConfiguration(),
         modelProvider: (any AgentModelProvider)? = nil,
+        tracer: any AgentTracer = AppAgentTracer.shared,
         enabledSkillNameResolver: @escaping @MainActor @Sendable (String) -> String? = {
             if let skill = SkillLibrary.enabledSkill(named: $0) {
                 return skill.name
@@ -141,7 +142,7 @@ final class AgentRuntime {
             }
             return ToolCallItem(id: call.id, name: "read_skill", arguments: arguments)
         }
-        runner = AgentRunner(provider: provider)
+        runner = AgentRunner(provider: provider, tracer: tracer)
     }
 
     func send(
@@ -207,8 +208,7 @@ final class AgentRuntime {
         guard let state = snapshot.pendingRunState else { return }
         guard snapshot.schemaVersion == AgentSessionSnapshot.currentSchemaVersion,
               state.schemaVersion == RunState.currentSchemaVersion,
-              state.sessionID == snapshot.sessionID,
-              state.currentAgentID == snapshot.agentID else {
+              state.sessionID == snapshot.sessionID else {
             onError?(AgentError.approvalStateInvalid)
             return
         }
@@ -363,28 +363,13 @@ final class AgentRuntime {
         case .textDelta(let text):
             onAssistantText?(text)
         case .toolCallStarted(let call):
-            AgentToolAuditStore.shared.record(
-                toolName: call.name,
-                summary: "执行工具 \(call.name)",
-                status: .running
-            )
             onToolStarted?(call.name)
         case .toolCallCompleted(let item):
             let result = legacyResult(from: item)
-            AgentToolAuditStore.shared.record(
-                toolName: item.toolName,
-                summary: "执行工具 \(item.toolName)",
-                status: result.isError ? .failed : .succeeded,
-                detail: result.content
-            )
             onToolFinished?(item.toolName, result)
-        case .approvalRequired(let interruption):
-            AgentToolAuditStore.shared.record(
-                toolName: interruption.toolCall.name,
-                summary: interruption.summary,
-                status: .requested
-            )
+        case .approvalRequired:
             // UI delivery waits for `RunResult`, after the serializable state has been saved.
+            break
         case .contextCompactionStarted:
             onContextCompactionStarted?()
         case .contextCompacted(let event):
@@ -407,11 +392,6 @@ final class AgentRuntime {
 
         pendingRunState = nil
         pendingInterruption = nil
-        AgentToolAuditStore.shared.record(
-            toolName: interruption.toolCall.name,
-            summary: interruption.summary,
-            status: decision == .approved ? .approved : .declined
-        )
         let token = runToken
         bind(
             runner.resume(

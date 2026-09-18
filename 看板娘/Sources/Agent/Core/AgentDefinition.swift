@@ -78,6 +78,7 @@ struct AgentDefinition<Context: Sendable, Output: Sendable>: Sendable {
     let instructions: AgentInstructions<Context>
     let model: AgentModelConfiguration
     let tools: [AnyAgentTool<Context>]
+    let handoffs: [AgentHandoff<Context, Output>]
     let inputGuardrails: [AnyInputGuardrail<Context>]
     let outputGuardrails: [AnyOutputGuardrail<Context, Output>]
     let toolGuardrails: [AnyToolGuardrail<Context>]
@@ -90,6 +91,7 @@ struct AgentDefinition<Context: Sendable, Output: Sendable>: Sendable {
         instructions: AgentInstructions<Context>,
         model: AgentModelConfiguration = AgentModelConfiguration(),
         tools: [AnyAgentTool<Context>] = [],
+        handoffs: [AgentHandoff<Context, Output>] = [],
         inputGuardrails: [AnyInputGuardrail<Context>] = [],
         outputGuardrails: [AnyOutputGuardrail<Context, Output>] = [],
         toolGuardrails: [AnyToolGuardrail<Context>] = [],
@@ -101,6 +103,7 @@ struct AgentDefinition<Context: Sendable, Output: Sendable>: Sendable {
         self.instructions = instructions
         self.model = model
         self.tools = tools
+        self.handoffs = handoffs
         self.inputGuardrails = inputGuardrails
         self.outputGuardrails = outputGuardrails
         self.toolGuardrails = toolGuardrails
@@ -116,6 +119,7 @@ extension AgentDefinition where Output == String {
         instructions: AgentInstructions<Context>,
         model: AgentModelConfiguration = AgentModelConfiguration(),
         tools: [AnyAgentTool<Context>] = [],
+        handoffs: [AgentHandoff<Context, String>] = [],
         inputGuardrails: [AnyInputGuardrail<Context>] = [],
         outputGuardrails: [AnyOutputGuardrail<Context, String>] = [],
         toolGuardrails: [AnyToolGuardrail<Context>] = [],
@@ -127,6 +131,7 @@ extension AgentDefinition where Output == String {
             instructions: instructions,
             model: model,
             tools: tools,
+            handoffs: handoffs,
             inputGuardrails: inputGuardrails,
             outputGuardrails: outputGuardrails,
             toolGuardrails: toolGuardrails,

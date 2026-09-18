@@ -68,6 +68,19 @@ struct HandoffItem: Codable, Equatable, Sendable {
     let sourceAgentID: String
     let targetAgentID: String
     let reason: String
+    let metadata: JSONValue?
+
+    init(
+        sourceAgentID: String,
+        targetAgentID: String,
+        reason: String,
+        metadata: JSONValue? = nil
+    ) {
+        self.sourceAgentID = sourceAgentID
+        self.targetAgentID = targetAgentID
+        self.reason = reason
+        self.metadata = metadata
+    }
 }
 
 struct GuardrailItem: Codable, Equatable, Sendable {

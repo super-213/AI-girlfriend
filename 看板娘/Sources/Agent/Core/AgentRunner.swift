@@ -30,13 +30,16 @@ protocol AgentRunning: Sendable {
 final class AgentRunner: AgentRunning, Sendable {
     private let provider: any AgentModelProvider
     private let sessionCoordinator: AgentSessionRunCoordinator
+    private let tracer: any AgentTracer
 
     init(
         provider: any AgentModelProvider,
-        sessionCoordinator: AgentSessionRunCoordinator = .shared
+        sessionCoordinator: AgentSessionRunCoordinator = .shared,
+        tracer: any AgentTracer = LocalAgentTracer.shared
     ) {
         self.provider = provider
         self.sessionCoordinator = sessionCoordinator
+        self.tracer = tracer
     }
 
     func run<Context: Sendable, Output: Sendable>(
@@ -55,6 +58,30 @@ final class AgentRunner: AgentRunning, Sendable {
                 context: context,
                 session: session,
                 configuration: configuration,
+                parentTrace: nil,
+                events: events
+            )
+        }
+    }
+
+    func runNested<Context: Sendable, Output: Sendable>(
+        agent: AgentDefinition<Context, Output>,
+        input: AgentInput,
+        context: Context,
+        session: any AgentSession,
+        configuration: RunConfiguration = RunConfiguration(),
+        parentTrace: AgentTraceContext?
+    ) -> AgentRun<Output> {
+        let runID = UUID()
+        return makeRun(runID: runID, sessionID: session.id) { events in
+            try await self.executeNewRun(
+                runID: runID,
+                agent: agent,
+                input: input,
+                context: context,
+                session: session,
+                configuration: configuration,
+                parentTrace: parentTrace,
                 events: events
             )
         }
@@ -124,6 +151,7 @@ final class AgentRunner: AgentRunning, Sendable {
         context: Context,
         session: any AgentSession,
         configuration: RunConfiguration,
+        parentTrace: AgentTraceContext?,
         events: AsyncThrowingStream<AgentRunEvent, Error>.Continuation
     ) async throws -> RunResult<Output> {
         try validate(agent: agent, configuration: configuration)
@@ -136,62 +164,100 @@ final class AgentRunner: AgentRunning, Sendable {
             throw AgentError.approvalStateInvalid
         }
         var allItems = try await loadItems(from: session)
+        let startingAgent = lastResponsibleAgentID(in: allItems)
+            .flatMap { agent.resolvingAgent(id: $0) } ?? agent
+        try validate(agent: startingAgent, configuration: configuration)
         var newItems: [AgentItem] = []
         var guardrailResults: [GuardrailResult] = []
-        emitStart(runID: runID, sessionID: session.id, agent: agent, events: events)
+        let traceID = parentTrace?.traceID ?? UUID()
+        let trace = AgentRunTrace(
+            tracer: tracer,
+            enabled: configuration.tracingEnabled,
+            traceID: traceID,
+            runID: runID,
+            sessionID: session.id,
+            agentID: startingAgent.id
+        )
+        await trace.start(
+            agentID: startingAgent.id,
+            agentName: startingAgent.name,
+            parentSpanID: parentTrace?.parentSpanID
+        )
+        emitStart(runID: runID, sessionID: session.id, agent: startingAgent, events: events)
         let guardrailContext = AgentGuardrailContext(
             runID: runID,
             sessionID: session.id,
-            agentID: agent.id,
+            agentID: startingAgent.id,
             context: context
         )
-        for guardrail in agent.inputGuardrails {
-            let result = await evaluateInputGuardrail(
-                guardrail,
-                context: guardrailContext,
-                input: input
-            )
-            guardrailResults.append(result)
-            events.yield(.guardrailEvaluated(result))
-            guard result.action == .allow else {
-                throw AgentError.guardrailTriggered(result)
+        do {
+            for guardrail in startingAgent.inputGuardrails {
+                let result = await evaluateInputGuardrail(
+                    guardrail,
+                    context: guardrailContext,
+                    input: input,
+                    trace: trace
+                )
+                guardrailResults.append(result)
+                events.yield(.guardrailEvaluated(result))
+                guard result.action == .allow else {
+                    throw AgentError.guardrailTriggered(result)
+                }
             }
-        }
-        let instructions = try await agent.instructions.resolve(using: context)
-        if !allItems.contains(where: {
-            if case .message(let message) = $0 { return message.role == .system }
-            return false
-        }) {
-            newItems.append(.message(AgentMessageItem(role: .system, content: instructions)))
-        }
-        newItems.append(.message(AgentMessageItem(
-            role: .user,
-            content: trimmedInput,
-            imagePaths: input.imagePaths
-        )))
-        newItems.append(contentsOf: input.followingItems)
-        newItems.append(contentsOf: guardrailResults.map { .guardrail(GuardrailItem(result: $0)) })
-        allItems.append(contentsOf: newItems)
+            if let compaction = allItems.reversed().compactMap({ item -> CompactionItem? in
+                guard case .compaction(let value) = item else { return nil }
+                return value
+            }).first {
+                await traceCompaction(compaction, trace: trace)
+            }
+            let instructions = try await startingAgent.instructions.resolve(using: context)
+            if !allItems.contains(where: {
+                if case .message(let message) = $0 { return message.role == .system }
+                return false
+            }) {
+                newItems.append(.message(AgentMessageItem(role: .system, content: instructions)))
+            }
+            newItems.append(.message(AgentMessageItem(
+                role: .user,
+                content: trimmedInput,
+                imagePaths: input.imagePaths
+            )))
+            newItems.append(contentsOf: input.followingItems)
+            newItems.append(contentsOf: guardrailResults.map { .guardrail(GuardrailItem(result: $0)) })
+            allItems.append(contentsOf: newItems)
 
-        let traceID = UUID()
-        return try await continueExecution(
-            runID: runID,
-            traceID: traceID,
-            agent: agent,
-            context: context,
-            session: session,
-            configuration: configuration,
-            completedTurnCount: 0,
-            allItems: allItems,
-            newItems: newItems,
-            pendingCalls: [],
-            knownInterruptionsByToolCallID: [:],
-            approvalResolutionsByToolCallID: [:],
-            rawResponses: [],
-            usage: .zero,
-            guardrailResults: guardrailResults,
-            events: events
-        )
+            let result = try await continueExecution(
+                runID: runID,
+                traceID: traceID,
+                trace: trace,
+                agent: startingAgent,
+                context: context,
+                session: session,
+                configuration: configuration,
+                completedTurnCount: 0,
+                allItems: allItems,
+                newItems: newItems,
+                pendingCalls: [],
+                knownInterruptionsByToolCallID: [:],
+                approvalResolutionsByToolCallID: [:],
+                rawResponses: [],
+                usage: .zero,
+                guardrailResults: guardrailResults,
+                events: events
+            )
+            await trace.finish(
+                status: result.resumableState == nil ? .completed : .interrupted,
+                usage: result.usage
+            )
+            return result
+        } catch {
+            await trace.finish(
+                status: error is CancellationError || error as? AgentError == .cancelled
+                    ? .cancelled : .failed,
+                error: error
+            )
+            throw error
+        }
     }
 
     private func executeResumedRun<Context: Sendable, Output: Sendable>(
@@ -204,9 +270,12 @@ final class AgentRunner: AgentRunning, Sendable {
         events: AsyncThrowingStream<AgentRunEvent, Error>.Continuation
     ) async throws -> RunResult<Output> {
         try validate(agent: agent, configuration: configuration)
+        guard let activeAgent = agent.resolvingAgent(id: state.currentAgentID) else {
+            throw AgentError.approvalStateInvalid
+        }
+        try validate(agent: activeAgent, configuration: configuration)
         guard state.schemaVersion == RunState.currentSchemaVersion,
               state.sessionID == session.id,
-              state.currentAgentID == agent.id,
               !state.interruptions.isEmpty else {
             throw AgentError.approvalStateInvalid
         }
@@ -230,32 +299,61 @@ final class AgentRunner: AgentRunning, Sendable {
             )
         }
 
-        emitStart(runID: state.runID, sessionID: session.id, agent: agent, events: events)
-        return try await continueExecution(
-            runID: state.runID,
+        let trace = AgentRunTrace(
+            tracer: tracer,
+            enabled: configuration.tracingEnabled,
             traceID: state.traceID,
-            agent: agent,
-            context: context,
-            session: session,
-            configuration: configuration,
-            completedTurnCount: state.turn,
-            allItems: state.completedItems,
-            newItems: [],
-            pendingCalls: state.pendingToolCalls,
-            knownInterruptionsByToolCallID: Dictionary(
-                uniqueKeysWithValues: state.interruptions.map { ($0.toolCall.id, $0) }
-            ),
-            approvalResolutionsByToolCallID: resolutions,
-            rawResponses: state.rawResponses,
-            usage: state.usage,
-            guardrailResults: state.guardrailResults,
-            events: events
+            runID: state.runID,
+            sessionID: session.id,
+            agentID: activeAgent.id
         )
+        await trace.start(agentID: activeAgent.id, agentName: activeAgent.name)
+        for (interruptionID, decision) in decisions {
+            guard let interruption = interruptionsByID[interruptionID] else { continue }
+            await traceApprovalDecision(interruption, decision: decision, trace: trace)
+        }
+        emitStart(runID: state.runID, sessionID: session.id, agent: activeAgent, events: events)
+        do {
+            let result = try await continueExecution(
+                runID: state.runID,
+                traceID: state.traceID,
+                trace: trace,
+                agent: activeAgent,
+                context: context,
+                session: session,
+                configuration: configuration,
+                completedTurnCount: state.turn,
+                allItems: state.completedItems,
+                newItems: [],
+                pendingCalls: state.pendingToolCalls,
+                knownInterruptionsByToolCallID: Dictionary(
+                    uniqueKeysWithValues: state.interruptions.map { ($0.toolCall.id, $0) }
+                ),
+                approvalResolutionsByToolCallID: resolutions,
+                rawResponses: state.rawResponses,
+                usage: state.usage,
+                guardrailResults: state.guardrailResults,
+                events: events
+            )
+            await trace.finish(
+                status: result.resumableState == nil ? .completed : .interrupted,
+                usage: result.usage
+            )
+            return result
+        } catch {
+            await trace.finish(
+                status: error is CancellationError || error as? AgentError == .cancelled
+                    ? .cancelled : .failed,
+                error: error
+            )
+            throw error
+        }
     }
 
     private func continueExecution<Context: Sendable, Output: Sendable>(
         runID: UUID,
         traceID: UUID,
+        trace: AgentRunTrace,
         agent: AgentDefinition<Context, Output>,
         context: Context,
         session: any AgentSession,
@@ -271,6 +369,7 @@ final class AgentRunner: AgentRunning, Sendable {
         guardrailResults initialGuardrailResults: [GuardrailResult],
         events: AsyncThrowingStream<AgentRunEvent, Error>.Continuation
     ) async throws -> RunResult<Output> {
+        var currentAgent = agent
         var allItems = initialItems
         var newItems = initialNewItems
         var rawResponses = initialResponses
@@ -283,7 +382,8 @@ final class AgentRunner: AgentRunning, Sendable {
                pendingCalls,
                runID: runID,
                traceID: traceID,
-               agent: agent,
+               trace: trace,
+               agent: currentAgent,
                context: context,
                session: session,
                configuration: configuration,
@@ -300,7 +400,7 @@ final class AgentRunner: AgentRunning, Sendable {
            ) {
             return interruptedResult(
                 runID: runID,
-                agentID: agent.id,
+                agentID: currentAgent.id,
                 allItems: allItems,
                 newItems: newItems,
                 usage: usage,
@@ -316,21 +416,43 @@ final class AgentRunner: AgentRunning, Sendable {
             turnCount += 1
             events.yield(.modelStarted(ModelRequestSnapshot(
                 turn: turnCount,
-                providerID: agent.model.providerID,
-                modelID: agent.model.modelID
+                providerID: currentAgent.model.providerID,
+                modelID: currentAgent.model.modelID
             )))
-            let response = try await requestModel(
-                ModelRequest(
-                    runID: runID,
-                    agentID: agent.id,
-                    model: agent.model,
-                    items: allItems,
-                    tools: agent.tools.map(\.definition),
-                    outputSchema: agent.outputSchema
-                ),
-                configuration: configuration,
-                events: events
+            let modelSpan = await trace.startChild(
+                kind: .model,
+                name: "model.request",
+                agentID: currentAgent.id,
+                providerID: currentAgent.model.providerID,
+                modelID: currentAgent.model.modelID,
+                attributes: ["turn": String(turnCount)]
             )
+            let response: ModelResponse
+            do {
+                response = try await requestModel(
+                    ModelRequest(
+                        runID: runID,
+                        agentID: currentAgent.id,
+                        model: currentAgent.model,
+                        items: allItems,
+                        tools: currentAgent.tools.map(\.definition)
+                            + currentAgent.handoffs.map(\.toolDefinition),
+                        outputSchema: currentAgent.outputSchema
+                    ),
+                    configuration: configuration,
+                    trace: trace,
+                    span: modelSpan,
+                    events: events
+                )
+                if let usage = response.usage { await trace.record(.usage(usage), in: modelSpan) }
+                await trace.end(
+                    modelSpan,
+                    outcome: SpanOutcome(status: .completed, usage: response.usage)
+                )
+            } catch {
+                await trace.end(modelSpan, outcome: SpanOutcome(status: .failed, error: error))
+                throw error
+            }
             rawResponses.append(response)
             usage.add(response.usage)
             events.yield(.modelCompleted(ModelResponseSnapshot(turn: turnCount, response: response)))
@@ -347,19 +469,34 @@ final class AgentRunner: AgentRunning, Sendable {
                 newItems.append(.toolCall(call))
             }
 
+            if let target = try await performHandoffIfRequested(
+                response.toolCalls,
+                from: currentAgent,
+                context: context,
+                trace: trace,
+                allItems: &allItems,
+                newItems: &newItems,
+                events: events
+            ) {
+                currentAgent = target
+                try validate(agent: currentAgent, configuration: configuration)
+                continue
+            }
+
             guard !response.toolCalls.isEmpty else {
-                let output = try decode(response.content, using: agent.outputDecoder)
+                let output = try decode(response.content, using: currentAgent.outputDecoder)
                 let guardrailContext = AgentGuardrailContext(
                     runID: runID,
                     sessionID: session.id,
-                    agentID: agent.id,
+                    agentID: currentAgent.id,
                     context: context
                 )
-                for guardrail in agent.outputGuardrails {
+                for guardrail in currentAgent.outputGuardrails {
                     let result = await evaluateOutputGuardrail(
                         guardrail,
                         context: guardrailContext,
-                        output: output
+                        output: output,
+                        trace: trace
                     )
                     guardrailResults.append(result)
                     events.yield(.guardrailEvaluated(result))
@@ -377,7 +514,7 @@ final class AgentRunner: AgentRunning, Sendable {
                     finalOutput: output,
                     history: allItems,
                     newItems: newItems,
-                    lastAgentID: agent.id,
+                    lastAgentID: currentAgent.id,
                     usage: usage,
                     rawResponses: rawResponses,
                     guardrailResults: guardrailResults,
@@ -390,7 +527,8 @@ final class AgentRunner: AgentRunning, Sendable {
                 response.toolCalls,
                 runID: runID,
                 traceID: traceID,
-                agent: agent,
+                trace: trace,
+                agent: currentAgent,
                 context: context,
                 session: session,
                 configuration: configuration,
@@ -407,7 +545,7 @@ final class AgentRunner: AgentRunning, Sendable {
             ) {
                 return interruptedResult(
                     runID: runID,
-                    agentID: agent.id,
+                    agentID: currentAgent.id,
                     allItems: allItems,
                     newItems: newItems,
                     usage: usage,
@@ -431,6 +569,7 @@ final class AgentRunner: AgentRunning, Sendable {
         _ calls: [ToolCallItem],
         runID: UUID,
         traceID: UUID,
+        trace: AgentRunTrace,
         agent: AgentDefinition<Context, Output>,
         context: Context,
         session: any AgentSession,
@@ -464,7 +603,8 @@ final class AgentRunner: AgentRunning, Sendable {
                     guardrail,
                     context: guardrailContext,
                     call: call,
-                    tool: tool.definition
+                    tool: tool.definition,
+                    trace: trace
                 )
                 guardrailResults.append(result)
                 events.yield(.guardrailEvaluated(result))
@@ -523,7 +663,10 @@ final class AgentRunner: AgentRunning, Sendable {
                 sessionID: session.id
             )
             try await persistInterrupted(items: allItems, state: state, session: session)
-            for interruption in unresolved { events.yield(.approvalRequired(interruption)) }
+            for interruption in unresolved {
+                await traceApprovalRequest(interruption, trace: trace)
+                events.yield(.approvalRequired(interruption))
+            }
             return PendingInterruption(interruptions: unresolved, state: state)
         }
 
@@ -547,7 +690,8 @@ final class AgentRunner: AgentRunning, Sendable {
                                 agentID: agent.id,
                                 sessionID: session.id,
                                 context: context,
-                                configuration: configuration
+                                configuration: configuration,
+                                trace: trace
                             )
                             return (index, result)
                         }
@@ -569,6 +713,7 @@ final class AgentRunner: AgentRunning, Sendable {
                         guardrailResults: &guardrailResults,
                         allItems: &allItems,
                         newItems: &newItems,
+                        trace: trace,
                         events: events
                     )
                 }
@@ -621,7 +766,8 @@ final class AgentRunner: AgentRunning, Sendable {
                     agentID: agent.id,
                     sessionID: session.id,
                     context: context,
-                    configuration: configuration
+                    configuration: configuration,
+                    trace: trace
                 )
                 observationImages.append(contentsOf: result.imagePaths)
                 appendToolResult(result, allItems: &allItems, newItems: &newItems, events: events)
@@ -633,6 +779,7 @@ final class AgentRunner: AgentRunning, Sendable {
                     guardrailResults: &guardrailResults,
                     allItems: &allItems,
                     newItems: &newItems,
+                    trace: trace,
                     events: events
                 )
             }
@@ -678,8 +825,20 @@ final class AgentRunner: AgentRunning, Sendable {
         agentID: String,
         sessionID: String,
         context: Context,
-        configuration: RunConfiguration
+        configuration: RunConfiguration,
+        trace: AgentRunTrace
     ) async -> ToolResultItem {
+        let toolSpan = await trace.startChild(
+            kind: .tool,
+            name: call.name,
+            agentID: agentID,
+            attributes: [
+                "tool.name": call.name,
+                "tool.call_id": call.id,
+                "tool.arguments": TraceRedactor.toolArguments(call.arguments),
+                "summary": "执行工具 \(call.name)"
+            ]
+        )
         let attempts = tool.behavior.isIdempotent && tool.behavior.allowsAutomaticRetry
             ? configuration.retryPolicy.maximumAttempts
             : 1
@@ -695,24 +854,39 @@ final class AgentRunner: AgentRunning, Sendable {
                             runID: runID,
                             sessionID: sessionID,
                             agentID: agentID,
-                            context: context
+                            context: context,
+                            traceContext: toolSpan.map {
+                                AgentTraceContext(traceID: $0.traceID, parentSpanID: $0.spanID)
+                            }
                         ),
                         arguments: call.arguments
                     )
                 }
-                return ToolResultItem(
+                let result = ToolResultItem(
                     toolCallID: call.id,
                     toolName: call.name,
                     content: output.content,
                     isError: false,
                     imagePaths: output.imagePaths
                 )
+                await trace.end(
+                    toolSpan,
+                    outcome: SpanOutcome(
+                        status: .completed,
+                        attributes: ["tool.output": TraceRedactor.toolOutput(output.content)]
+                    )
+                )
+                return result
             } catch is CancellationError {
                 lastError = AgentError.cancelled
                 break
             } catch {
                 lastError = error
                 if attempt < attempts {
+                    await trace.record(
+                        .retry(attempt: attempt + 1, maximumAttempts: attempts),
+                        in: toolSpan
+                    )
                     do {
                         try await Task.sleep(for: configuration.retryPolicy.initialDelay)
                     } catch {
@@ -725,17 +899,28 @@ final class AgentRunner: AgentRunning, Sendable {
         let detail = (lastError as? LocalizedError)?.errorDescription
             ?? lastError?.localizedDescription
             ?? "未知错误"
-        return ToolResultItem(
+        let result = ToolResultItem(
             toolCallID: call.id,
             toolName: call.name,
             content: detail,
             isError: true
         )
+        await trace.end(
+            toolSpan,
+            outcome: SpanOutcome(
+                status: lastError as? AgentError == .cancelled ? .cancelled : .failed,
+                error: lastError,
+                attributes: ["tool.output": TraceRedactor.toolOutput(detail)]
+            )
+        )
+        return result
     }
 
     private func requestModel(
         _ request: ModelRequest,
         configuration: RunConfiguration,
+        trace: AgentRunTrace,
+        span: SpanHandle?,
         events: AsyncThrowingStream<AgentRunEvent, Error>.Continuation
     ) async throws -> ModelResponse {
         var lastError: Error?
@@ -760,6 +945,13 @@ final class AgentRunner: AgentRunning, Sendable {
             } catch {
                 lastError = error
                 if attempt < configuration.retryPolicy.maximumAttempts {
+                    await trace.record(
+                        .retry(
+                            attempt: attempt + 1,
+                            maximumAttempts: configuration.retryPolicy.maximumAttempts
+                        ),
+                        in: span
+                    )
                     try await Task.sleep(for: configuration.retryPolicy.initialDelay)
                 }
             }
@@ -774,7 +966,8 @@ final class AgentRunner: AgentRunning, Sendable {
     ) throws {
         try configuration.validate()
         try Task.checkCancellation()
-        guard agent.tools.isEmpty || provider.capabilities.supportsTools else {
+        guard (agent.tools.isEmpty && agent.handoffs.isEmpty)
+                || provider.capabilities.supportsTools else {
             throw AgentError.modelRequestFailed(.unsupportedCapability("当前 Provider 不支持工具调用"))
         }
         guard agent.outputSchema == nil || provider.capabilities.supportsStructuredOutput else {
@@ -835,59 +1028,276 @@ final class AgentRunner: AgentRunning, Sendable {
         catch { throw AgentError.outputValidationFailed(error.localizedDescription) }
     }
 
+    private func performHandoffIfRequested<Context: Sendable, Output: Sendable>(
+        _ calls: [ToolCallItem],
+        from source: AgentDefinition<Context, Output>,
+        context: Context,
+        trace: AgentRunTrace,
+        allItems: inout [AgentItem],
+        newItems: inout [AgentItem],
+        events: AsyncThrowingStream<AgentRunEvent, Error>.Continuation
+    ) async throws -> AgentDefinition<Context, Output>? {
+        let matches = calls.compactMap { call -> (ToolCallItem, AgentHandoff<Context, Output>)? in
+            guard let handoff = source.handoffs.first(where: { $0.toolName == call.name }) else {
+                return nil
+            }
+            return (call, handoff)
+        }
+        guard !matches.isEmpty else { return nil }
+        guard matches.count == 1, calls.count == 1 else {
+            throw AgentError.invalidConfiguration(
+                "Handoff 必须是该模型轮次中唯一的工具调用"
+            )
+        }
+        let (call, handoff) = matches[0]
+        guard let data = call.arguments.data(using: .utf8) else {
+            throw AgentError.invalidToolArguments(toolName: call.name, detail: "参数不是 UTF-8 文本")
+        }
+        let arguments: HandoffArguments
+        do {
+            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let reason = object["reason"] as? String,
+                  !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw AgentError.invalidToolArguments(
+                    toolName: call.name,
+                    detail: "reason 必须是非空字符串"
+                )
+            }
+            arguments = HandoffArguments(
+                reason: reason,
+                metadata: try object["metadata"].map(JSONValue.init(any:))
+            )
+        } catch {
+            if let error = error as? AgentError { throw error }
+            throw AgentError.invalidToolArguments(
+                toolName: call.name,
+                detail: error.localizedDescription
+            )
+        }
+        let metadata = arguments.metadata ?? handoff.metadata
+        let span = await trace.startChild(
+            kind: .handoff,
+            name: "\(source.id) -> \(handoff.targetAgentID)",
+            agentID: source.id,
+            attributes: [
+                "handoff.source": source.id,
+                "handoff.target": handoff.targetAgentID,
+                "handoff.reason": arguments.reason,
+                "handoff.metadata": metadata == nil ? "absent" : "present"
+            ]
+        )
+        let target = handoff.resolve()
+        allItems = handoff.filterHistory(allItems)
+        if !allItems.contains(where: {
+            guard case .toolCall(let existing) = $0 else { return false }
+            return existing.id == call.id
+        }) {
+            allItems.append(.toolCall(call))
+        }
+        let result = ToolResultItem(
+            toolCallID: call.id,
+            toolName: call.name,
+            content: "Handoff accepted by \(target.name)",
+            isError: false
+        )
+        appendToolResult(result, allItems: &allItems, newItems: &newItems, events: events)
+        let item = AgentItem.handoff(HandoffItem(
+            sourceAgentID: source.id,
+            targetAgentID: target.id,
+            reason: arguments.reason,
+            metadata: metadata
+        ))
+        allItems.append(item)
+        newItems.append(item)
+        let instructions = try await target.instructions.resolve(using: context)
+        let instructionItem = AgentItem.message(AgentMessageItem(
+            role: .system,
+            content: instructions
+        ))
+        allItems.append(instructionItem)
+        newItems.append(instructionItem)
+        events.yield(.handoff(HandoffEvent(
+            sourceAgentID: source.id,
+            targetAgentID: target.id,
+            reason: arguments.reason,
+            metadata: metadata
+        )))
+        await trace.end(span, outcome: SpanOutcome(status: .completed))
+        await trace.switchAgent(to: target.id, name: target.name)
+        return target
+    }
+
+    private func lastResponsibleAgentID(in items: [AgentItem]) -> String? {
+        items.reversed().compactMap { item -> String? in
+            guard case .handoff(let handoff) = item else { return nil }
+            return handoff.targetAgentID
+        }.first
+    }
+
+    private func traceCompaction(_ compaction: CompactionItem, trace: AgentRunTrace) async {
+        let span = await trace.startChild(
+            kind: .compaction,
+            name: "context.compaction",
+            attributes: [
+                "compaction.summarized_items": String(compaction.summarizedItemCount),
+                "compaction.summary_length": String(compaction.summary.utf8.count)
+            ]
+        )
+        await trace.end(span, outcome: SpanOutcome(status: .completed))
+    }
+
+    private func traceApprovalRequest(
+        _ interruption: AgentInterruption,
+        trace: AgentRunTrace
+    ) async {
+        let span = await trace.startChild(
+            kind: .approval,
+            name: "tool.approval",
+            attributes: [
+                "approval.phase": "request",
+                "tool.name": interruption.toolCall.name,
+                "tool.call_id": interruption.toolCall.id,
+                "summary": interruption.summary,
+                "risk": interruption.riskLevel.rawValue
+            ]
+        )
+        await trace.end(span, outcome: SpanOutcome(status: .interrupted))
+    }
+
+    private func traceApprovalDecision(
+        _ interruption: AgentInterruption,
+        decision: ApprovalDecision,
+        trace: AgentRunTrace
+    ) async {
+        let value: String
+        switch decision {
+        case .approved: value = "approved"
+        case .rejected: value = "rejected"
+        }
+        let span = await trace.startChild(
+            kind: .approval,
+            name: "tool.approval",
+            attributes: [
+                "approval.phase": "decision",
+                "tool.name": interruption.toolCall.name,
+                "tool.call_id": interruption.toolCall.id,
+                "summary": interruption.summary
+            ]
+        )
+        await trace.record(.approval(decision: value), in: span)
+        await trace.end(span, outcome: SpanOutcome(
+            status: .completed,
+            attributes: ["approval.decision": value]
+        ))
+    }
+
+    private func endGuardrailSpan(
+        _ span: SpanHandle?,
+        result: GuardrailResult,
+        trace: AgentRunTrace
+    ) async {
+        let status: AgentSpanStatus
+        switch result.action {
+        case .allow: status = .completed
+        case .requireApproval: status = .interrupted
+        case .stop: status = .failed
+        }
+        await trace.end(span, outcome: SpanOutcome(
+            status: status,
+            attributes: [
+                "guardrail.action": result.action.rawValue,
+                "guardrail.message": result.message
+            ]
+        ))
+    }
+
     private func evaluateInputGuardrail<Context: Sendable>(
         _ guardrail: AnyInputGuardrail<Context>,
         context: AgentGuardrailContext<Context>,
-        input: AgentInput
+        input: AgentInput,
+        trace: AgentRunTrace
     ) async -> GuardrailResult {
+        let span = await trace.startChild(
+            kind: .guardrail,
+            name: guardrail.name,
+            agentID: context.agentID,
+            attributes: ["guardrail.stage": GuardrailStage.input.rawValue]
+        )
+        let result: GuardrailResult
         do {
-            return decorate(
+            result = decorate(
                 try await guardrail.evaluate(context: context, input: input),
                 name: guardrail.name,
                 stage: .input
             )
         } catch {
-            return guardrailFailure(name: guardrail.name, stage: .input, error: error)
+            result = guardrailFailure(name: guardrail.name, stage: .input, error: error)
         }
+        await endGuardrailSpan(span, result: result, trace: trace)
+        return result
     }
 
     private func evaluateOutputGuardrail<Context: Sendable, Output: Sendable>(
         _ guardrail: AnyOutputGuardrail<Context, Output>,
         context: AgentGuardrailContext<Context>,
-        output: Output
+        output: Output,
+        trace: AgentRunTrace
     ) async -> GuardrailResult {
+        let span = await trace.startChild(
+            kind: .guardrail,
+            name: guardrail.name,
+            agentID: context.agentID,
+            attributes: ["guardrail.stage": GuardrailStage.output.rawValue]
+        )
+        let result: GuardrailResult
         do {
-            return decorate(
+            result = decorate(
                 try await guardrail.evaluate(context: context, output: output),
                 name: guardrail.name,
                 stage: .output
             )
         } catch {
-            return guardrailFailure(name: guardrail.name, stage: .output, error: error)
+            result = guardrailFailure(name: guardrail.name, stage: .output, error: error)
         }
+        await endGuardrailSpan(span, result: result, trace: trace)
+        return result
     }
 
     private func evaluateToolInputGuardrail<Context: Sendable>(
         _ guardrail: AnyToolGuardrail<Context>,
         context: AgentGuardrailContext<Context>,
         call: ToolCallItem,
-        tool: ToolDefinition
+        tool: ToolDefinition,
+        trace: AgentRunTrace
     ) async -> GuardrailResult {
+        let span = await trace.startChild(
+            kind: .guardrail,
+            name: guardrail.name,
+            agentID: context.agentID,
+            attributes: [
+                "guardrail.stage": GuardrailStage.toolInput.rawValue,
+                "tool.name": call.name,
+                "tool.call_id": call.id
+            ]
+        )
+        let result: GuardrailResult
         do {
-            return decorate(
+            result = decorate(
                 try await guardrail.evaluateInput(context: context, call: call, tool: tool),
                 name: guardrail.name,
                 stage: .toolInput,
                 toolCallID: call.id
             )
         } catch {
-            return guardrailFailure(
+            result = guardrailFailure(
                 name: guardrail.name,
                 stage: .toolInput,
                 toolCallID: call.id,
                 error: error
             )
         }
+        await endGuardrailSpan(span, result: result, trace: trace)
+        return result
     }
 
     private func applyToolOutputGuardrails<Context: Sendable>(
@@ -898,9 +1308,20 @@ final class AgentRunner: AgentRunning, Sendable {
         guardrailResults: inout [GuardrailResult],
         allItems: inout [AgentItem],
         newItems: inout [AgentItem],
+        trace: AgentRunTrace,
         events: AsyncThrowingStream<AgentRunEvent, Error>.Continuation
     ) async throws {
         for guardrail in guardrails {
+            let span = await trace.startChild(
+                kind: .guardrail,
+                name: guardrail.name,
+                agentID: context.agentID,
+                attributes: [
+                    "guardrail.stage": GuardrailStage.toolOutput.rawValue,
+                    "tool.name": call.name,
+                    "tool.call_id": call.id
+                ]
+            )
             let evaluated: GuardrailResult
             do {
                 evaluated = decorate(
@@ -921,6 +1342,7 @@ final class AgentRunner: AgentRunning, Sendable {
                     error: error
                 )
             }
+            await endGuardrailSpan(span, result: evaluated, trace: trace)
             guardrailResults.append(evaluated)
             events.yield(.guardrailEvaluated(evaluated))
             let item = AgentItem.guardrail(GuardrailItem(result: evaluated))
