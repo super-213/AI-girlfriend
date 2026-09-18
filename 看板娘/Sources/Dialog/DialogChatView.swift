@@ -21,6 +21,8 @@ struct DialogChatView: View {
     @State private var invocationSelection = 0
     @State private var invocationPickerSuppressed = false
     @State private var isCreateProjectPresented = false
+    @State private var isConversationHistoryExpanded = true
+    @State private var isProjectsExpanded = true
     @State private var expandedProjectIDs = Set<UUID>()
     @State private var hoveredProjectID: UUID?
     @State private var projectPendingDeletion: DialogProject?
@@ -84,6 +86,7 @@ struct DialogChatView: View {
                 guard viewModel.createProject(name: name, sourceDirectory: sourceDirectory) else {
                     return false
                 }
+                isProjectsExpanded = true
                 if let projectID = viewModel.selectedProject?.id {
                     expandedProjectIDs.insert(projectID)
                 }
@@ -121,16 +124,23 @@ struct DialogChatView: View {
             .listRowSeparator(.hidden)
 
             if !unassignedConversations.isEmpty {
-                Section("对话历史") {
-                    ForEach(unassignedConversations) { conversation in
-                        conversationRow(conversation)
+                Section {
+                    if isConversationHistoryExpanded {
+                        ForEach(unassignedConversations) { conversation in
+                            conversationRow(conversation)
+                                .transition(.opacity)
+                        }
                     }
+                } header: {
+                    conversationHistorySectionHeader
                 }
             }
 
             Section {
-                ForEach(sortedProjects) { project in
-                    projectRow(project)
+                if isProjectsExpanded {
+                    ForEach(sortedProjects) { project in
+                        projectRow(project)
+                    }
                 }
             } header: {
                 projectSectionHeader
@@ -164,11 +174,25 @@ struct DialogChatView: View {
         .help("开始新对话")
     }
 
+    private var conversationHistorySectionHeader: some View {
+        sidebarSectionToggle(
+            title: "对话历史",
+            isExpanded: isConversationHistoryExpanded
+        ) {
+            withAnimation(reduceMotion ? nil : DesignAnimation.spring) {
+                isConversationHistoryExpanded.toggle()
+            }
+        }
+        .textCase(nil)
+    }
+
     private var projectSectionHeader: some View {
         HStack(spacing: 4) {
-            Text("项目")
-
-            Spacer(minLength: 4)
+            sidebarSectionToggle(title: "项目", isExpanded: isProjectsExpanded) {
+                withAnimation(reduceMotion ? nil : DesignAnimation.spring) {
+                    isProjectsExpanded.toggle()
+                }
+            }
 
             Button {
                 isCreateProjectPresented = true
@@ -184,6 +208,29 @@ struct DialogChatView: View {
             .accessibilityLabel("新建项目")
         }
         .textCase(nil)
+    }
+
+    private func sidebarSectionToggle(
+        title: String,
+        isExpanded: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Text(title)
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                    .rotationEffect(.degrees(isExpanded ? 0 : -90))
+
+                Spacer(minLength: 4)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(isExpanded ? "已展开" : "已收起")
     }
 
     @ViewBuilder
@@ -300,6 +347,7 @@ struct DialogChatView: View {
     }
 
     private func createConversation(in project: DialogProject) {
+        isProjectsExpanded = true
         expandedProjectIDs.insert(project.id)
         viewModel.startNewConversation(in: project.id)
         isInputFocused = true
