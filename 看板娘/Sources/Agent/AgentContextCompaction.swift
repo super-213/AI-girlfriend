@@ -10,8 +10,8 @@ import Foundation
 struct AgentContextCompactionPolicy: Equatable {
     static let dynamicTriggerRatio = 0.85
 
-    /// Compact before a conservative 32K-class context becomes crowded.
-    var triggerTokenCount: Int = 24_000
+    /// Fallback trigger when the model's context window cannot be resolved.
+    var triggerTokenCount: Int = 100_000
     /// Leave enough room for tool work and the model's next response.
     var targetTokenCount: Int = 12_000
     var summaryTokenReserve: Int = 2_000

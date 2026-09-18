@@ -845,7 +845,7 @@ struct AgentFoundationTests {
     func contextCompactionPolicyFallsBackOrAdaptsToResolvedWindow() {
         let fallback = AgentContextCompactionPolicy.standard
 
-        #expect(fallback.adaptingTrigger(to: nil).triggerTokenCount == 24_000)
+        #expect(fallback.adaptingTrigger(to: nil).triggerTokenCount == 100_000)
         #expect(fallback.adaptingTrigger(to: 1_000_000).triggerTokenCount == 850_000)
     }
 
