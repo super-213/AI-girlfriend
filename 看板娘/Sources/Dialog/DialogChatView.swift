@@ -22,6 +22,7 @@ struct DialogChatView: View {
     @State private var invocationPickerSuppressed = false
     @State private var isCreateProjectPresented = false
     @State private var expandedProjectIDs = Set<UUID>()
+    @State private var hoveredProjectID: UUID?
     @State private var projectPendingDeletion: DialogProject?
     @AppStorage(AgentWorkspaceSettings.showCloudTransferNoticeKey) private var showCloudTransferNotice = false
     @AppStorage(AgentWorkspaceSettings.showDirectoryAccessStatusKey) private var showDirectoryAccessStatus = false
@@ -114,23 +115,10 @@ struct DialogChatView: View {
     private var sidebar: some View {
         List(selection: conversationSelection) {
             Section {
-                Button {
-                    viewModel.startNewConversation()
-                    isInputFocused = true
-                } label: {
-                    Label("新对话", systemImage: "square.and.pencil")
-                }
-                .disabled(viewModel.isBusy)
-                .help("开始新对话")
-
-                Button {
-                    isCreateProjectPresented = true
-                } label: {
-                    Label("新建项目", systemImage: "folder.badge.plus")
-                }
-                .disabled(viewModel.isBusy)
-                .help("添加一个源文件夹并创建项目")
+                sidebarQuickActions
             }
+            .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 8, trailing: 8))
+            .listRowSeparator(.hidden)
 
             if !unassignedConversations.isEmpty {
                 Section("对话历史") {
@@ -140,12 +128,12 @@ struct DialogChatView: View {
                 }
             }
 
-            if !sortedProjects.isEmpty {
-                Section("项目") {
-                    ForEach(sortedProjects) { project in
-                        projectRow(project)
-                    }
+            Section {
+                ForEach(sortedProjects) { project in
+                    projectRow(project)
                 }
+            } header: {
+                projectSectionHeader
             }
         }
         .listStyle(.sidebar)
@@ -161,63 +149,170 @@ struct DialogChatView: View {
         }
     }
 
-    private func projectRow(_ project: DialogProject) -> some View {
-        DisclosureGroup(isExpanded: projectExpansionBinding(for: project.id)) {
-            ForEach(conversations(in: project.id)) { conversation in
-                conversationRow(conversation)
-            }
+    private var sidebarQuickActions: some View {
+        Button {
+            viewModel.startNewConversation()
+            isInputFocused = true
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "folder")
-                    .foregroundStyle(.secondary)
-                    .frame(width: 17)
+            Label("新对话", systemImage: "square.and.pencil")
+                .font(.system(size: 13, weight: .medium))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(DialogSidebarActionButtonStyle())
+        .disabled(viewModel.isBusy)
+        .help("开始新对话")
+    }
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(project.name)
-                        .fontWeight(.medium)
-                        .lineLimit(1)
-                    Text(project.sourceFolderName)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
+    private var projectSectionHeader: some View {
+        HStack(spacing: 4) {
+            Text("项目")
 
-                Spacer(minLength: 4)
+            Spacer(minLength: 4)
 
-                Button {
-                    expandedProjectIDs.insert(project.id)
-                    viewModel.startNewConversation(in: project.id)
-                    isInputFocused = true
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 10, weight: .semibold))
-                        .frame(width: 20, height: 20)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(viewModel.isBusy)
-                .help("在“\(project.name)”中新建对话")
+            Button {
+                isCreateProjectPresented = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 28, height: 24)
+                    .contentShape(Rectangle())
             }
-            .contextMenu {
-                Button("在项目中新建对话", systemImage: "square.and.pencil") {
-                    expandedProjectIDs.insert(project.id)
-                    viewModel.startNewConversation(in: project.id)
-                    isInputFocused = true
+            .buttonStyle(DialogSidebarIconButtonStyle())
+            .disabled(viewModel.isBusy)
+            .help("新建项目")
+            .accessibilityLabel("新建项目")
+        }
+        .textCase(nil)
+    }
+
+    @ViewBuilder
+    private func projectRow(_ project: DialogProject) -> some View {
+        let isExpanded = expandedProjectIDs.contains(project.id)
+        let isHovered = hoveredProjectID == project.id
+
+        HStack(spacing: 4) {
+            Button {
+                toggleProjectExpansion(project.id)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: isExpanded ? "folder.fill" : "folder")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 17)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(project.name)
+                            .fontWeight(.medium)
+                            .lineLimit(1)
+                        Text(project.sourceFolderName)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 4)
                 }
-                Divider()
-                Button("在 Finder 中显示", systemImage: "folder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([
-                        URL(fileURLWithPath: project.sourceDirectory, isDirectory: true)
-                    ])
-                }
-                Divider()
-                Button("移除项目", systemImage: "trash", role: .destructive) {
-                    projectPendingDeletion = project
-                }
-                .disabled(viewModel.isBusy)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("项目：\(project.name)")
+            .accessibilityValue(isExpanded ? "已展开" : "已收起")
+
+            Button {
+                createConversation(in: project)
+            } label: {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 11, weight: .medium))
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(DialogSidebarIconButtonStyle())
+            .disabled(viewModel.isBusy)
+            .help("在“\(project.name)”中新建对话")
+            .opacity(isHovered ? 1 : 0)
+            .allowsHitTesting(isHovered)
+            .accessibilityHidden(!isHovered)
+
+            Menu {
+                projectMenuActions(project)
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("更多项目操作")
+            .opacity(isHovered ? 1 : 0)
+            .allowsHitTesting(isHovered)
+            .accessibilityHidden(!isHovered)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 3)
+        .background {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.primary.opacity(isHovered ? 0.055 : 0))
+        }
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            withAnimation(reduceMotion ? nil : DesignAnimation.gentle) {
+                hoveredProjectID = hovering ? project.id : nil
             }
         }
-        .accessibilityLabel("项目：\(project.name)")
+        .contextMenu {
+            projectMenuActions(project)
+        }
+        .accessibilityElement(children: .contain)
+
+        if isExpanded {
+            ForEach(conversations(in: project.id)) { conversation in
+                conversationRow(conversation)
+                    .padding(.leading, 22)
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func projectMenuActions(_ project: DialogProject) -> some View {
+        Button("在项目中新建对话", systemImage: "square.and.pencil") {
+            createConversation(in: project)
+        }
+        .disabled(viewModel.isBusy)
+
+        Divider()
+
+        Button("在 Finder 中显示", systemImage: "folder") {
+            NSWorkspace.shared.activateFileViewerSelecting([
+                URL(fileURLWithPath: project.sourceDirectory, isDirectory: true)
+            ])
+        }
+
+        Divider()
+
+        Button("移除项目", systemImage: "trash", role: .destructive) {
+            projectPendingDeletion = project
+        }
+        .disabled(viewModel.isBusy)
+    }
+
+    private func createConversation(in project: DialogProject) {
+        expandedProjectIDs.insert(project.id)
+        viewModel.startNewConversation(in: project.id)
+        isInputFocused = true
+    }
+
+    private func toggleProjectExpansion(_ projectID: UUID) {
+        withAnimation(reduceMotion ? nil : DesignAnimation.spring) {
+            if expandedProjectIDs.contains(projectID) {
+                expandedProjectIDs.remove(projectID)
+            } else {
+                expandedProjectIDs.insert(projectID)
+            }
+        }
     }
 
     private func conversationRow(_ conversation: DialogConversation) -> some View {
@@ -761,19 +856,6 @@ struct DialogChatView: View {
             .sorted(by: { $0.updatedAt > $1.updatedAt })
     }
 
-    private func projectExpansionBinding(for projectID: UUID) -> Binding<Bool> {
-        Binding(
-            get: { expandedProjectIDs.contains(projectID) },
-            set: { isExpanded in
-                if isExpanded {
-                    expandedProjectIDs.insert(projectID)
-                } else {
-                    expandedProjectIDs.remove(projectID)
-                }
-            }
-        )
-    }
-
     private var canSend: Bool {
         !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || !viewModel.pendingAttachments.isEmpty
@@ -1196,6 +1278,54 @@ private struct DialogTextEditor: NSViewRepresentable {
             scrollView.hasVerticalScroller = contentHeight > DialogTextEditor.maximumHeight
             textView.frame.size.height = max(contentHeight, clampedHeight)
         }
+    }
+}
+
+private struct DialogSidebarActionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        DialogSidebarButtonStyleBody(
+            configuration: configuration,
+            horizontalPadding: 8
+        )
+    }
+}
+
+private struct DialogSidebarIconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        DialogSidebarButtonStyleBody(
+            configuration: configuration,
+            horizontalPadding: 0
+        )
+    }
+}
+
+private struct DialogSidebarButtonStyleBody: View {
+    let configuration: ButtonStyleConfiguration
+    let horizontalPadding: CGFloat
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovered = false
+
+    var body: some View {
+        configuration.label
+            .padding(.horizontal, horizontalPadding)
+            .foregroundStyle(isEnabled ? Color.primary : Color.secondary)
+            .background {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.primary.opacity(backgroundOpacity))
+            }
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .opacity(isEnabled ? 1 : 0.45)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: configuration.isPressed)
+            .animation(reduceMotion ? nil : DesignAnimation.gentle, value: isHovered)
+            .onHover { isHovered = $0 }
+    }
+
+    private var backgroundOpacity: Double {
+        if configuration.isPressed { return 0.10 }
+        if isHovered && isEnabled { return 0.065 }
+        return 0
     }
 }
 
