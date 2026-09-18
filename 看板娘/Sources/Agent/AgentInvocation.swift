@@ -111,7 +111,9 @@ enum AgentInvocationParser {
         let fallbackInstruction: String
         switch kind {
         case .tool:
-            fallbackInstruction = "我已显式附加此工具，请把它作为本轮可用上下文，并根据实际任务决定是否使用。"
+            fallbackInstruction = option.name == AgentRuntimeToolName.compactContext
+                ? "请立即压缩当前会话上下文。"
+                : "我已显式附加此工具，请把它作为本轮可用上下文，并根据实际任务决定是否使用。"
         case .skill:
             fallbackInstruction = "我已显式附加此技能，请把它作为本轮可用上下文，并根据实际任务决定如何使用。"
         }

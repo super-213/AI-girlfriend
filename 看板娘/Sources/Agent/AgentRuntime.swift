@@ -67,6 +67,7 @@ final class AgentRuntime {
     private var previousContextMeasurement: AgentContextMeasurement?
     private var inFlightEstimatedTokens: Int?
     private var lastCompactionAttemptMessageCount: Int?
+    private var isContextCompactionRequested = false
     private var isCompacting = false
     private var contextWindowLookupIdentifier: String?
     private var didResolveContextWindow = false
@@ -137,6 +138,17 @@ final class AgentRuntime {
 
         if let explicitInvocation, explicitInvocation.kind == .skill {
             loadExplicitSkill(named: explicitInvocation.name)
+        } else if let explicitInvocation,
+                  explicitInvocation.kind == .tool,
+                  explicitInvocation.name == AgentRuntimeToolName.compactContext,
+                  let tool = registry.tool(named: AgentRuntimeToolName.compactContext) {
+            let call = AgentToolCall(
+                id: "forced-tool-\(UUID().uuidString)",
+                name: AgentRuntimeToolName.compactContext,
+                arguments: "{}"
+            )
+            messages.append(.assistant(content: nil, toolCalls: [call]))
+            execute(call, with: tool, arguments: [:])
         } else {
             requestModel()
         }
@@ -163,6 +175,7 @@ final class AgentRuntime {
         previousContextMeasurement = nil
         inFlightEstimatedTokens = nil
         lastCompactionAttemptMessageCount = nil
+        isContextCompactionRequested = false
         isCompacting = false
         isResolvingContextWindow = false
         isRunning = false
@@ -206,6 +219,7 @@ final class AgentRuntime {
         if startContextCompactionIfNeeded() {
             return
         }
+        isContextCompactionRequested = false
         performModelRequest()
     }
 
@@ -384,6 +398,9 @@ final class AgentRuntime {
                 call: call,
                 content: self.contextManager.boundedToolResult(result.modelContent)
             ))
+            if !result.isError, call.name == AgentRuntimeToolName.compactContext {
+                self.isContextCompactionRequested = true
+            }
             self.pendingObservationImagePaths.append(contentsOf: result.imagePaths)
             self.onToolFinished?(call.name, result)
             AgentToolAuditStore.shared.record(
@@ -405,12 +422,14 @@ final class AgentRuntime {
     }
 
     private func startContextCompactionIfNeeded() -> Bool {
+        let force = isContextCompactionRequested
         guard !isCompacting,
-              lastCompactionAttemptMessageCount != messages.count,
+              (force || lastCompactionAttemptMessageCount != messages.count),
               let plan = contextManager.makePlan(
                 messages: messages,
                 tools: registry.definitions,
-                previousMeasurement: previousContextMeasurement
+                previousMeasurement: previousContextMeasurement,
+                force: force
               ),
               let systemMessage = messages.first(where: {
                 $0.role == .system && $0.contextKind == nil
@@ -419,6 +438,7 @@ final class AgentRuntime {
         }
 
         isCompacting = true
+        isContextCompactionRequested = false
         lastCompactionAttemptMessageCount = messages.count
         onContextCompactionStarted?()
         let token = runToken
@@ -516,6 +536,7 @@ final class AgentRuntime {
         新建、覆盖、复制或移动文件使用受控文件工具，并在用户确认后执行。
         “可用 Skills”中的 name 只是工作流标识，不是工具名称；禁止直接调用 Skill name。
         用户任务匹配 Skill 时，只能先调用 read_skill，并将 Skill name 放入 name 参数。
+        用户明确要求压缩、整理或缩短当前会话上下文时，调用 compact_context；不要仅用文本声称已经压缩。
         工具结果会作为 tool message 返回；根据结果继续处理，直到给出最终答复。
         不要在普通文本中伪造工具调用，不要输出“命令:”或“[命令]”协议。
         """

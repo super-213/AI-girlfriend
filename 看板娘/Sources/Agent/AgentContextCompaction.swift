@@ -88,14 +88,15 @@ struct AgentContextManager {
     func makePlan(
         messages: [AgentMessage],
         tools: [AgentToolDefinition],
-        previousMeasurement: AgentContextMeasurement? = nil
+        previousMeasurement: AgentContextMeasurement? = nil,
+        force: Bool = false
     ) -> AgentContextCompactionPlan? {
         let projectedTokens = projectedTokenCount(
             messages: messages,
             tools: tools,
             previousMeasurement: previousMeasurement
         )
-        guard projectedTokens >= policy.triggerTokenCount,
+        guard (force || projectedTokens >= policy.triggerTokenCount),
               let firstSystemIndex = messages.firstIndex(where: { $0.role == .system && $0.contextKind == nil }) else {
             return nil
         }
@@ -104,6 +105,20 @@ struct AgentContextManager {
         guard bodyStart < messages.endIndex else { return nil }
         let units = conversationUnits(in: messages, from: bodyStart)
         guard units.count >= 2 else { return nil }
+
+        // A user-requested compaction should have an observable effect even
+        // while the context is still below the automatic threshold. Preserve
+        // the latest complete turn and summarize every earlier turn.
+        if force, let latestUnit = units.last {
+            let older = Array(messages[bodyStart..<latestUnit.lowerBound])
+            let recent = Array(messages[latestUnit])
+            guard !older.isEmpty, !recent.isEmpty else { return nil }
+            return AgentContextCompactionPlan(
+                messagesToSummarize: older,
+                recentMessages: recent,
+                estimatedTokensBeforeCompaction: projectedTokens
+            )
+        }
 
         let fixedMessages = [messages[firstSystemIndex]]
         let fixedTokens = estimatedTokenCount(messages: fixedMessages, tools: tools)
@@ -153,7 +168,7 @@ struct AgentContextManager {
     ) -> [AgentMessage] {
         let summaryMessage = AgentMessage.contextSummary("""
         ## 压缩后的会话上下文
-        以下是对更早对话和工具结果的自动压缩。将其视为已发生的会话状态，不要声称刚刚执行了其中的操作。
+        以下是对更早对话和工具结果的压缩。将其视为已发生的会话状态，不要声称刚刚执行了其中的操作。
 
         \(summary.trimmingCharacters(in: .whitespacesAndNewlines))
         """)

@@ -7,6 +7,10 @@
 
 import Foundation
 
+enum AgentRuntimeToolName {
+    static let compactContext = "compact_context"
+}
+
 @MainActor
 protocol AgentTool: AnyObject {
     var definition: AgentToolDefinition { get }
@@ -44,6 +48,7 @@ final class AgentToolRegistry {
     static func standard() -> AgentToolRegistry {
         let registry = AgentToolRegistry()
         registry.register(CurrentDateTimeTool())
+        registry.register(CompactContextTool())
         registry.register(ReadSkillTool())
         registry.register(ListKnowledgeBasesTool())
         registry.register(AddToKnowledgeBaseTool())
@@ -75,6 +80,31 @@ final class AgentToolRegistry {
         registry.register(RunAutomationTool())
         registry.register(GetCodexTaskStatusTool())
         return registry
+    }
+}
+
+@MainActor
+final class CompactContextTool: AgentTool {
+    let definition = AgentToolDefinition(
+        name: AgentRuntimeToolName.compactContext,
+        description: "主动压缩当前会话上下文。当用户明确要求压缩、整理或缩短当前上下文时调用。Runtime 会保留最新完整轮次，并将更早的对话和工具结果整理为结构化摘要。",
+        parameters: [
+            "type": "object",
+            "properties": [:],
+            "additionalProperties": false
+        ]
+    )
+    let requiresConfirmation = false
+
+    func approvalSummary(arguments: [String: Any]) -> String {
+        "压缩当前会话上下文"
+    }
+
+    func execute(
+        arguments: [String: Any],
+        completion: @escaping @MainActor (AgentToolExecutionResult) -> Void
+    ) {
+        completion(.success("已请求压缩当前会话上下文；Runtime 将保留最新完整轮次，并摘要更早内容。"))
     }
 }
 

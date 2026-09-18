@@ -130,6 +130,7 @@ struct AgentFoundationTests {
     func standardRegistryExposesCoreAndAppTools() {
         let names = Set(AgentToolRegistry.standard().definitions.map(\.name))
         #expect(names.contains("get_current_datetime"))
+        #expect(names.contains("compact_context"))
         #expect(names.contains("read_skill"))
         #expect(names.contains("read_file"))
         #expect(names.contains("read_document"))
@@ -810,6 +811,44 @@ struct AgentFoundationTests {
         #expect(client.requests[2].last == .user("第二个问题"))
         #expect(client.requests[2].contains(where: { $0.content?.contains("第一个问题") == true }) == false)
         #expect(runtime.messages.last?.content == "新回复")
+    }
+
+    @Test @MainActor
+    func explicitCompactContextToolForcesCompactionBelowAutomaticThreshold() {
+        let client = FakeModelClient()
+        client.responses = [
+            AgentModelResponse(content: "第一轮回复", toolCalls: []),
+            AgentModelResponse(
+                content: "## 用户目标与约束\n- 保留目标\n\n## 当前状态与未完成项\n- 继续",
+                toolCalls: []
+            ),
+            AgentModelResponse(content: "上下文已压缩", toolCalls: [])
+        ]
+        let runtime = AgentRuntime(
+            apiManager: client,
+            registry: .standard(),
+            contextCompactionPolicy: AgentContextCompactionPolicy(
+                triggerTokenCount: 1_000_000,
+                targetTokenCount: 12_000,
+                summaryTokenReserve: 2_000,
+                maximumToolResultCharacters: 12_000,
+                maximumSummaryInputCharacters: 20_000
+            ),
+            systemPromptProvider: { "system" }
+        )
+
+        runtime.send("第一轮问题")
+        runtime.send(
+            "请立即压缩当前会话上下文。",
+            explicitInvocation: AgentInvocation(kind: .tool, name: AgentRuntimeToolName.compactContext)
+        )
+
+        #expect(client.requestPurposes == [.conversation, .contextCompaction, .conversation])
+        #expect(client.requests[1].contains(where: { $0.content?.contains("第一轮问题") == true }))
+        #expect(client.requests[2].contains(where: { $0.contextKind == .compactionSummary }))
+        #expect(client.requests[2].contains(where: { $0.content?.contains("第一轮问题") == true }) == false)
+        #expect(client.requests[2].contains(where: { $0.name == AgentRuntimeToolName.compactContext }))
+        #expect(runtime.messages.last?.content == "上下文已压缩")
     }
 
     @Test @MainActor
