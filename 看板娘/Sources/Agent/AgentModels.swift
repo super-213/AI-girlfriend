@@ -378,7 +378,6 @@ struct AgentToolExecutionResult: Equatable {
 enum AgentRuntimeError: LocalizedError {
     case busy
     case invalidToolArguments(String)
-    case iterationLimit
     case toolUnavailable(String)
     case skillUnavailable(String)
 
@@ -388,8 +387,6 @@ enum AgentRuntimeError: LocalizedError {
             return "Agent 正在处理上一项任务"
         case .invalidToolArguments(let name):
             return "工具 \(name) 的参数不是有效 JSON 对象"
-        case .iterationLimit:
-            return "Agent 已达到最大工具调用轮数"
         case .toolUnavailable(let name):
             return "模型请求了未注册的工具：\(name)"
         case .skillUnavailable(let name):

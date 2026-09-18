@@ -658,6 +658,41 @@ struct AgentFoundationTests {
     }
 
     @Test @MainActor
+    func runtimeContinuesBeyondFormerIterationLimit() {
+        let client = FakeModelClient()
+        client.responses = (1...17).map { index in
+            AgentModelResponse(
+                content: "",
+                toolCalls: [
+                    AgentToolCall(
+                        id: "call-echo-\(index)",
+                        name: "echo",
+                        arguments: #"{"value":"ok"}"#
+                    )
+                ]
+            )
+        } + [AgentModelResponse(content: "完成", toolCalls: [])]
+        let registry = AgentToolRegistry()
+        registry.register(EchoTool())
+        let runtime = AgentRuntime(
+            apiManager: client,
+            registry: registry,
+            systemPromptProvider: { "system" }
+        )
+        var completed = false
+        var failed = false
+        runtime.onCompleted = { completed = true }
+        runtime.onError = { _ in failed = true }
+
+        runtime.send("test")
+
+        #expect(completed)
+        #expect(!failed)
+        #expect(client.requests.count == 18)
+        #expect(runtime.messages.last?.content == "完成")
+    }
+
+    @Test @MainActor
     func runtimeRewritesAnEnabledSkillNameMistakenForATool() {
         let client = FakeModelClient()
         client.responses = [

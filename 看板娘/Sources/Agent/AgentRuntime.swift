@@ -61,8 +61,6 @@ final class AgentRuntime {
     private let systemPromptProvider: () -> String
     private let enabledSkillNameResolver: (String) -> String?
     private let fallbackContextCompactionPolicy: AgentContextCompactionPolicy
-    private let maxIterations: Int
-    private var iterationCount = 0
     private var pendingCalls: [AgentToolCall] = []
     private var pendingObservationImagePaths: [String] = []
     private var pendingApproval: (call: AgentToolCall, tool: any AgentTool, arguments: [String: Any])?
@@ -87,7 +85,6 @@ final class AgentRuntime {
     init(
         apiManager: any AgentModelClient = APIManager(),
         registry: AgentToolRegistry = .standard(),
-        maxIterations: Int = 16,
         contextCompactionPolicy: AgentContextCompactionPolicy = .standard,
         enabledSkillNameResolver: @escaping (String) -> String? = {
             if let skill = SkillLibrary.enabledSkill(named: $0) {
@@ -103,7 +100,6 @@ final class AgentRuntime {
     ) {
         self.apiManager = apiManager
         self.registry = registry
-        self.maxIterations = maxIterations
         fallbackContextCompactionPolicy = contextCompactionPolicy
         self.enabledSkillNameResolver = enabledSkillNameResolver
         self.systemPromptProvider = systemPromptProvider
@@ -137,7 +133,6 @@ final class AgentRuntime {
             modelText = text
         }
         messages.append(.user(modelText, imagePaths: imagePaths))
-        iterationCount = 0
         isRunning = true
 
         if let explicitInvocation, explicitInvocation.kind == .skill {
@@ -203,10 +198,6 @@ final class AgentRuntime {
 
     private func requestModel() {
         guard isRunning else { return }
-        guard iterationCount < maxIterations else {
-            finishWithError(AgentRuntimeError.iterationLimit)
-            return
-        }
         refreshSystemPrompt()
 
         if resolveContextWindowIfNeeded() {
@@ -220,11 +211,6 @@ final class AgentRuntime {
 
     private func performModelRequest() {
         guard isRunning else { return }
-        guard iterationCount < maxIterations else {
-            finishWithError(AgentRuntimeError.iterationLimit)
-            return
-        }
-        iterationCount += 1
 
         let token = runToken
         inFlightEstimatedTokens = contextManager.estimatedTokenCount(

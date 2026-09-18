@@ -177,7 +177,7 @@
         <mxCell id="c23" value="runShell()&lt;br&gt;/bin/zsh -lc command&lt;br&gt;收集退出码和输出" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;" vertex="1" parent="1">
           <mxGeometry x="1920" y="1420" width="310" height="130" as="geometry" />
         </mxCell>
-        <mxCell id="c24" value="执行结果回注为 user 消息&lt;br&gt;commandIterationCount &lt;= 5&lt;br&gt;再次 sendRequest()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;" vertex="1" parent="1">
+        <mxCell id="c24" value="执行结果回注为 tool 消息&lt;br&gt;再次请求模型继续处理" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=15;" vertex="1" parent="1">
           <mxGeometry x="1030" y="1410" width="350" height="150" as="geometry" />
         </mxCell>
         <mxCell id="ce1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;strokeWidth=2;" edge="1" parent="1" source="c1" target="c2">
