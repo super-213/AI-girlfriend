@@ -137,6 +137,26 @@ final class AgentRunner: AgentRunning, Sendable {
         }
         var allItems = try await loadItems(from: session)
         var newItems: [AgentItem] = []
+        var guardrailResults: [GuardrailResult] = []
+        emitStart(runID: runID, sessionID: session.id, agent: agent, events: events)
+        let guardrailContext = AgentGuardrailContext(
+            runID: runID,
+            sessionID: session.id,
+            agentID: agent.id,
+            context: context
+        )
+        for guardrail in agent.inputGuardrails {
+            let result = await evaluateInputGuardrail(
+                guardrail,
+                context: guardrailContext,
+                input: input
+            )
+            guardrailResults.append(result)
+            events.yield(.guardrailEvaluated(result))
+            guard result.action == .allow else {
+                throw AgentError.guardrailTriggered(result)
+            }
+        }
         let instructions = try await agent.instructions.resolve(using: context)
         if !allItems.contains(where: {
             if case .message(let message) = $0 { return message.role == .system }
@@ -150,10 +170,10 @@ final class AgentRunner: AgentRunning, Sendable {
             imagePaths: input.imagePaths
         )))
         newItems.append(contentsOf: input.followingItems)
+        newItems.append(contentsOf: guardrailResults.map { .guardrail(GuardrailItem(result: $0)) })
         allItems.append(contentsOf: newItems)
 
         let traceID = UUID()
-        emitStart(runID: runID, sessionID: session.id, agent: agent, events: events)
         return try await continueExecution(
             runID: runID,
             traceID: traceID,
@@ -169,6 +189,7 @@ final class AgentRunner: AgentRunning, Sendable {
             approvalResolutionsByToolCallID: [:],
             rawResponses: [],
             usage: .zero,
+            guardrailResults: guardrailResults,
             events: events
         )
     }
@@ -227,6 +248,7 @@ final class AgentRunner: AgentRunning, Sendable {
             approvalResolutionsByToolCallID: resolutions,
             rawResponses: state.rawResponses,
             usage: state.usage,
+            guardrailResults: state.guardrailResults,
             events: events
         )
     }
@@ -246,12 +268,14 @@ final class AgentRunner: AgentRunning, Sendable {
         approvalResolutionsByToolCallID: [String: ApprovalResolution],
         rawResponses initialResponses: [ModelResponse],
         usage initialUsage: AgentUsage,
+        guardrailResults initialGuardrailResults: [GuardrailResult],
         events: AsyncThrowingStream<AgentRunEvent, Error>.Continuation
     ) async throws -> RunResult<Output> {
         var allItems = initialItems
         var newItems = initialNewItems
         var rawResponses = initialResponses
         var usage = initialUsage
+        var guardrailResults = initialGuardrailResults
         var turnCount = completedTurnCount
 
         if !pendingCalls.isEmpty,
@@ -267,6 +291,7 @@ final class AgentRunner: AgentRunning, Sendable {
                providerContinuationID: nil,
                rawResponses: rawResponses,
                usage: usage,
+               guardrailResults: &guardrailResults,
                knownInterruptionsByToolCallID: knownInterruptionsByToolCallID,
                approvalResolutionsByToolCallID: approvalResolutionsByToolCallID,
                allItems: &allItems,
@@ -280,6 +305,7 @@ final class AgentRunner: AgentRunning, Sendable {
                 newItems: newItems,
                 usage: usage,
                 rawResponses: rawResponses,
+                guardrailResults: guardrailResults,
                 interruptions: interruption.interruptions,
                 state: interruption.state
             )
@@ -299,7 +325,8 @@ final class AgentRunner: AgentRunning, Sendable {
                     agentID: agent.id,
                     model: agent.model,
                     items: allItems,
-                    tools: agent.tools.map(\.definition)
+                    tools: agent.tools.map(\.definition),
+                    outputSchema: agent.outputSchema
                 ),
                 configuration: configuration,
                 events: events
@@ -322,6 +349,27 @@ final class AgentRunner: AgentRunning, Sendable {
 
             guard !response.toolCalls.isEmpty else {
                 let output = try decode(response.content, using: agent.outputDecoder)
+                let guardrailContext = AgentGuardrailContext(
+                    runID: runID,
+                    sessionID: session.id,
+                    agentID: agent.id,
+                    context: context
+                )
+                for guardrail in agent.outputGuardrails {
+                    let result = await evaluateOutputGuardrail(
+                        guardrail,
+                        context: guardrailContext,
+                        output: output
+                    )
+                    guardrailResults.append(result)
+                    events.yield(.guardrailEvaluated(result))
+                    let item = AgentItem.guardrail(GuardrailItem(result: result))
+                    allItems.append(item)
+                    newItems.append(item)
+                    guard result.action == .allow else {
+                        throw AgentError.guardrailTriggered(result)
+                    }
+                }
                 try await persistCompleted(items: allItems, session: session)
                 events.yield(.runCompleted)
                 return RunResult(
@@ -332,7 +380,7 @@ final class AgentRunner: AgentRunning, Sendable {
                     lastAgentID: agent.id,
                     usage: usage,
                     rawResponses: rawResponses,
-                    guardrailResults: [],
+                    guardrailResults: guardrailResults,
                     interruptions: [],
                     resumableState: nil
                 )
@@ -350,6 +398,7 @@ final class AgentRunner: AgentRunning, Sendable {
                 providerContinuationID: response.id,
                 rawResponses: rawResponses,
                 usage: usage,
+                guardrailResults: &guardrailResults,
                 knownInterruptionsByToolCallID: [:],
                 approvalResolutionsByToolCallID: [:],
                 allItems: &allItems,
@@ -363,6 +412,7 @@ final class AgentRunner: AgentRunning, Sendable {
                     newItems: newItems,
                     usage: usage,
                     rawResponses: rawResponses,
+                    guardrailResults: guardrailResults,
                     interruptions: interruption.interruptions,
                     state: interruption.state
                 )
@@ -389,6 +439,7 @@ final class AgentRunner: AgentRunning, Sendable {
         providerContinuationID: String?,
         rawResponses: [ModelResponse],
         usage: AgentUsage,
+        guardrailResults: inout [GuardrailResult],
         knownInterruptionsByToolCallID: [String: AgentInterruption],
         approvalResolutionsByToolCallID: [String: ApprovalResolution],
         allItems: inout [AgentItem],
@@ -396,20 +447,55 @@ final class AgentRunner: AgentRunning, Sendable {
         events: AsyncThrowingStream<AgentRunEvent, Error>.Continuation
     ) async throws -> PendingInterruption? {
         var unresolved: [AgentInterruption] = []
+        var guardrailApprovalSummaries: [String: String] = [:]
+        let guardrailContext = AgentGuardrailContext(
+            runID: runID,
+            sessionID: session.id,
+            agentID: agent.id,
+            context: context
+        )
         for call in calls {
             guard let tool = agent.tools.first(where: { $0.definition.name == call.name }) else {
                 continue
             }
-            let requiresApproval = try await tool.requiresApproval(arguments: call.arguments)
+            var requiresApproval = try await tool.requiresApproval(arguments: call.arguments)
+            for guardrail in agent.toolGuardrails {
+                let result = await evaluateToolInputGuardrail(
+                    guardrail,
+                    context: guardrailContext,
+                    call: call,
+                    tool: tool.definition
+                )
+                guardrailResults.append(result)
+                events.yield(.guardrailEvaluated(result))
+                let item = AgentItem.guardrail(GuardrailItem(result: result))
+                allItems.append(item)
+                newItems.append(item)
+                switch result.action {
+                case .allow:
+                    break
+                case .stop:
+                    throw AgentError.guardrailTriggered(result)
+                case .requireApproval:
+                    requiresApproval = true
+                    guardrailApprovalSummaries[call.id] = result.message
+                }
+            }
             guard requiresApproval,
                   approvalResolutionsByToolCallID[call.id] == nil else { continue }
             if let existing = knownInterruptionsByToolCallID[call.id] {
                 unresolved.append(existing)
             } else {
+                let summary: String
+                if let guardrailSummary = guardrailApprovalSummaries[call.id] {
+                    summary = guardrailSummary
+                } else {
+                    summary = await tool.approvalSummary(arguments: call.arguments)
+                }
                 unresolved.append(AgentInterruption(
                     runID: runID,
                     toolCall: call,
-                    summary: await tool.approvalSummary(arguments: call.arguments),
+                    summary: summary,
                     riskLevel: tool.behavior.riskLevel
                 ))
             }
@@ -432,6 +518,7 @@ final class AgentRunner: AgentRunning, Sendable {
                 providerContinuationID: providerContinuationID,
                 rawResponses: rawResponses,
                 usage: usage,
+                guardrailResults: guardrailResults,
                 traceID: traceID,
                 sessionID: session.id
             )
@@ -473,6 +560,18 @@ final class AgentRunner: AgentRunning, Sendable {
             for (_, result) in indexedResults.sorted(by: { $0.0 < $1.0 }) {
                 observationImages.append(contentsOf: result.imagePaths)
                 appendToolResult(result, allItems: &allItems, newItems: &newItems, events: events)
+                if let call = calls.first(where: { $0.id == result.toolCallID }) {
+                    try await applyToolOutputGuardrails(
+                        agent.toolGuardrails,
+                        context: guardrailContext,
+                        call: call,
+                        result: result,
+                        guardrailResults: &guardrailResults,
+                        allItems: &allItems,
+                        newItems: &newItems,
+                        events: events
+                    )
+                }
             }
         } else {
             for call in calls {
@@ -526,6 +625,16 @@ final class AgentRunner: AgentRunning, Sendable {
                 )
                 observationImages.append(contentsOf: result.imagePaths)
                 appendToolResult(result, allItems: &allItems, newItems: &newItems, events: events)
+                try await applyToolOutputGuardrails(
+                    agent.toolGuardrails,
+                    context: guardrailContext,
+                    call: call,
+                    result: result,
+                    guardrailResults: &guardrailResults,
+                    allItems: &allItems,
+                    newItems: &newItems,
+                    events: events
+                )
             }
         }
 
@@ -668,6 +777,11 @@ final class AgentRunner: AgentRunning, Sendable {
         guard agent.tools.isEmpty || provider.capabilities.supportsTools else {
             throw AgentError.modelRequestFailed(.unsupportedCapability("当前 Provider 不支持工具调用"))
         }
+        guard agent.outputSchema == nil || provider.capabilities.supportsStructuredOutput else {
+            throw AgentError.modelRequestFailed(
+                .unsupportedCapability("当前 Provider 不支持 JSON Schema 结构化输出")
+            )
+        }
     }
 
     private func emitStart<Context: Sendable, Output: Sendable>(
@@ -721,6 +835,133 @@ final class AgentRunner: AgentRunning, Sendable {
         catch { throw AgentError.outputValidationFailed(error.localizedDescription) }
     }
 
+    private func evaluateInputGuardrail<Context: Sendable>(
+        _ guardrail: AnyInputGuardrail<Context>,
+        context: AgentGuardrailContext<Context>,
+        input: AgentInput
+    ) async -> GuardrailResult {
+        do {
+            return decorate(
+                try await guardrail.evaluate(context: context, input: input),
+                name: guardrail.name,
+                stage: .input
+            )
+        } catch {
+            return guardrailFailure(name: guardrail.name, stage: .input, error: error)
+        }
+    }
+
+    private func evaluateOutputGuardrail<Context: Sendable, Output: Sendable>(
+        _ guardrail: AnyOutputGuardrail<Context, Output>,
+        context: AgentGuardrailContext<Context>,
+        output: Output
+    ) async -> GuardrailResult {
+        do {
+            return decorate(
+                try await guardrail.evaluate(context: context, output: output),
+                name: guardrail.name,
+                stage: .output
+            )
+        } catch {
+            return guardrailFailure(name: guardrail.name, stage: .output, error: error)
+        }
+    }
+
+    private func evaluateToolInputGuardrail<Context: Sendable>(
+        _ guardrail: AnyToolGuardrail<Context>,
+        context: AgentGuardrailContext<Context>,
+        call: ToolCallItem,
+        tool: ToolDefinition
+    ) async -> GuardrailResult {
+        do {
+            return decorate(
+                try await guardrail.evaluateInput(context: context, call: call, tool: tool),
+                name: guardrail.name,
+                stage: .toolInput,
+                toolCallID: call.id
+            )
+        } catch {
+            return guardrailFailure(
+                name: guardrail.name,
+                stage: .toolInput,
+                toolCallID: call.id,
+                error: error
+            )
+        }
+    }
+
+    private func applyToolOutputGuardrails<Context: Sendable>(
+        _ guardrails: [AnyToolGuardrail<Context>],
+        context: AgentGuardrailContext<Context>,
+        call: ToolCallItem,
+        result: ToolResultItem,
+        guardrailResults: inout [GuardrailResult],
+        allItems: inout [AgentItem],
+        newItems: inout [AgentItem],
+        events: AsyncThrowingStream<AgentRunEvent, Error>.Continuation
+    ) async throws {
+        for guardrail in guardrails {
+            let evaluated: GuardrailResult
+            do {
+                evaluated = decorate(
+                    try await guardrail.evaluateOutput(
+                        context: context,
+                        call: call,
+                        result: result
+                    ),
+                    name: guardrail.name,
+                    stage: .toolOutput,
+                    toolCallID: call.id
+                )
+            } catch {
+                evaluated = guardrailFailure(
+                    name: guardrail.name,
+                    stage: .toolOutput,
+                    toolCallID: call.id,
+                    error: error
+                )
+            }
+            guardrailResults.append(evaluated)
+            events.yield(.guardrailEvaluated(evaluated))
+            let item = AgentItem.guardrail(GuardrailItem(result: evaluated))
+            allItems.append(item)
+            newItems.append(item)
+            guard evaluated.action == .allow else {
+                throw AgentError.guardrailTriggered(evaluated)
+            }
+        }
+    }
+
+    private func decorate(
+        _ result: GuardrailResult,
+        name: String,
+        stage: GuardrailStage,
+        toolCallID: String? = nil
+    ) -> GuardrailResult {
+        GuardrailResult(
+            action: result.action,
+            message: result.message,
+            guardrailName: result.guardrailName ?? name,
+            stage: result.stage ?? stage,
+            toolCallID: result.toolCallID ?? toolCallID
+        )
+    }
+
+    private func guardrailFailure(
+        name: String,
+        stage: GuardrailStage,
+        toolCallID: String? = nil,
+        error: Error
+    ) -> GuardrailResult {
+        GuardrailResult(
+            action: .stop,
+            message: "Guardrail \(name) 执行失败：\(error.localizedDescription)",
+            guardrailName: name,
+            stage: stage,
+            toolCallID: toolCallID
+        )
+    }
+
     private func interruptedResult<Output: Sendable>(
         runID: UUID,
         agentID: String,
@@ -728,6 +969,7 @@ final class AgentRunner: AgentRunning, Sendable {
         newItems: [AgentItem],
         usage: AgentUsage,
         rawResponses: [ModelResponse],
+        guardrailResults: [GuardrailResult],
         interruptions: [AgentInterruption],
         state: RunState
     ) -> RunResult<Output> {
@@ -739,7 +981,7 @@ final class AgentRunner: AgentRunning, Sendable {
             lastAgentID: agentID,
             usage: usage,
             rawResponses: rawResponses,
-            guardrailResults: [],
+            guardrailResults: guardrailResults,
             interruptions: interruptions,
             resumableState: state
         )

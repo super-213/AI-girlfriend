@@ -265,6 +265,38 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         task?.resume()
     }
 
+    /// Builds the provider-neutral Agent adapter for the active model profile.
+    /// Legacy chat methods remain available for context compaction and older callers.
+    func makeAgentModelProvider() -> any AgentModelProvider {
+        let kind = ModelProvider(rawValue: provider.lowercased()) ?? .openAICompatible
+        var endpointText = apiUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        if kind == .openAICompatible,
+           endpointText.contains("dashscope.aliyuncs.com/compatible-mode/v1"),
+           !endpointText.contains("/chat/completions") {
+            if endpointText.hasSuffix("/") { endpointText.removeLast() }
+            endpointText += "/chat/completions"
+        }
+        let endpoint = URL(string: endpointText)
+            ?? URL(string: "http://127.0.0.1/invalid")!
+        let configuration = AgentProviderConfiguration(
+            id: contextWindowConfigurationIdentifier,
+            endpoint: endpoint,
+            model: aiModel.trimmingCharacters(in: .whitespacesAndNewlines),
+            apiKey: kind == .ollama ? nil : currentAPIKey()
+        )
+        switch kind {
+        case .zhipu:
+            return ZhipuChatProvider(configuration: configuration)
+        case .ollama:
+            return OllamaChatProvider(configuration: configuration)
+        case .openAICompatible:
+            if endpoint.path.lowercased().hasSuffix("/responses") {
+                return OpenAIResponsesProvider(configuration: configuration)
+            }
+            return OpenAICompatibleChatProvider(configuration: configuration)
+        }
+    }
+
     /// 发送非流式 JSON 请求，用于触发器意图检测等结构化输出场景
     func sendJSONRequest(
         messages: [[String: String]],

@@ -95,6 +95,7 @@ final class AgentRuntime {
         registry: AgentToolRegistry = .standard(),
         contextCompactionPolicy: AgentContextCompactionPolicy = .standard,
         runConfiguration: RunConfiguration = RunConfiguration(),
+        modelProvider: (any AgentModelProvider)? = nil,
         enabledSkillNameResolver: @escaping @MainActor @Sendable (String) -> String? = {
             if let skill = SkillLibrary.enabledSkill(named: $0) {
                 return skill.name
@@ -119,22 +120,27 @@ final class AgentRuntime {
         sessionSnapshot = initialSnapshot
         session = MemoryAgentSession(id: initialSnapshot.sessionID)
 
-        let provider = LegacyModelProvider(
-            client: apiManager,
-            normalizeToolCall: { call in
-                guard registry.tool(named: call.name) == nil,
-                      registry.tool(named: "read_skill") != nil,
-                      let canonicalName = enabledSkillNameResolver(call.name),
-                      let data = try? JSONSerialization.data(
-                          withJSONObject: ["name": canonicalName],
-                          options: [.sortedKeys]
-                      ),
-                      let arguments = String(data: data, encoding: .utf8) else {
-                    return call
-                }
-                return AgentToolCall(id: call.id, name: "read_skill", arguments: arguments)
+        let baseProvider: any AgentModelProvider
+        if let modelProvider {
+            baseProvider = modelProvider
+        } else if let manager = apiManager as? APIManager {
+            baseProvider = manager.makeAgentModelProvider()
+        } else {
+            baseProvider = LegacyModelProvider(client: apiManager)
+        }
+        let provider = ToolCallNormalizingModelProvider(base: baseProvider) { call in
+            guard registry.tool(named: call.name) == nil,
+                  registry.tool(named: "read_skill") != nil,
+                  let canonicalName = enabledSkillNameResolver(call.name),
+                  let data = try? JSONSerialization.data(
+                    withJSONObject: ["name": canonicalName],
+                    options: [.sortedKeys]
+                  ),
+                  let arguments = String(data: data, encoding: .utf8) else {
+                return call
             }
-        )
+            return ToolCallItem(id: call.id, name: "read_skill", arguments: arguments)
+        }
         runner = AgentRunner(provider: provider)
     }
 
@@ -387,7 +393,7 @@ final class AgentRuntime {
                 retainedMessageCount: event.retainedItemCount,
                 estimatedTokensBeforeCompaction: event.estimatedTokensBeforeCompaction
             ))
-        case .runStarted, .agentStarted, .modelCompleted, .usageUpdated,
+        case .runStarted, .agentStarted, .modelCompleted, .guardrailEvaluated, .usageUpdated,
              .handoff, .runCompleted, .runFailed:
             break
         }

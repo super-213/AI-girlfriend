@@ -6,6 +6,23 @@ struct ModelRequest: Sendable {
     let model: AgentModelConfiguration
     let items: [AgentItem]
     let tools: [ToolDefinition]
+    let outputSchema: AgentOutputSchema?
+
+    init(
+        runID: UUID,
+        agentID: String,
+        model: AgentModelConfiguration,
+        items: [AgentItem],
+        tools: [ToolDefinition],
+        outputSchema: AgentOutputSchema? = nil
+    ) {
+        self.runID = runID
+        self.agentID = agentID
+        self.model = model
+        self.items = items
+        self.tools = tools
+        self.outputSchema = outputSchema
+    }
 }
 
 struct ModelResponse: Codable, Equatable, Sendable {

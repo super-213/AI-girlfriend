@@ -1,7 +1,7 @@
 import Foundation
 
 struct RunState: Codable, Equatable, Sendable {
-    static let currentSchemaVersion = 2
+    static let currentSchemaVersion = 3
 
     let schemaVersion: Int
     let runID: UUID
@@ -15,6 +15,7 @@ struct RunState: Codable, Equatable, Sendable {
     let providerContinuationID: String?
     let rawResponses: [ModelResponse]
     let usage: AgentUsage
+    let guardrailResults: [GuardrailResult]
     let traceID: UUID
     let sessionID: String
 
@@ -31,6 +32,7 @@ struct RunState: Codable, Equatable, Sendable {
         providerContinuationID: String? = nil,
         rawResponses: [ModelResponse] = [],
         usage: AgentUsage = .zero,
+        guardrailResults: [GuardrailResult] = [],
         traceID: UUID,
         sessionID: String
     ) {
@@ -46,6 +48,7 @@ struct RunState: Codable, Equatable, Sendable {
         self.providerContinuationID = providerContinuationID
         self.rawResponses = rawResponses
         self.usage = usage
+        self.guardrailResults = guardrailResults
         self.traceID = traceID
         self.sessionID = sessionID
     }
@@ -53,7 +56,7 @@ struct RunState: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, runID, currentAgentID, turn, completedItems
         case pendingToolCalls, interruptions, approvalResolutionsByToolCallID
-        case contextCompaction, providerContinuationID, rawResponses, usage
+        case contextCompaction, providerContinuationID, rawResponses, usage, guardrailResults
         case traceID, sessionID
     }
 
@@ -83,6 +86,10 @@ struct RunState: Codable, Equatable, Sendable {
             forKey: .rawResponses
         ) ?? []
         usage = try container.decodeIfPresent(AgentUsage.self, forKey: .usage) ?? .zero
+        guardrailResults = try container.decodeIfPresent(
+            [GuardrailResult].self,
+            forKey: .guardrailResults
+        ) ?? []
         traceID = try container.decode(UUID.self, forKey: .traceID)
         sessionID = try container.decode(String.self, forKey: .sessionID)
     }

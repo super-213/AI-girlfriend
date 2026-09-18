@@ -51,6 +51,7 @@ enum AgentRunEvent: Sendable, Equatable {
     case modelCompleted(ModelResponseSnapshot)
     case toolCallStarted(ToolCallItem)
     case toolCallCompleted(ToolResultItem)
+    case guardrailEvaluated(GuardrailResult)
     case approvalRequired(AgentInterruption)
     case handoff(HandoffEvent)
     case contextCompactionStarted
