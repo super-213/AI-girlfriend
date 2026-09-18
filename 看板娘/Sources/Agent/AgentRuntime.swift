@@ -52,6 +52,7 @@ final class AgentRuntime {
     var onContextCompacted: ((AgentContextCompactionEvent) -> Void)?
     var onCompleted: (() -> Void)?
     var onError: ((Error) -> Void)?
+    var additionalSystemContext: String?
 
     private(set) var messages: [AgentMessage] = []
     private(set) var isRunning = false
@@ -540,6 +541,6 @@ final class AgentRuntime {
         工具结果会作为 tool message 返回；根据结果继续处理，直到给出最终答复。
         不要在普通文本中伪造工具调用，不要输出“命令:”或“[命令]”协议。
         """
-        return systemPromptProvider() + environment
+        return systemPromptProvider() + environment + (additionalSystemContext ?? "")
     }
 }

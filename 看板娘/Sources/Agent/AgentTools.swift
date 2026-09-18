@@ -296,7 +296,8 @@ private final class RunCommandTool: AgentTool {
         parameters: [
             "type": "object",
             "properties": [
-                "command": ["type": "string", "description": "要执行的单条 shell 命令"]
+                "command": ["type": "string", "description": "要执行的单条 shell 命令"],
+                "working_directory": ["type": "string", "description": "可选的绝对工作目录；项目会话中使用当前项目根目录"]
             ],
             "required": ["command"],
             "additionalProperties": false
@@ -327,8 +328,28 @@ private final class RunCommandTool: AgentTool {
             return
         }
 
+        let workingDirectory = (arguments["working_directory"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let workingDirectory, !workingDirectory.isEmpty {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(
+                atPath: workingDirectory,
+                isDirectory: &isDirectory
+            ), isDirectory.boolValue else {
+                completion(.failure("工作目录不存在：\(workingDirectory)"))
+                return
+            }
+            guard AgentFileAccessStore.shared.canRead(workingDirectory) else {
+                completion(.failure(AgentFileAccessStore.denialMessage(path: workingDirectory)))
+                return
+            }
+        }
+
         DispatchQueue.global(qos: .userInitiated).async {
-            let (exitCode, output) = CommandExecutionSupport.runShell(command)
+            let (exitCode, output) = CommandExecutionSupport.runShell(
+                command,
+                workingDirectory: workingDirectory
+            )
             let result = "退出码: \(exitCode)\n输出:\n\(output.isEmpty ? "(无输出)" : output)"
             Task { @MainActor in
                 completion(exitCode == 0 ? .success(result) : .failure(result))

@@ -12,10 +12,13 @@ enum CommandExecutionSupport {
         CommandPermissionPolicy().decision(for: command)
     }
 
-    static func runShell(_ command: String) -> (Int32, String) {
+    static func runShell(_ command: String, workingDirectory: String? = nil) -> (Int32, String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-lc", command]
+        if let workingDirectory, !workingDirectory.isEmpty {
+            process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory, isDirectory: true)
+        }
 
         let pipe = Pipe()
         process.standardOutput = pipe

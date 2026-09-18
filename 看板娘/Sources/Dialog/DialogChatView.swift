@@ -20,6 +20,9 @@ struct DialogChatView: View {
     @State private var isFileDropTargeted = false
     @State private var invocationSelection = 0
     @State private var invocationPickerSuppressed = false
+    @State private var isCreateProjectPresented = false
+    @State private var expandedProjectIDs = Set<UUID>()
+    @State private var projectPendingDeletion: DialogProject?
     @AppStorage(AgentWorkspaceSettings.showCloudTransferNoticeKey) private var showCloudTransferNotice = false
     @AppStorage(AgentWorkspaceSettings.showDirectoryAccessStatusKey) private var showDirectoryAccessStatus = false
 
@@ -34,7 +37,7 @@ struct DialogChatView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    viewModel.startNewConversation()
+                    viewModel.startNewConversation(in: viewModel.selectedProject?.id)
                     isInputFocused = true
                 } label: {
                     Label("新对话", systemImage: "square.and.pencil")
@@ -46,6 +49,9 @@ struct DialogChatView: View {
         .onAppear {
             viewModel.refreshCacheStatus()
             viewModel.refreshInvocationOptions()
+            if let projectID = viewModel.selectedProject?.id {
+                expandedProjectIDs.insert(projectID)
+            }
             isInputFocused = true
         }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
@@ -55,6 +61,9 @@ struct DialogChatView: View {
         .onChange(of: viewModel.selectedConversationID) { _, _ in
             inputEditorHeight = DialogTextEditor.minimumHeight
             isInputFocused = true
+            if let projectID = viewModel.selectedProject?.id {
+                expandedProjectIDs.insert(projectID)
+            }
         }
         .onChange(of: viewModel.inputText) { oldValue, newValue in
             guard oldValue != newValue else { return }
@@ -69,6 +78,37 @@ struct DialogChatView: View {
             )
             .interactiveDismissDisabled()
         }
+        .sheet(isPresented: $isCreateProjectPresented) {
+            DialogCreateProjectSheet { name, sourceDirectory in
+                guard viewModel.createProject(name: name, sourceDirectory: sourceDirectory) else {
+                    return false
+                }
+                if let projectID = viewModel.selectedProject?.id {
+                    expandedProjectIDs.insert(projectID)
+                }
+                isInputFocused = true
+                return true
+            }
+        }
+        .alert(
+            "从看板娘中移除项目？",
+            isPresented: Binding(
+                get: { projectPendingDeletion != nil },
+                set: { if !$0 { projectPendingDeletion = nil } }
+            ),
+            presenting: projectPendingDeletion
+        ) { project in
+            Button("移除项目", role: .destructive) {
+                viewModel.deleteProject(project.id)
+                expandedProjectIDs.remove(project.id)
+                projectPendingDeletion = nil
+            }
+            Button("取消", role: .cancel) {
+                projectPendingDeletion = nil
+            }
+        } message: { project in
+            Text("项目“\(project.name)”及其对话会从应用中移除，源文件夹中的文件不会被删除。")
+        }
     }
 
     private var sidebar: some View {
@@ -82,11 +122,29 @@ struct DialogChatView: View {
                 }
                 .disabled(viewModel.isBusy)
                 .help("开始新对话")
+
+                Button {
+                    isCreateProjectPresented = true
+                } label: {
+                    Label("新建项目", systemImage: "folder.badge.plus")
+                }
+                .disabled(viewModel.isBusy)
+                .help("添加一个源文件夹并创建项目")
             }
 
-            Section("对话历史") {
-                ForEach(sortedConversations) { conversation in
-                    conversationRow(conversation)
+            if !unassignedConversations.isEmpty {
+                Section("对话历史") {
+                    ForEach(unassignedConversations) { conversation in
+                        conversationRow(conversation)
+                    }
+                }
+            }
+
+            if !sortedProjects.isEmpty {
+                Section("项目") {
+                    ForEach(sortedProjects) { project in
+                        projectRow(project)
+                    }
                 }
             }
         }
@@ -101,6 +159,65 @@ struct DialogChatView: View {
                 .frame(height: 36)
                 .background(.bar)
         }
+    }
+
+    private func projectRow(_ project: DialogProject) -> some View {
+        DisclosureGroup(isExpanded: projectExpansionBinding(for: project.id)) {
+            ForEach(conversations(in: project.id)) { conversation in
+                conversationRow(conversation)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "folder")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 17)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(project.name)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+                    Text(project.sourceFolderName)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 4)
+
+                Button {
+                    expandedProjectIDs.insert(project.id)
+                    viewModel.startNewConversation(in: project.id)
+                    isInputFocused = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .semibold))
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isBusy)
+                .help("在“\(project.name)”中新建对话")
+            }
+            .contextMenu {
+                Button("在项目中新建对话", systemImage: "square.and.pencil") {
+                    expandedProjectIDs.insert(project.id)
+                    viewModel.startNewConversation(in: project.id)
+                    isInputFocused = true
+                }
+                Divider()
+                Button("在 Finder 中显示", systemImage: "folder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([
+                        URL(fileURLWithPath: project.sourceDirectory, isDirectory: true)
+                    ])
+                }
+                Divider()
+                Button("移除项目", systemImage: "trash", role: .destructive) {
+                    projectPendingDeletion = project
+                }
+                .disabled(viewModel.isBusy)
+            }
+        }
+        .accessibilityLabel("项目：\(project.name)")
     }
 
     private func conversationRow(_ conversation: DialogConversation) -> some View {
@@ -146,6 +263,7 @@ struct DialogChatView: View {
             inputArea
         }
         .navigationTitle(viewModel.selectedConversationTitle)
+        .navigationSubtitle(viewModel.selectedProject?.name ?? "")
         .background(Color(nsColor: .windowBackgroundColor))
         .overlay {
             if isFileDropTargeted {
@@ -234,12 +352,15 @@ struct DialogChatView: View {
             }
             .padding(.bottom, 20)
 
-            Text("要和看板娘聊点什么？")
+            Text(viewModel.selectedProject.map { "要在“\($0.name)”中做什么？" }
+                ?? "要和看板娘聊点什么？")
                 .font(.system(size: 24, weight: .semibold))
                 .tracking(-0.45)
                 .foregroundStyle(.primary)
 
-            Text("问问题、整理想法，或让我帮你完成一个任务。")
+            Text(viewModel.selectedProject.map {
+                "我会以 \($0.sourceFolderName) 为工作目录，继续记住这个项目的对话。"
+            } ?? "问问题、整理想法，或让我帮你完成一个任务。")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -624,8 +745,33 @@ struct DialogChatView: View {
         )
     }
 
-    private var sortedConversations: [DialogConversation] {
-        viewModel.conversations.sorted(by: { $0.updatedAt > $1.updatedAt })
+    private var unassignedConversations: [DialogConversation] {
+        viewModel.conversations
+            .filter { $0.projectID == nil }
+            .sorted(by: { $0.updatedAt > $1.updatedAt })
+    }
+
+    private var sortedProjects: [DialogProject] {
+        viewModel.projects.sorted(by: { $0.updatedAt > $1.updatedAt })
+    }
+
+    private func conversations(in projectID: UUID) -> [DialogConversation] {
+        viewModel.conversations
+            .filter { $0.projectID == projectID }
+            .sorted(by: { $0.updatedAt > $1.updatedAt })
+    }
+
+    private func projectExpansionBinding(for projectID: UUID) -> Binding<Bool> {
+        Binding(
+            get: { expandedProjectIDs.contains(projectID) },
+            set: { isExpanded in
+                if isExpanded {
+                    expandedProjectIDs.insert(projectID)
+                } else {
+                    expandedProjectIDs.remove(projectID)
+                }
+            }
+        )
     }
 
     private var canSend: Bool {
@@ -1062,5 +1208,181 @@ private struct DialogPressButtonStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
             .opacity(configuration.isPressed ? 0.84 : 1)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+
+private struct DialogCreateProjectSheet: View {
+    let onCreate: (String, URL) -> Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var isNameFocused: Bool
+    @State private var projectName = ""
+    @State private var sourceDirectory: URL?
+    @State private var isDropTargeted = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: "folder.badge.plus")
+                    .font(.system(size: 21, weight: .medium))
+                    .foregroundStyle(DesignColors.primary)
+                    .frame(width: 42, height: 42)
+                    .background(DesignColors.primary.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("创建项目")
+                        .font(.system(size: 22, weight: .semibold))
+                        .tracking(-0.35)
+                    Text("将对话和一个本机工作目录放在一起。")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("项目名称")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    Image(systemName: "folder")
+                        .foregroundStyle(.secondary)
+                    TextField("例如：看板娘", text: $projectName)
+                        .textFieldStyle(.plain)
+                        .focused($isNameFocused)
+                        .onSubmit(createProject)
+                }
+                .padding(.horizontal, 13)
+                .frame(height: 44)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 11))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 11)
+                        .strokeBorder(
+                            isNameFocused ? DesignColors.primary.opacity(0.75) : Color.primary.opacity(0.13),
+                            lineWidth: isNameFocused ? 1.5 : 1
+                        )
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("源文件夹")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                Button(action: chooseDirectory) {
+                    VStack(spacing: 11) {
+                        Image(systemName: sourceDirectory == nil ? "folder.badge.plus" : "folder.fill")
+                            .font(.system(size: 24, weight: .medium))
+                            .foregroundStyle(sourceDirectory == nil ? DesignColors.primary : .secondary)
+
+                        if let sourceDirectory {
+                            Text(sourceDirectory.lastPathComponent)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            Text(sourceDirectory.path)
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        } else {
+                            Text("选择此 Mac 上的文件夹")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.primary)
+                            Text("也可以将文件夹拖到这里")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 126)
+                    .background(Color.primary.opacity(isDropTargeted ? 0.075 : 0.035))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            .strokeBorder(
+                                isDropTargeted ? DesignColors.primary : Color.primary.opacity(0.13),
+                                style: StrokeStyle(lineWidth: isDropTargeted ? 1.5 : 1, dash: [6])
+                            )
+                    }
+                }
+                .buttonStyle(.plain)
+                .dropDestination(for: URL.self) { urls, _ in
+                    guard let directory = urls.first(where: isDirectory) else { return false }
+                    selectDirectory(directory)
+                    return true
+                } isTargeted: { isDropTargeted = $0 }
+            }
+
+            if let errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(DesignColors.warning)
+                    .transition(.opacity)
+            }
+
+            HStack(spacing: 10) {
+                Spacer()
+                Button("取消") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("创建项目", action: createProject)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canCreate)
+            }
+        }
+        .padding(26)
+        .frame(width: 560)
+        .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1), value: sourceDirectory)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: errorMessage)
+        .onAppear { isNameFocused = true }
+    }
+
+    private var canCreate: Bool {
+        !projectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && sourceDirectory != nil
+    }
+
+    private func chooseDirectory() {
+        let panel = NSOpenPanel()
+        panel.title = "选择项目源文件夹"
+        panel.message = "看板娘会将这个目录作为项目会话的工作区。"
+        panel.prompt = "添加"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let directory = panel.url else { return }
+        selectDirectory(directory)
+    }
+
+    private func selectDirectory(_ directory: URL) {
+        let standardized = directory.standardizedFileURL
+        guard isDirectory(standardized) else {
+            errorMessage = "请选择一个可用的文件夹。"
+            return
+        }
+        sourceDirectory = standardized
+        if projectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            projectName = standardized.lastPathComponent
+        }
+        errorMessage = nil
+        isNameFocused = projectName.isEmpty
+    }
+
+    private func isDirectory(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            && isDirectory.boolValue
+    }
+
+    private func createProject() {
+        guard canCreate, let sourceDirectory else { return }
+        guard onCreate(projectName, sourceDirectory) else {
+            errorMessage = "无法创建项目，请检查名称和源文件夹。"
+            return
+        }
+        dismiss()
     }
 }

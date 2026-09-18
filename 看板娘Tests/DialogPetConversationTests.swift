@@ -118,6 +118,7 @@ struct DialogPetConversationTests {
         let decoded = try JSONDecoder().decode(DialogConversation.self, from: legacyData)
 
         #expect(decoded.kind == .standard)
+        #expect(decoded.projectID == nil)
     }
 
     @MainActor

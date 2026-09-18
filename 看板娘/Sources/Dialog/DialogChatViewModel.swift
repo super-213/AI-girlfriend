@@ -75,6 +75,33 @@ struct QueuedDialogMessage: Identifiable, Equatable {
     }
 }
 
+struct DialogProject: Identifiable, Equatable, Codable {
+    let id: UUID
+    var name: String
+    let sourceDirectory: String
+    let createdAt: Date
+    var updatedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        sourceDirectory: String,
+        createdAt: Date = .now,
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.sourceDirectory = URL(fileURLWithPath: sourceDirectory).standardizedFileURL.path
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    var sourceFolderName: String {
+        let folderName = URL(fileURLWithPath: sourceDirectory).lastPathComponent
+        return folderName.isEmpty ? sourceDirectory : folderName
+    }
+}
+
 struct DialogConversation: Identifiable, Equatable, Codable {
     let id: UUID
     var title: String
@@ -83,6 +110,7 @@ struct DialogConversation: Identifiable, Equatable, Codable {
     let createdAt: Date
     var updatedAt: Date
     var kind: DialogConversationKind
+    var projectID: UUID?
 
     init(
         id: UUID = UUID(),
@@ -91,7 +119,8 @@ struct DialogConversation: Identifiable, Equatable, Codable {
         agentHistory: [AgentMessage] = [],
         createdAt: Date = .now,
         updatedAt: Date = .now,
-        kind: DialogConversationKind = .standard
+        kind: DialogConversationKind = .standard,
+        projectID: UUID? = nil
     ) {
         self.id = id
         self.title = title
@@ -100,10 +129,11 @@ struct DialogConversation: Identifiable, Equatable, Codable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.kind = kind
+        self.projectID = projectID
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, messages, agentHistory, createdAt, updatedAt, kind
+        case id, title, messages, agentHistory, createdAt, updatedAt, kind, projectID
     }
 
     init(from decoder: Decoder) throws {
@@ -115,6 +145,7 @@ struct DialogConversation: Identifiable, Equatable, Codable {
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         kind = try container.decodeIfPresent(DialogConversationKind.self, forKey: .kind) ?? .standard
+        projectID = try container.decodeIfPresent(UUID.self, forKey: .projectID)
     }
 }
 
@@ -122,20 +153,31 @@ struct DialogConversation: Identifiable, Equatable, Codable {
 final class DialogConversationStore {
     struct Change {
         let conversations: [DialogConversation]
+        let projects: [DialogProject]
         let sourceID: UUID
     }
 
     static let shared = DialogConversationStore(defaults: .standard)
     static let conversationsStorageKey = "dialog.conversations.v1"
+    static let projectsStorageKey = "dialog.projects.v1"
 
     private(set) var conversations: [DialogConversation]
+    private(set) var projects: [DialogProject]
     let changes = PassthroughSubject<Change, Never>()
 
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults) {
         self.defaults = defaults
-        conversations = Self.load(from: defaults)
+        projects = Self.loadProjects(from: defaults)
+        let projectIDs = Set(projects.map(\.id))
+        conversations = Self.load(from: defaults).map { conversation in
+            guard let projectID = conversation.projectID,
+                  !projectIDs.contains(projectID) else { return conversation }
+            var detached = conversation
+            detached.projectID = nil
+            return detached
+        }
     }
 
     var petConversation: DialogConversation? {
@@ -143,30 +185,62 @@ final class DialogConversationStore {
     }
 
     func replaceAll(_ conversations: [DialogConversation], sourceID: UUID) {
-        save(conversations, sourceID: sourceID)
+        save(conversations, projects: projects, sourceID: sourceID)
+    }
+
+    func replaceWorkspace(
+        conversations: [DialogConversation],
+        projects: [DialogProject],
+        sourceID: UUID
+    ) {
+        save(conversations, projects: projects, sourceID: sourceID)
     }
 
     func upsertPetConversation(_ conversation: DialogConversation, sourceID: UUID) {
         var updated = conversations.filter { $0.kind != .pet && $0.id != conversation.id }
         updated.append(conversation)
-        save(updated, sourceID: sourceID)
+        save(updated, projects: projects, sourceID: sourceID)
     }
 
     func deleteConversation(_ conversationID: UUID, sourceID: UUID) {
-        save(conversations.filter { $0.id != conversationID }, sourceID: sourceID)
+        save(
+            conversations.filter { $0.id != conversationID },
+            projects: projects,
+            sourceID: sourceID
+        )
     }
 
-    private func save(_ conversations: [DialogConversation], sourceID: UUID) {
+    private func save(
+        _ conversations: [DialogConversation],
+        projects: [DialogProject],
+        sourceID: UUID
+    ) {
         let normalized = Self.normalized(conversations)
-        guard let data = try? JSONEncoder().encode(normalized) else { return }
+        let normalizedProjects = Self.normalized(projects)
+        guard let data = try? JSONEncoder().encode(normalized),
+              let projectData = try? JSONEncoder().encode(normalizedProjects) else { return }
         self.conversations = normalized
+        self.projects = normalizedProjects
         defaults.set(data, forKey: Self.conversationsStorageKey)
-        changes.send(Change(conversations: normalized, sourceID: sourceID))
+        defaults.set(projectData, forKey: Self.projectsStorageKey)
+        changes.send(Change(
+            conversations: normalized,
+            projects: normalizedProjects,
+            sourceID: sourceID
+        ))
     }
 
     private static func load(from defaults: UserDefaults) -> [DialogConversation] {
         guard let data = defaults.data(forKey: conversationsStorageKey),
               let decoded = try? JSONDecoder().decode([DialogConversation].self, from: data) else {
+            return []
+        }
+        return normalized(decoded)
+    }
+
+    private static func loadProjects(from defaults: UserDefaults) -> [DialogProject] {
+        guard let data = defaults.data(forKey: projectsStorageKey),
+              let decoded = try? JSONDecoder().decode([DialogProject].self, from: data) else {
             return []
         }
         return normalized(decoded)
@@ -178,6 +252,13 @@ final class DialogConversationStore {
             .filter { $0.kind == .pet }
             .max(by: { $0.updatedAt < $1.updatedAt })
         return (regular + [newestPet].compactMap { $0 })
+            .sorted(by: { $0.updatedAt > $1.updatedAt })
+    }
+
+    private static func normalized(_ projects: [DialogProject]) -> [DialogProject] {
+        var seen = Set<UUID>()
+        return projects
+            .filter { seen.insert($0.id).inserted }
             .sorted(by: { $0.updatedAt > $1.updatedAt })
     }
 }
@@ -206,6 +287,7 @@ struct DialogCacheStatus: Equatable {
 @MainActor
 final class DialogChatViewModel: ObservableObject {
     @Published private(set) var conversations: [DialogConversation]
+    @Published private(set) var projects: [DialogProject]
     @Published private(set) var selectedConversationID: UUID
     @Published var messages: [DialogMessage]
     @Published var inputText: String = ""
@@ -236,6 +318,13 @@ final class DialogChatViewModel: ObservableObject {
         conversations.first(where: { $0.id == selectedConversationID })?.title ?? "对话"
     }
 
+    var selectedProject: DialogProject? {
+        guard let projectID = conversations
+            .first(where: { $0.id == selectedConversationID })?
+            .projectID else { return nil }
+        return projects.first(where: { $0.id == projectID })
+    }
+
     var isBusy: Bool {
         isRequesting || isExecutingTool
     }
@@ -262,6 +351,7 @@ final class DialogChatViewModel: ObservableObject {
         }
 
         let restored = resolvedConversationStore.conversations
+        let restoredProjects = resolvedConversationStore.projects
         let initialConversations = restored.isEmpty ? [DialogConversation()] : restored
         let storedSelection = defaults.string(forKey: Self.selectedConversationStorageKey)
             .flatMap(UUID.init(uuidString:))
@@ -270,6 +360,7 @@ final class DialogChatViewModel: ObservableObject {
         let initialConversation = initialConversations.first(where: { $0.id == initialSelection })!
 
         conversations = initialConversations
+        projects = restoredProjects
         selectedConversationID = initialSelection
         messages = initialConversation.messages
         cacheStatus = DialogCacheStatus.load(from: defaults)
@@ -277,10 +368,14 @@ final class DialogChatViewModel: ObservableObject {
 
         configureAgentRuntime()
         self.agentRuntime.restoreConversation(initialConversation.agentHistory)
+        updateAgentWorkspaceContext()
         conversationStoreCancellable = resolvedConversationStore.changes
             .sink { [weak self] change in
                 guard let self, change.sourceID != self.conversationStoreSourceID else { return }
-                self.applyConversationStoreChange(change.conversations)
+                self.applyConversationStoreChange(
+                    change.conversations,
+                    projects: change.projects
+                )
             }
     }
 
@@ -365,18 +460,19 @@ final class DialogChatViewModel: ObservableObject {
         inputText = AgentInvocationParser.replacingQuery(in: inputText, with: option)
     }
 
-    func startNewConversation() {
+    func startNewConversation(in projectID: UUID? = nil) {
         guard !isBusy else { return }
 
         synchronizeSelectedConversation(persist: true, updateTimestamp: false)
-        if messages.isEmpty {
+        let selectedConversation = conversations.first(where: { $0.id == selectedConversationID })
+        if messages.isEmpty, selectedConversation?.projectID == projectID {
             inputText = ""
             pendingAttachments = []
             return
         }
 
         streamTextCoalescer.reset()
-        let conversation = DialogConversation()
+        let conversation = DialogConversation(projectID: projectID)
         conversations.append(conversation)
         selectedConversationID = conversation.id
         messages = []
@@ -384,6 +480,73 @@ final class DialogChatViewModel: ObservableObject {
         pendingAttachments = []
         activeAssistantID = nil
         agentRuntime.startNewConversation()
+        updateAgentWorkspaceContext()
+        persistConversations()
+    }
+
+    @discardableResult
+    func createProject(name: String, sourceDirectory: URL) -> Bool {
+        guard !isBusy else { return false }
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let directory = sourceDirectory.standardizedFileURL
+        var isDirectory: ObjCBool = false
+        guard !trimmedName.isEmpty,
+              FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory),
+              isDirectory.boolValue,
+              !projects.contains(where: { $0.sourceDirectory == directory.path }) else { return false }
+
+        synchronizeSelectedConversation(persist: false, updateTimestamp: false)
+        if let index = conversations.firstIndex(where: { $0.id == selectedConversationID }),
+           conversations[index].kind == .standard,
+           conversations[index].projectID == nil,
+           conversations[index].messages.isEmpty,
+           conversations[index].agentHistory.isEmpty {
+            conversations.remove(at: index)
+        }
+        let project = DialogProject(name: trimmedName, sourceDirectory: directory.path)
+        let conversation = DialogConversation(projectID: project.id)
+        projects.append(project)
+        conversations.append(conversation)
+        streamTextCoalescer.reset()
+        selectedConversationID = conversation.id
+        messages = []
+        inputText = ""
+        pendingAttachments = []
+        queuedMessages = []
+        activeAssistantID = nil
+        showToolConfirmation = false
+        pendingToolSummary = ""
+        agentRuntime.startNewConversation()
+        updateAgentWorkspaceContext()
+        persistConversations()
+        return true
+    }
+
+    func deleteProject(_ projectID: UUID) {
+        guard !isBusy,
+              projects.contains(where: { $0.id == projectID }) else { return }
+
+        let removedSelectedConversation = conversations
+            .first(where: { $0.id == selectedConversationID })?
+            .projectID == projectID
+        projects.removeAll(where: { $0.id == projectID })
+        conversations.removeAll(where: { $0.projectID == projectID })
+        if conversations.isEmpty {
+            conversations = [DialogConversation()]
+        }
+
+        if removedSelectedConversation {
+            let next = conversations.max(by: { $0.updatedAt < $1.updatedAt })!
+            streamTextCoalescer.reset()
+            selectedConversationID = next.id
+            messages = next.messages
+            inputText = ""
+            pendingAttachments = []
+            queuedMessages = []
+            activeAssistantID = nil
+            agentRuntime.restoreConversation(next.agentHistory)
+            updateAgentWorkspaceContext()
+        }
         persistConversations()
     }
 
@@ -402,19 +565,35 @@ final class DialogChatViewModel: ObservableObject {
         showToolConfirmation = false
         pendingToolSummary = ""
         agentRuntime.restoreConversation(conversation.agentHistory)
+        updateAgentWorkspaceContext()
         persistConversations()
     }
 
     func deleteConversation(_ conversationID: UUID) {
         guard !isBusy, let index = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
 
+        let deletedConversation = conversations[index]
         conversations.remove(at: index)
-        if conversations.isEmpty {
-            conversations = [DialogConversation()]
-        }
 
         if selectedConversationID == conversationID {
-            let next = conversations.sorted(by: { $0.updatedAt > $1.updatedAt }).first!
+            let next: DialogConversation
+            if let projectID = deletedConversation.projectID,
+               projects.contains(where: { $0.id == projectID }) {
+                if let projectConversation = conversations
+                    .filter({ $0.projectID == projectID })
+                    .max(by: { $0.updatedAt < $1.updatedAt }) {
+                    next = projectConversation
+                } else {
+                    let replacement = DialogConversation(projectID: projectID)
+                    conversations.append(replacement)
+                    next = replacement
+                }
+            } else {
+                if conversations.isEmpty {
+                    conversations.append(DialogConversation())
+                }
+                next = conversations.max(by: { $0.updatedAt < $1.updatedAt })!
+            }
             streamTextCoalescer.reset()
             selectedConversationID = next.id
             messages = next.messages
@@ -422,6 +601,7 @@ final class DialogChatViewModel: ObservableObject {
             pendingAttachments = []
             activeAssistantID = nil
             agentRuntime.restoreConversation(next.agentHistory)
+            updateAgentWorkspaceContext()
         }
         persistConversations()
     }
@@ -575,6 +755,10 @@ final class DialogChatViewModel: ObservableObject {
             : title(for: messages)
         if updateTimestamp {
             conversations[index].updatedAt = .now
+            if let projectID = conversations[index].projectID,
+               let projectIndex = projects.firstIndex(where: { $0.id == projectID }) {
+                projects[projectIndex].updatedAt = conversations[index].updatedAt
+            }
         }
         if persist {
             persistConversations()
@@ -593,11 +777,18 @@ final class DialogChatViewModel: ObservableObject {
     }
 
     private func persistConversations() {
-        conversationStore.replaceAll(conversations, sourceID: conversationStoreSourceID)
+        conversationStore.replaceWorkspace(
+            conversations: conversations,
+            projects: projects,
+            sourceID: conversationStoreSourceID
+        )
         defaults.set(selectedConversationID.uuidString, forKey: Self.selectedConversationStorageKey)
     }
 
-    private func applyConversationStoreChange(_ storedConversations: [DialogConversation]) {
+    private func applyConversationStoreChange(
+        _ storedConversations: [DialogConversation],
+        projects storedProjects: [DialogProject]
+    ) {
         // Keep an in-flight selection stable. In particular, the pet-side
         // expiration timer may fire while this window is actively continuing
         // the shared pet conversation; completion below will publish the
@@ -605,6 +796,7 @@ final class DialogChatViewModel: ObservableObject {
         if isBusy {
             if storedConversations.contains(where: { $0.id == selectedConversationID }) {
                 conversations = storedConversations
+                projects = storedProjects
             }
             return
         }
@@ -612,17 +804,20 @@ final class DialogChatViewModel: ObservableObject {
         if storedConversations.isEmpty {
             let conversation = DialogConversation()
             conversations = [conversation]
+            projects = storedProjects
             selectedConversationID = conversation.id
             messages = []
             inputText = ""
             pendingAttachments = []
             activeAssistantID = nil
             agentRuntime.startNewConversation()
+            updateAgentWorkspaceContext()
             persistConversations()
             return
         }
 
         conversations = storedConversations
+        projects = storedProjects
         let selection = storedConversations.first(where: { $0.id == selectedConversationID })
             ?? storedConversations.max(by: { $0.updatedAt < $1.updatedAt })!
         streamTextCoalescer.reset()
@@ -634,7 +829,27 @@ final class DialogChatViewModel: ObservableObject {
         showToolConfirmation = false
         pendingToolSummary = ""
         agentRuntime.restoreConversation(selection.agentHistory)
+        updateAgentWorkspaceContext()
         defaults.set(selectedConversationID.uuidString, forKey: Self.selectedConversationStorageKey)
+    }
+
+    private func updateAgentWorkspaceContext() {
+        guard let project = selectedProject else {
+            agentRuntime.additionalSystemContext = nil
+            return
+        }
+        AgentFileAccessStore.shared.grantSessionAccess(to: [
+            URL(fileURLWithPath: project.sourceDirectory, isDirectory: true)
+        ])
+        agentRuntime.additionalSystemContext = """
+
+        ## 当前项目工作区
+        项目名称：\(project.name)
+        项目根目录：\(project.sourceDirectory)
+        用户已将该目录设为当前项目的源文件夹，并授权你为完成项目任务读取它。
+        将该目录视为当前工作目录；当用户使用“这个项目”、“项目代码”或相对路径时，都从该根目录解析。
+        调用文件工具时使用该目录下的绝对路径；执行 Shell 命令时将 working_directory 设为该目录。
+        """
     }
 
     private static func artifact(toolName: String, result: String) -> DialogArtifact? {
