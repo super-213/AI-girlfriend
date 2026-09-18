@@ -15,6 +15,7 @@ struct DialogChatView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @State private var isInputFocused = false
+    @State private var isComposingInput = false
     @State private var inputEditorHeight: CGFloat = DialogTextEditor.minimumHeight
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isFileDropTargeted = false
@@ -542,7 +543,7 @@ struct DialogChatView: View {
 
             HStack(alignment: .bottom, spacing: 10) {
                 ZStack(alignment: .topLeading) {
-                    if viewModel.inputText.isEmpty {
+                    if viewModel.inputText.isEmpty && !isComposingInput {
                         Text(inputPlaceholder)
                             .font(.system(size: 14))
                             .foregroundStyle(Color(nsColor: .placeholderTextColor))
@@ -554,6 +555,7 @@ struct DialogChatView: View {
                         text: $viewModel.inputText,
                         height: $inputEditorHeight,
                         isFocused: $isInputFocused,
+                        isComposingText: $isComposingInput,
                         isEditable: true,
                         isInvocationPickerVisible: !filteredInvocationOptions.isEmpty
                             && activeInvocationQuery != nil,
@@ -1150,6 +1152,37 @@ private struct DialogFileResultsCard: View {
     }
 }
 
+private final class DialogComposerTextView: NSTextView {
+    var onMarkedTextStateChange: ((Bool) -> Void)?
+
+    override func setMarkedText(
+        _ string: Any,
+        selectedRange: NSRange,
+        replacementRange: NSRange
+    ) {
+        super.setMarkedText(
+            string,
+            selectedRange: selectedRange,
+            replacementRange: replacementRange
+        )
+        reportMarkedTextState()
+    }
+
+    override func unmarkText() {
+        super.unmarkText()
+        reportMarkedTextState()
+    }
+
+    override func insertText(_ insertString: Any, replacementRange: NSRange) {
+        super.insertText(insertString, replacementRange: replacementRange)
+        reportMarkedTextState()
+    }
+
+    private func reportMarkedTextState() {
+        onMarkedTextStateChange?(hasMarkedText())
+    }
+}
+
 private struct DialogTextEditor: NSViewRepresentable {
     static let minimumHeight: CGFloat = 22
     static let maximumHeight: CGFloat = 112
@@ -1157,6 +1190,7 @@ private struct DialogTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var height: CGFloat
     @Binding var isFocused: Bool
+    @Binding var isComposingText: Bool
     let isEditable: Bool
     let isInvocationPickerVisible: Bool
     let onMoveInvocationSelection: (Int) -> Void
@@ -1176,7 +1210,7 @@ private struct DialogTextEditor: NSViewRepresentable {
         scrollView.hasVerticalScroller = false
         scrollView.autohidesScrollers = true
 
-        let textView = NSTextView(frame: NSRect(
+        let textView = DialogComposerTextView(frame: NSRect(
             origin: .zero,
             size: NSSize(width: 0, height: Self.minimumHeight)
         ))
@@ -1184,7 +1218,7 @@ private struct DialogTextEditor: NSViewRepresentable {
         textView.string = text
         textView.font = NSFont.systemFont(ofSize: 14)
         textView.textColor = .labelColor
-        textView.insertionPointColor = .controlAccentColor
+        textView.insertionPointColor = .labelColor
         textView.drawsBackground = false
         textView.isRichText = false
         textView.allowsUndo = true
@@ -1199,6 +1233,9 @@ private struct DialogTextEditor: NSViewRepresentable {
             height: CGFloat.greatestFiniteMagnitude
         )
         textView.setAccessibilityLabel("消息")
+        textView.onMarkedTextStateChange = { [weak coordinator = context.coordinator] isComposing in
+            coordinator?.updateCompositionState(isComposing)
+        }
 
         scrollView.documentView = textView
 
@@ -1215,7 +1252,9 @@ private struct DialogTextEditor: NSViewRepresentable {
         guard let textView = scrollView.documentView as? NSTextView else { return }
         context.coordinator.parent = self
 
-        if textView.string != text {
+        // Do not replace the editor contents while an input method owns marked text.
+        // Reassigning `string` here would cancel the first composing keystroke.
+        if !textView.hasMarkedText(), textView.string != text {
             textView.string = text
             textView.scrollRangeToVisible(textView.selectedRange())
         }
@@ -1246,6 +1285,7 @@ private struct DialogTextEditor: NSViewRepresentable {
 
         func textDidEndEditing(_ notification: Notification) {
             parent.isFocused = false
+            parent.isComposingText = false
         }
 
         func textDidChange(_ notification: Notification) {
@@ -1253,8 +1293,14 @@ private struct DialogTextEditor: NSViewRepresentable {
                   let scrollView = textView.enclosingScrollView else { return }
 
             parent.text = textView.string
+            parent.isComposingText = textView.hasMarkedText()
             updateHeight(for: textView, in: scrollView)
             textView.scrollRangeToVisible(textView.selectedRange())
+        }
+
+        func updateCompositionState(_ isComposing: Bool) {
+            guard parent.isComposingText != isComposing else { return }
+            parent.isComposingText = isComposing
         }
 
         func textView(
