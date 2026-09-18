@@ -84,6 +84,8 @@ final class PetViewBackend: ObservableObject {
     private let automationStore: AutomationStore
     private let triggerDispatcher: TriggerDispatcher
     private let codexTaskMonitor: CodexTaskMonitor
+    private let conversationStore: DialogConversationStore
+    private let conversationStoreSourceID = UUID()
     private let assetResolver = PetAssetResolver()
     private var outputBoxHideTimer: AnyCancellable?
     private var periodicAutoActionTimer: AnyCancellable?
@@ -92,6 +94,9 @@ final class PetViewBackend: ObservableObject {
     private var sleepTimer: Timer?
     private var conversationExpirationTimer: Timer?
     private var petConversationSession = PetConversationSession()
+    private var petConversationID: UUID?
+    private var petDialogMessages: [DialogMessage] = []
+    private var activePetAssistantMessageID: UUID?
     private var cancellables = Set<AnyCancellable>()
     private var notificationObservers: [NSObjectProtocol] = []
 
@@ -115,12 +120,14 @@ final class PetViewBackend: ObservableObject {
         automationStore: AutomationStore = .shared,
         triggerDispatcher: TriggerDispatcher = .shared,
         codexTaskMonitor: CodexTaskMonitor = .shared,
+        conversationStore: DialogConversationStore = .shared,
         stateCoordinator: PetStateCoordinator? = nil
     ) {
         self.apiManager = apiManager
         self.automationStore = automationStore
         self.triggerDispatcher = triggerDispatcher
         self.codexTaskMonitor = codexTaskMonitor
+        self.conversationStore = conversationStore
         self.stateCoordinator = stateCoordinator ?? PetStateCoordinator()
 
         currentCharacter = Self.initialCharacter()
@@ -128,6 +135,8 @@ final class PetViewBackend: ObservableObject {
         prefetchInteractionDurations()
         refreshConversationStyle()
         configureAgentRuntime()
+        bindConversationStore()
+        restorePersistedPetConversation()
         bindState()
         bindCodexMonitor()
         codexTaskMonitor.start()
@@ -192,7 +201,9 @@ final class PetViewBackend: ObservableObject {
                 prompt,
                 runID: runID,
                 imagePaths: attachments.filter(\.isImage).map(\.path),
-                explicitInvocation: submission.invocation
+                explicitInvocation: submission.invocation,
+                visibleText: submission.visibleText.isEmpty ? "请分析这些附件" : submission.visibleText,
+                attachments: attachments
             )
             return
         }
@@ -201,7 +212,8 @@ final class PetViewBackend: ObservableObject {
             continueChatProcessing(
                 submission.instruction,
                 runID: runID,
-                explicitInvocation: invocation
+                explicitInvocation: invocation,
+                visibleText: submission.visibleText
             )
             return
         }
@@ -397,9 +409,20 @@ final class PetViewBackend: ObservableObject {
         _ input: String,
         runID: UUID,
         imagePaths: [String] = [],
-        explicitInvocation: AgentInvocation? = nil
+        explicitInvocation: AgentInvocation? = nil,
+        visibleText: String? = nil,
+        attachments: [LocalFileAttachment] = []
     ) {
         restorePetConversationForNextInput()
+        if petConversationID == nil {
+            petConversationID = UUID()
+            petDialogMessages = []
+        }
+        petDialogMessages.append(DialogMessage(
+            role: .user,
+            content: visibleText ?? input,
+            attachments: attachments
+        ))
         activeRequestID = runID
         activeRequestKind = .conversation
         streamTextCoalescer.reset()
@@ -411,6 +434,7 @@ final class PetViewBackend: ObservableObject {
             imagePaths: imagePaths,
             explicitInvocation: explicitInvocation
         )
+        persistPetConversation(at: .now)
     }
 
     private func configureAgentRuntime() {
@@ -429,6 +453,13 @@ final class PetViewBackend: ObservableObject {
             self.isExecutingCommand = false
             switch self.activeRequestKind {
             case .conversation:
+                let messageID = UUID()
+                self.activePetAssistantMessageID = messageID
+                self.petDialogMessages.append(DialogMessage(
+                    id: messageID,
+                    role: .assistant,
+                    content: ""
+                ))
                 self.stateCoordinator.send(.conversationStarted(runID))
             case .automation:
                 self.stateCoordinator.send(.automationStarted(runID))
@@ -456,6 +487,9 @@ final class PetViewBackend: ObservableObject {
             self.streamTextCoalescer.flush()
             self.isExecutingCommand = true
             self.streamedResponse = "正在调用工具：\(name)…"
+            if self.activeRequestKind == .conversation {
+                self.fillEmptyPetAssistantMessage("正在调用工具：\(name)…")
+            }
             self.revealOutputBox(autoHideAfter: 30)
             self.stateCoordinator.send(.commandStarted(runID))
         }
@@ -506,7 +540,8 @@ final class PetViewBackend: ObservableObject {
             }
             self.revealOutputBox(autoHideAfter: self.configuredBubbleDuration)
             if kind == .conversation {
-                self.petConversationSession.record(history: self.agentRuntime.messages, at: .now)
+                self.fillEmptyPetAssistantMessage("（模型没有返回文本）")
+                self.recordPetConversationAndScheduleExpiration()
             }
             self.activeRequestID = nil
             self.activeRequestKind = nil
@@ -523,6 +558,9 @@ final class PetViewBackend: ObservableObject {
             self.showCommandConfirm = false
             self.pendingCommand = ""
             self.streamedResponse = "请求失败：\(message)"
+            if self.activeRequestKind == .conversation {
+                self.fillEmptyPetAssistantMessage("请求失败：\(message)")
+            }
             self.revealOutputBox(autoHideAfter: 15)
             let kind = self.activeRequestKind
             switch kind {
@@ -534,7 +572,7 @@ final class PetViewBackend: ObservableObject {
                 return
             }
             if kind == .conversation {
-                self.petConversationSession.record(history: self.agentRuntime.messages, at: .now)
+                self.recordPetConversationAndScheduleExpiration()
             }
             self.activeRequestID = nil
             self.activeRequestKind = nil
@@ -546,6 +584,64 @@ final class PetViewBackend: ObservableObject {
 
     private func appendStreamedResponse(_ text: String) {
         streamedResponseStore.append(text, limit: 5_000)
+        guard activeRequestKind == .conversation,
+              let messageID = activePetAssistantMessageID,
+              let index = petDialogMessages.firstIndex(where: { $0.id == messageID }) else { return }
+        petDialogMessages[index].content += text
+    }
+
+    private func fillEmptyPetAssistantMessage(_ text: String) {
+        guard let messageID = activePetAssistantMessageID,
+              let index = petDialogMessages.firstIndex(where: { $0.id == messageID }),
+              petDialogMessages[index].content.isEmpty else { return }
+        petDialogMessages[index].content = text
+    }
+
+    private func bindConversationStore() {
+        conversationStore.changes
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] change in
+                guard let self, change.sourceID != self.conversationStoreSourceID else { return }
+                self.handleConversationStoreChange(change.conversations)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func handleConversationStoreChange(_ conversations: [DialogConversation]) {
+        let storedPetConversation = conversations.first(where: { $0.kind == .pet })
+        if activeRequestKind == .conversation {
+            guard let petConversationID,
+                  storedPetConversation?.id == petConversationID else {
+                cancelPetConversationDeletedFromDialog()
+                return
+            }
+            return
+        }
+        guard activeRequestID == nil else { return }
+
+        guard let storedPetConversation else {
+            clearPetConversationState()
+            return
+        }
+        loadPetConversation(storedPetConversation)
+        schedulePetConversationExpiration(at: .now)
+    }
+
+    private func cancelPetConversationDeletedFromDialog() {
+        streamTextCoalescer.reset()
+        agentRuntime.cancel()
+        apiManager.cancelStreamRequest()
+        activeRequestID = nil
+        activeRequestKind = nil
+        isRecognizingTrigger = false
+        isCompactingContext = false
+        isExecutingCommand = false
+        showCommandConfirm = false
+        pendingCommand = ""
+        stateCoordinator.send(.resetToIdle)
+        clearPetConversationState()
+        streamedResponse = "桌宠会话已在完整模式中删除。"
+        revealOutputBox(autoHideAfter: 6)
     }
 
     private func tryLegacyAppleMusicFallback(_ input: String, runID: UUID) -> Bool {
@@ -727,16 +823,73 @@ final class PetViewBackend: ObservableObject {
     private func restorePetConversationForNextInput(at date: Date = .now) {
         conversationExpirationTimer?.invalidate()
         conversationExpirationTimer = nil
+        guard let storedConversation = conversationStore.petConversation else {
+            clearPetConversationState()
+            return
+        }
+        loadPetConversation(storedConversation)
         let history = petConversationSession.historyForNextInput(
             at: date,
             timeout: PetConversationRetention.timeout()
         )
+        guard !history.isEmpty else {
+            conversationStore.deleteConversation(
+                storedConversation.id,
+                sourceID: conversationStoreSourceID
+            )
+            clearPetConversationState()
+            return
+        }
         agentRuntime.restoreConversation(history)
     }
 
     private func recordPetConversationAndScheduleExpiration(at date: Date = .now) {
-        petConversationSession.record(history: agentRuntime.messages, at: date)
+        persistPetConversation(at: date)
         schedulePetConversationExpiration(at: date)
+    }
+
+    private func persistPetConversation(at date: Date) {
+        guard let petConversationID else { return }
+        let existing = conversationStore.petConversation
+        let createdAt = existing?.id == petConversationID
+            ? (existing?.createdAt ?? date)
+            : date
+        let conversation = DialogConversation(
+            id: petConversationID,
+            title: "桌宠对话",
+            messages: petDialogMessages,
+            agentHistory: agentRuntime.messages,
+            createdAt: createdAt,
+            updatedAt: date,
+            kind: .pet
+        )
+        petConversationSession.record(history: conversation.agentHistory, at: date)
+        conversationStore.upsertPetConversation(conversation, sourceID: conversationStoreSourceID)
+    }
+
+    private func restorePersistedPetConversation(at date: Date = .now) {
+        guard let conversation = conversationStore.petConversation else { return }
+        loadPetConversation(conversation)
+        petConversationSession.expireIfNeeded(
+            at: date,
+            timeout: PetConversationRetention.timeout()
+        )
+        if petConversationSession.isEmpty {
+            conversationStore.deleteConversation(conversation.id, sourceID: conversationStoreSourceID)
+            clearPetConversationState()
+        } else {
+            agentRuntime.restoreConversation(conversation.agentHistory)
+            schedulePetConversationExpiration(at: date)
+        }
+    }
+
+    private func loadPetConversation(_ conversation: DialogConversation) {
+        petConversationID = conversation.id
+        petDialogMessages = conversation.messages
+        activePetAssistantMessageID = nil
+        petConversationSession.destroy()
+        petConversationSession.record(history: conversation.agentHistory, at: conversation.updatedAt)
+        agentRuntime.restoreConversation(conversation.agentHistory)
     }
 
     private func schedulePetConversationExpiration(at date: Date = .now) {
@@ -753,8 +906,7 @@ final class PetViewBackend: ObservableObject {
             return
         }
         guard remaining > 0 else {
-            petConversationSession.destroy()
-            clearRuntimeIfPetConversationExpired()
+            destroyPersistedPetConversation()
             return
         }
 
@@ -774,10 +926,30 @@ final class PetViewBackend: ObservableObject {
             timeout: PetConversationRetention.timeout()
         )
         if petConversationSession.isEmpty {
-            clearRuntimeIfPetConversationExpired()
+            destroyPersistedPetConversation()
         } else {
             schedulePetConversationExpiration(at: date)
         }
+    }
+
+    private func destroyPersistedPetConversation() {
+        if let petConversationID {
+            conversationStore.deleteConversation(
+                petConversationID,
+                sourceID: conversationStoreSourceID
+            )
+        }
+        clearPetConversationState()
+    }
+
+    private func clearPetConversationState() {
+        conversationExpirationTimer?.invalidate()
+        conversationExpirationTimer = nil
+        petConversationSession.destroy()
+        petConversationID = nil
+        petDialogMessages = []
+        activePetAssistantMessageID = nil
+        clearRuntimeIfPetConversationExpired()
     }
 
     private func clearRuntimeIfPetConversationExpired() {

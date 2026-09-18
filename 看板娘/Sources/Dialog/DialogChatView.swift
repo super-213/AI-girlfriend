@@ -107,7 +107,9 @@ struct DialogChatView: View {
         let isSelected = conversation.id == viewModel.selectedConversationID
 
         return HStack(spacing: 8) {
-            Image(systemName: isSelected ? "bubble.left.fill" : "bubble.left")
+            Image(systemName: conversation.kind == .pet
+                ? "pawprint.fill"
+                : (isSelected ? "bubble.left.fill" : "bubble.left"))
                 .foregroundStyle(isSelected ? DesignColors.primary : Color.secondary)
                 .frame(width: 17)
 
@@ -116,7 +118,9 @@ struct DialogChatView: View {
                     .fontWeight(isSelected ? .semibold : .regular)
                     .lineLimit(1)
 
-                Text(relativeTimestamp(for: conversation.updatedAt))
+                Text(conversation.kind == .pet
+                    ? "桌宠会话 · \(relativeTimestamp(for: conversation.updatedAt))"
+                    : relativeTimestamp(for: conversation.updatedAt))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

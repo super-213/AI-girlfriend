@@ -5,8 +5,14 @@
 //  对话窗口的状态管理、历史会话与上下文聊天请求
 //
 
+import Combine
 import Foundation
 import SwiftUI
+
+enum DialogConversationKind: String, Codable {
+    case standard
+    case pet
+}
 
 struct DialogMessage: Identifiable, Equatable, Codable {
     enum Role: String, Codable {
@@ -76,6 +82,7 @@ struct DialogConversation: Identifiable, Equatable, Codable {
     var agentHistory: [AgentMessage]
     let createdAt: Date
     var updatedAt: Date
+    var kind: DialogConversationKind
 
     init(
         id: UUID = UUID(),
@@ -83,7 +90,8 @@ struct DialogConversation: Identifiable, Equatable, Codable {
         messages: [DialogMessage] = [],
         agentHistory: [AgentMessage] = [],
         createdAt: Date = .now,
-        updatedAt: Date = .now
+        updatedAt: Date = .now,
+        kind: DialogConversationKind = .standard
     ) {
         self.id = id
         self.title = title
@@ -91,6 +99,86 @@ struct DialogConversation: Identifiable, Equatable, Codable {
         self.agentHistory = agentHistory
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.kind = kind
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, messages, agentHistory, createdAt, updatedAt, kind
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        messages = try container.decode([DialogMessage].self, forKey: .messages)
+        agentHistory = try container.decode([AgentMessage].self, forKey: .agentHistory)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        kind = try container.decodeIfPresent(DialogConversationKind.self, forKey: .kind) ?? .standard
+    }
+}
+
+@MainActor
+final class DialogConversationStore {
+    struct Change {
+        let conversations: [DialogConversation]
+        let sourceID: UUID
+    }
+
+    static let shared = DialogConversationStore(defaults: .standard)
+    static let conversationsStorageKey = "dialog.conversations.v1"
+
+    private(set) var conversations: [DialogConversation]
+    let changes = PassthroughSubject<Change, Never>()
+
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults) {
+        self.defaults = defaults
+        conversations = Self.load(from: defaults)
+    }
+
+    var petConversation: DialogConversation? {
+        conversations.first(where: { $0.kind == .pet })
+    }
+
+    func replaceAll(_ conversations: [DialogConversation], sourceID: UUID) {
+        save(conversations, sourceID: sourceID)
+    }
+
+    func upsertPetConversation(_ conversation: DialogConversation, sourceID: UUID) {
+        var updated = conversations.filter { $0.kind != .pet && $0.id != conversation.id }
+        updated.append(conversation)
+        save(updated, sourceID: sourceID)
+    }
+
+    func deleteConversation(_ conversationID: UUID, sourceID: UUID) {
+        save(conversations.filter { $0.id != conversationID }, sourceID: sourceID)
+    }
+
+    private func save(_ conversations: [DialogConversation], sourceID: UUID) {
+        let normalized = Self.normalized(conversations)
+        guard let data = try? JSONEncoder().encode(normalized) else { return }
+        self.conversations = normalized
+        defaults.set(data, forKey: Self.conversationsStorageKey)
+        changes.send(Change(conversations: normalized, sourceID: sourceID))
+    }
+
+    private static func load(from defaults: UserDefaults) -> [DialogConversation] {
+        guard let data = defaults.data(forKey: conversationsStorageKey),
+              let decoded = try? JSONDecoder().decode([DialogConversation].self, from: data) else {
+            return []
+        }
+        return normalized(decoded)
+    }
+
+    private static func normalized(_ conversations: [DialogConversation]) -> [DialogConversation] {
+        let regular = conversations.filter { $0.kind == .standard }
+        let newestPet = conversations
+            .filter { $0.kind == .pet }
+            .max(by: { $0.updatedAt < $1.updatedAt })
+        return (regular + [newestPet].compactMap { $0 })
+            .sorted(by: { $0.updatedAt > $1.updatedAt })
     }
 }
 
@@ -131,11 +219,13 @@ final class DialogChatViewModel: ObservableObject {
     @Published private(set) var cacheStatus: DialogCacheStatus
     @Published private(set) var invocationOptions: [AgentInvocationOption]
 
-    private static let conversationsStorageKey = "dialog.conversations.v1"
     private static let selectedConversationStorageKey = "dialog.selectedConversation.v1"
 
     private let defaults: UserDefaults
     private let agentRuntime: AgentRuntime
+    private let conversationStore: DialogConversationStore
+    private let conversationStoreSourceID = UUID()
+    private var conversationStoreCancellable: AnyCancellable?
     private lazy var streamTextCoalescer = StreamingTextCoalescer { [weak self] text in
         guard let self, let id = self.activeAssistantID else { return }
         self.appendAssistantChunk(text, to: id)
@@ -150,8 +240,17 @@ final class DialogChatViewModel: ObservableObject {
         isRequesting || isExecutingTool
     }
 
-    init(defaults: UserDefaults = .standard, agentRuntime: AgentRuntime? = nil) {
+    init(
+        defaults: UserDefaults = .standard,
+        agentRuntime: AgentRuntime? = nil,
+        conversationStore: DialogConversationStore? = nil
+    ) {
         self.defaults = defaults
+        let resolvedConversationStore = conversationStore
+            ?? (defaults === UserDefaults.standard
+                ? DialogConversationStore.shared
+                : DialogConversationStore(defaults: defaults))
+        self.conversationStore = resolvedConversationStore
         if let agentRuntime {
             self.agentRuntime = agentRuntime
         } else {
@@ -162,7 +261,7 @@ final class DialogChatViewModel: ObservableObject {
             }
         }
 
-        let restored = Self.loadConversations(from: defaults)
+        let restored = resolvedConversationStore.conversations
         let initialConversations = restored.isEmpty ? [DialogConversation()] : restored
         let storedSelection = defaults.string(forKey: Self.selectedConversationStorageKey)
             .flatMap(UUID.init(uuidString:))
@@ -178,6 +277,11 @@ final class DialogChatViewModel: ObservableObject {
 
         configureAgentRuntime()
         self.agentRuntime.restoreConversation(initialConversation.agentHistory)
+        conversationStoreCancellable = resolvedConversationStore.changes
+            .sink { [weak self] change in
+                guard let self, change.sourceID != self.conversationStoreSourceID else { return }
+                self.applyConversationStoreChange(change.conversations)
+            }
     }
 
     func sendCurrentInput() {
@@ -466,7 +570,9 @@ final class DialogChatViewModel: ObservableObject {
 
         conversations[index].messages = messages
         conversations[index].agentHistory = agentRuntime.messages
-        conversations[index].title = title(for: messages)
+        conversations[index].title = conversations[index].kind == .pet
+            ? "桌宠对话"
+            : title(for: messages)
         if updateTimestamp {
             conversations[index].updatedAt = .now
         }
@@ -487,18 +593,48 @@ final class DialogChatViewModel: ObservableObject {
     }
 
     private func persistConversations() {
-        let sorted = conversations.sorted(by: { $0.updatedAt > $1.updatedAt })
-        guard let data = try? JSONEncoder().encode(sorted) else { return }
-        defaults.set(data, forKey: Self.conversationsStorageKey)
+        conversationStore.replaceAll(conversations, sourceID: conversationStoreSourceID)
         defaults.set(selectedConversationID.uuidString, forKey: Self.selectedConversationStorageKey)
     }
 
-    private static func loadConversations(from defaults: UserDefaults) -> [DialogConversation] {
-        guard let data = defaults.data(forKey: conversationsStorageKey),
-              let conversations = try? JSONDecoder().decode([DialogConversation].self, from: data) else {
-            return []
+    private func applyConversationStoreChange(_ storedConversations: [DialogConversation]) {
+        // Keep an in-flight selection stable. In particular, the pet-side
+        // expiration timer may fire while this window is actively continuing
+        // the shared pet conversation; completion below will publish the
+        // renewed timestamp and recreate that still-active conversation.
+        if isBusy {
+            if storedConversations.contains(where: { $0.id == selectedConversationID }) {
+                conversations = storedConversations
+            }
+            return
         }
-        return conversations
+
+        if storedConversations.isEmpty {
+            let conversation = DialogConversation()
+            conversations = [conversation]
+            selectedConversationID = conversation.id
+            messages = []
+            inputText = ""
+            pendingAttachments = []
+            activeAssistantID = nil
+            agentRuntime.startNewConversation()
+            persistConversations()
+            return
+        }
+
+        conversations = storedConversations
+        let selection = storedConversations.first(where: { $0.id == selectedConversationID })
+            ?? storedConversations.max(by: { $0.updatedAt < $1.updatedAt })!
+        streamTextCoalescer.reset()
+        selectedConversationID = selection.id
+        messages = selection.messages
+        inputText = ""
+        pendingAttachments = []
+        activeAssistantID = nil
+        showToolConfirmation = false
+        pendingToolSummary = ""
+        agentRuntime.restoreConversation(selection.agentHistory)
+        defaults.set(selectedConversationID.uuidString, forKey: Self.selectedConversationStorageKey)
     }
 
     private static func artifact(toolName: String, result: String) -> DialogArtifact? {
