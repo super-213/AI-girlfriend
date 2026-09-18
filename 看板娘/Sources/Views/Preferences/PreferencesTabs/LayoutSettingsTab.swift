@@ -54,69 +54,81 @@ struct LayoutSettingsTab: View {
 
     private var petBehaviorSection: some View {
         SettingsCard(title: "桌宠行为", systemImage: "sparkles") {
-            VStack(alignment: .leading, spacing: DesignSpacing.sm) {
-                settingTitle(
-                    "空闲休息",
-                    detail: sleepMinutes == 0 ? "关闭" : "\(Int(sleepMinutes)) 分钟"
-                )
-                Slider(value: $sleepMinutes, in: 0...30, step: 1)
-                    .accessibilityValue(sleepMinutes == 0 ? "关闭" : "\(Int(sleepMinutes)) 分钟")
-            }
+            compactSliderRow(
+                title: "空闲休息",
+                value: sleepMinutes == 0 ? "关闭" : "\(Int(sleepMinutes)) 分钟",
+                binding: $sleepMinutes,
+                range: 0...30,
+                step: 1
+            )
         }
     }
 
     private var conversationSection: some View {
         SettingsCard(title: "对话界面", systemImage: "bubble.left.and.bubble.right") {
-            VStack(alignment: .leading, spacing: DesignSpacing.sm) {
-                HStack(spacing: DesignSpacing.lg) {
-                    VStack(alignment: .leading, spacing: DesignSpacing.xs) {
-                        Text("桌宠对话上下文")
-                            .font(.system(size: 13, weight: .medium))
-                        Text("超过设定时间没有继续对话时，自动开始新会话。")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Spacer()
-
-                    Toggle("不销毁", isOn: conversationNeverExpires)
-                        .toggleStyle(.switch)
-                        .fixedSize()
+            HStack(spacing: DesignSpacing.lg) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("桌宠对话上下文")
+                        .font(.system(size: 13, weight: .medium))
+                    Text("超时后自动开始新会话")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                 }
 
-                if petConversationRetentionMinutes > 0 {
-                    settingTitle(
-                        "保留时长",
-                        detail: PetConversationRetention.description(for: petConversationRetentionMinutes)
-                    )
-                    Slider(
-                        value: conversationRetentionBinding,
-                        in: PetConversationRetention.minimumMinutes...PetConversationRetention.maximumMinutes,
-                        step: PetConversationRetention.stepMinutes
-                    )
-                    .accessibilityValue(PetConversationRetention.description(for: petConversationRetentionMinutes))
-                }
+                Spacer(minLength: DesignSpacing.md)
+
+                Toggle("不销毁", isOn: conversationNeverExpires)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .fixedSize()
+            }
+
+            if petConversationRetentionMinutes > 0 {
+                Divider()
+
+                compactSliderRow(
+                    title: "保留时长",
+                    value: PetConversationRetention.description(for: petConversationRetentionMinutes),
+                    binding: conversationRetentionBinding,
+                    range: PetConversationRetention.minimumMinutes...PetConversationRetention.maximumMinutes,
+                    step: PetConversationRetention.stepMinutes
+                )
             }
 
             Divider()
 
-            VStack(alignment: .leading, spacing: DesignSpacing.sm) {
-                settingTitle("气泡自动收起", detail: "\(Int(bubbleAutoHideDuration)) 秒")
-                Slider(value: $bubbleAutoHideDuration, in: 5...60, step: 5)
-                    .accessibilityValue("\(Int(bubbleAutoHideDuration)) 秒")
-            }
+            compactSliderRow(
+                title: "气泡自动收起",
+                value: "\(Int(bubbleAutoHideDuration)) 秒",
+                binding: $bubbleAutoHideDuration,
+                range: 5...60,
+                step: 5
+            )
         }
     }
 
-    private func settingTitle(_ title: String, detail: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
+    private func compactSliderRow(
+        title: String,
+        value: String,
+        binding: Binding<Double>,
+        range: ClosedRange<Double>,
+        step: Double
+    ) -> some View {
+        HStack(spacing: DesignSpacing.md) {
             Text(title)
                 .font(.system(size: 13, weight: .medium))
-            Spacer()
-            Text(detail)
+                .frame(width: 112, alignment: .leading)
+
+            Slider(value: binding, in: range, step: step)
+                .controlSize(.small)
+                .accessibilityLabel(title)
+                .accessibilityValue(value)
+
+            Text(value)
                 .font(.system(size: 12).monospacedDigit())
                 .foregroundStyle(.secondary)
                 .contentTransition(.numericText())
+                .frame(width: 64, alignment: .trailing)
         }
     }
 
@@ -147,14 +159,14 @@ private struct SettingsCard<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DesignSpacing.lg) {
+        VStack(alignment: .leading, spacing: DesignSpacing.md) {
             Label(title, systemImage: systemImage)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.secondary)
 
             content
         }
-        .padding(DesignSpacing.lg)
+        .padding(DesignSpacing.md)
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
