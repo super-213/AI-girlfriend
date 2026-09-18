@@ -72,11 +72,16 @@ struct PreferencesView: View {
                       let section = PreferencesViewBackend.PreferenceSection(rawValue: rawValue) else { return }
                 backend.selectedSection = section
             }
-            .onChange(of: [systemPrompt, String(overlapRatio), String(petHorizontalPosition), String(petConversationRetentionMinutes)]) { _, _ in
+            .onChange(of: systemPrompt) { _, _ in
                 checkChanges()
             }
             .onChange(of: petContentScale) { _, newValue in
                 PetWindowController.shared.setContentScale(CGFloat(newValue), persist: false)
+            }
+            .task(id: layoutAutoSaveToken) {
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+                autoSaveLayoutSettings()
             }
             .onChange(of: selectedStyleCharacterID) { _, _ in
                 focusedField = nil
@@ -217,9 +222,7 @@ extension PreferencesView {
                 selectedConfigurationID: $selectedModelConfigurationID,
                 activeConfigurationID: $activeModelConfigurationID,
                 focusedField: $focusedField,
-                onSave: saveModelSettings,
-                onCancel: cancelChanges,
-                hasUnsavedChanges: backend.hasUnsavedChanges || modelConfigurationsHaveUnsavedChanges
+                onAutoSave: autoSaveModelSettings
             )
 
         case .securityPrivacy:
@@ -233,10 +236,7 @@ extension PreferencesView {
                 sleepMinutes: $sleepMinutes,
                 petConversationRetentionMinutes: $petConversationRetentionMinutes,
                 bubbleAutoHideDuration: $bubbleAutoHideDuration,
-                character: petViewBackend.currentCharacter,
-                onSave: saveSettings,
-                onCancel: cancelChanges,
-                hasUnsavedChanges: backend.hasUnsavedChanges || petSizeHasUnsavedChanges
+                character: petViewBackend.currentCharacter
             )
 
         case .knowledgeBases:
@@ -285,10 +285,6 @@ extension PreferencesView {
         NSApp.keyWindow?.firstResponder?.tryToPerform(#selector(NSSplitViewController.toggleSidebar(_:)), with: nil)
     }
     
-    private func saveSettings() {
-        saveSettings(dismissAfterSave: true)
-    }
-
     private func saveStyleSettings() {
         focusedField = nil
         PetConversationStyleStore.save(styleDraftProfiles)
@@ -335,7 +331,11 @@ extension PreferencesView {
         )
     }
 
-    private func saveModelSettings() {
+    private func autoSaveModelSettings() {
+        guard modelConfigurationsHaveUnsavedChanges,
+              !modelConfigurations.isEmpty,
+              modelConfigurations.allSatisfy(\.isValid) else { return }
+
         let normalizedConfigurations = modelConfigurations.map { $0.normalized() }
         guard let activeConfiguration = normalizedConfigurations.first(where: { $0.id == activeModelConfigurationID }) else {
             return
@@ -362,17 +362,35 @@ extension PreferencesView {
         apiUrl = activeConfiguration.apiUrl
         apiKey = activeConfiguration.apiKey
 
-        saveSettings(dismissAfterSave: false)
+        refreshSavedSettingsSnapshot()
+        NotificationCenter.default.post(
+            name: NSNotification.Name("SettingsChanged"),
+            object: nil
+        )
     }
-    
-    private func cancelChanges() {
-        overlapRatio = backend.temporaryOverlapRatio
-        petHorizontalPosition = backend.temporaryPetHorizontalPosition
-        petConversationRetentionMinutes = backend.temporaryPetConversationRetentionMinutes
-        petContentScale = originalPetContentScale
-        PetWindowController.shared.setContentScale(CGFloat(originalPetContentScale), persist: false)
-        backend.cancelChanges()
-        presentationMode.wrappedValue.dismiss()
+
+    private func autoSaveLayoutSettings() {
+        PetWindowController.shared.setContentScale(CGFloat(petContentScale), persist: true)
+        originalPetContentScale = petContentScale
+        refreshSavedSettingsSnapshot()
+        NotificationCenter.default.post(
+            name: NSNotification.Name("SettingsChanged"),
+            object: nil
+        )
+    }
+
+    private func refreshSavedSettingsSnapshot() {
+        backend.loadTemporaryValues(
+            apiKey: apiKey,
+            aiModel: aiModel,
+            systemPrompt: systemPrompt,
+            apiUrl: apiUrl,
+            provider: provider,
+            overlapRatio: overlapRatio,
+            petHorizontalPosition: petHorizontalPosition,
+            petConversationRetentionMinutes: petConversationRetentionMinutes
+        )
+        backend.hasUnsavedChanges = false
     }
     
     private func handleAppear() {
@@ -442,12 +460,19 @@ extension PreferencesView {
             || activeModelConfigurationID != originalActiveModelConfigurationID
     }
 
-    private var petSizeHasUnsavedChanges: Bool {
-        abs(petContentScale - originalPetContentScale) > 0.001
-    }
-
     private var styleHasUnsavedChanges: Bool {
         styleDraftProfiles != originalStyleProfiles
+    }
+
+    private var layoutAutoSaveToken: [String] {
+        [
+            String(overlapRatio),
+            String(petHorizontalPosition),
+            String(petContentScale),
+            String(sleepMinutes),
+            String(petConversationRetentionMinutes),
+            String(bubbleAutoHideDuration)
+        ]
     }
     
     private func handleCharacterChange(_ newIndex: Int) {

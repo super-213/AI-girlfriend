@@ -13,37 +13,28 @@ struct ModelSettingsTab: View {
     @Binding var activeConfigurationID: String
     var focusedField: FocusState<PreferencesView.FocusableField?>.Binding
 
-    let onSave: () -> Void
-    let onCancel: () -> Void
-    let hasUnsavedChanges: Bool
+    let onAutoSave: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var configurationPendingDeletion: ModelConfiguration?
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                configurationSidebar
-                    .frame(minWidth: 190, idealWidth: 210, maxWidth: 230)
-
-                Divider()
-
-                editorArea
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+        HStack(spacing: 0) {
+            configurationSidebar
+                .frame(minWidth: 190, idealWidth: 210, maxWidth: 230)
 
             Divider()
 
-            EnhancedActionButtons(
-                onSave: onSave,
-                onCancel: onCancel,
-                isSaveDisabled: configurations.contains(where: { !$0.isValid }),
-                hasUnsavedChanges: hasUnsavedChanges
-            )
-            .padding(.horizontal, DesignSpacing.xl)
-            .padding(.vertical, DesignSpacing.md)
-            .background(.bar)
+            editorArea
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .task(id: autoSaveState) {
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled,
+                  !configurations.isEmpty,
+                  configurations.allSatisfy(\.isValid) else { return }
+            onAutoSave()
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("模型设置")
@@ -65,8 +56,20 @@ struct ModelSettingsTab: View {
                 configurationPendingDeletion = nil
             }
         } message: {
-            Text("该操作会在保存设置后生效。")
+            Text("删除后会自动保存，并立即切换到其他可用配置。")
         }
+    }
+
+    private struct AutoSaveState: Equatable {
+        let configurations: [ModelConfiguration]
+        let activeConfigurationID: String
+    }
+
+    private var autoSaveState: AutoSaveState {
+        AutoSaveState(
+            configurations: configurations,
+            activeConfigurationID: activeConfigurationID
+        )
     }
 
     private var configurationSidebar: some View {
@@ -75,7 +78,7 @@ struct ModelSettingsTab: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("模型配置")
                         .font(.headline)
-                    Text("\(configurations.count) 个已保存连接")
+                    Text("\(configurations.count) 个连接 · 自动保存")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

@@ -17,10 +17,6 @@ struct LayoutSettingsTab: View {
     @Binding var bubbleAutoHideDuration: Double
 
     let character: PetCharacter
-    let onSave: () -> Void
-    let onCancel: () -> Void
-    let hasUnsavedChanges: Bool
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DesignSpacing.xl) {
@@ -36,15 +32,6 @@ struct LayoutSettingsTab: View {
 
                 petBehaviorSection
                 conversationSection
-
-                EnhancedActionButtons(
-                    onSave: onSave,
-                    onCancel: onCancel,
-                    isSaveDisabled: false,
-                    hasUnsavedChanges: hasUnsavedChanges
-                )
-                .padding(.top, DesignSpacing.xs)
-                .padding(.bottom, DesignSpacing.lg)
             }
             .frame(maxWidth: 680)
             .padding(.horizontal, DesignSpacing.xxl)
@@ -59,7 +46,7 @@ struct LayoutSettingsTab: View {
         VStack(alignment: .leading, spacing: DesignSpacing.xs) {
             Text("桌面与交互")
                 .font(.system(size: 22, weight: .semibold))
-            Text("调整桌宠在桌面上的位置，以及日常交互行为。")
+            Text("调整桌宠在桌面上的位置与日常交互行为，更改会自动保存。")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
