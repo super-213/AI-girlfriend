@@ -29,9 +29,14 @@ protocol AgentRunning: Sendable {
 /// Executes one user turn without depending on a concrete UI or model provider.
 final class AgentRunner: AgentRunning, Sendable {
     private let provider: any AgentModelProvider
+    private let sessionCoordinator: AgentSessionRunCoordinator
 
-    init(provider: any AgentModelProvider) {
+    init(
+        provider: any AgentModelProvider,
+        sessionCoordinator: AgentSessionRunCoordinator = .shared
+    ) {
         self.provider = provider
+        self.sessionCoordinator = sessionCoordinator
     }
 
     func run<Context: Sendable, Output: Sendable>(
@@ -42,7 +47,7 @@ final class AgentRunner: AgentRunning, Sendable {
         configuration: RunConfiguration = RunConfiguration()
     ) -> AgentRun<Output> {
         let runID = UUID()
-        return makeRun(runID: runID) { events in
+        return makeRun(runID: runID, sessionID: session.id) { events in
             try await self.executeNewRun(
                 runID: runID,
                 agent: agent,
@@ -64,7 +69,7 @@ final class AgentRunner: AgentRunning, Sendable {
         session: any AgentSession,
         configuration: RunConfiguration = RunConfiguration()
     ) -> AgentRun<Output> {
-        makeRun(runID: state.runID) { events in
+        makeRun(runID: state.runID, sessionID: session.id) { events in
             try await self.executeResumedRun(
                 agent: agent,
                 state: state,
@@ -79,17 +84,26 @@ final class AgentRunner: AgentRunning, Sendable {
 
     private func makeRun<Output: Sendable>(
         runID: UUID,
+        sessionID: String,
         operation: @escaping @Sendable (
             AsyncThrowingStream<AgentRunEvent, Error>.Continuation
         ) async throws -> RunResult<Output>
     ) -> AgentRun<Output> {
         let stream = AsyncThrowingStream<AgentRunEvent, Error>.makeStream()
         let task = Task<RunResult<Output>, Error> {
+            guard await self.sessionCoordinator.acquire(sessionID: sessionID, runID: runID) else {
+                let error = AgentError.busy
+                stream.continuation.yield(.runFailed(error))
+                stream.continuation.finish(throwing: error)
+                throw error
+            }
             do {
                 let result = try await operation(stream.continuation)
+                await self.sessionCoordinator.release(sessionID: sessionID, runID: runID)
                 stream.continuation.finish()
                 return result
             } catch {
+                await self.sessionCoordinator.release(sessionID: sessionID, runID: runID)
                 let normalized = Self.normalize(error)
                 stream.continuation.yield(.runFailed(normalized))
                 stream.continuation.finish(throwing: normalized)
@@ -118,6 +132,9 @@ final class AgentRunner: AgentRunning, Sendable {
             throw AgentError.invalidConfiguration("输入不能为空")
         }
 
+        if try await loadRunState(from: session) != nil {
+            throw AgentError.approvalStateInvalid
+        }
         var allItems = try await loadItems(from: session)
         var newItems: [AgentItem] = []
         let instructions = try await agent.instructions.resolve(using: context)
@@ -148,7 +165,8 @@ final class AgentRunner: AgentRunning, Sendable {
             allItems: allItems,
             newItems: newItems,
             pendingCalls: [],
-            decisionsByToolCallID: [:],
+            knownInterruptionsByToolCallID: [:],
+            approvalResolutionsByToolCallID: [:],
             rawResponses: [],
             usage: .zero,
             events: events
@@ -171,13 +189,21 @@ final class AgentRunner: AgentRunning, Sendable {
               !state.interruptions.isEmpty else {
             throw AgentError.approvalStateInvalid
         }
+        guard let storedState = try await loadRunState(from: session),
+              storedState.runID == state.runID,
+              storedState.schemaVersion == state.schemaVersion else {
+            throw AgentError.approvalStateInvalid
+        }
 
-        var decisionsByToolCallID: [String: ResolvedApprovalDecision] = [:]
-        for interruption in state.interruptions {
-            guard let decision = decisions[interruption.id] else {
+        let interruptionsByID = Dictionary(
+            uniqueKeysWithValues: state.interruptions.map { ($0.id, $0) }
+        )
+        var resolutions = state.approvalResolutionsByToolCallID
+        for (interruptionID, decision) in decisions {
+            guard let interruption = interruptionsByID[interruptionID] else {
                 throw AgentError.approvalStateInvalid
             }
-            decisionsByToolCallID[interruption.toolCall.id] = ResolvedApprovalDecision(
+            resolutions[interruption.toolCall.id] = ApprovalResolution(
                 interruptionID: interruption.id,
                 decision: decision
             )
@@ -195,7 +221,10 @@ final class AgentRunner: AgentRunning, Sendable {
             allItems: state.completedItems,
             newItems: [],
             pendingCalls: state.pendingToolCalls,
-            decisionsByToolCallID: decisionsByToolCallID,
+            knownInterruptionsByToolCallID: Dictionary(
+                uniqueKeysWithValues: state.interruptions.map { ($0.toolCall.id, $0) }
+            ),
+            approvalResolutionsByToolCallID: resolutions,
             rawResponses: state.rawResponses,
             usage: state.usage,
             events: events
@@ -213,7 +242,8 @@ final class AgentRunner: AgentRunning, Sendable {
         allItems initialItems: [AgentItem],
         newItems initialNewItems: [AgentItem],
         pendingCalls: [ToolCallItem],
-        decisionsByToolCallID: [String: ResolvedApprovalDecision],
+        knownInterruptionsByToolCallID: [String: AgentInterruption],
+        approvalResolutionsByToolCallID: [String: ApprovalResolution],
         rawResponses initialResponses: [ModelResponse],
         usage initialUsage: AgentUsage,
         events: AsyncThrowingStream<AgentRunEvent, Error>.Continuation
@@ -237,7 +267,8 @@ final class AgentRunner: AgentRunning, Sendable {
                providerContinuationID: nil,
                rawResponses: rawResponses,
                usage: usage,
-               decisionsByToolCallID: decisionsByToolCallID,
+               knownInterruptionsByToolCallID: knownInterruptionsByToolCallID,
+               approvalResolutionsByToolCallID: approvalResolutionsByToolCallID,
                allItems: &allItems,
                newItems: &newItems,
                events: events
@@ -249,7 +280,7 @@ final class AgentRunner: AgentRunning, Sendable {
                 newItems: newItems,
                 usage: usage,
                 rawResponses: rawResponses,
-                interruption: interruption.interruption,
+                interruptions: interruption.interruptions,
                 state: interruption.state
             )
         }
@@ -319,7 +350,8 @@ final class AgentRunner: AgentRunning, Sendable {
                 providerContinuationID: response.id,
                 rawResponses: rawResponses,
                 usage: usage,
-                decisionsByToolCallID: [:],
+                knownInterruptionsByToolCallID: [:],
+                approvalResolutionsByToolCallID: [:],
                 allItems: &allItems,
                 newItems: &newItems,
                 events: events
@@ -331,7 +363,7 @@ final class AgentRunner: AgentRunning, Sendable {
                     newItems: newItems,
                     usage: usage,
                     rawResponses: rawResponses,
-                    interruption: interruption.interruption,
+                    interruptions: interruption.interruptions,
                     state: interruption.state
                 )
             }
@@ -341,13 +373,8 @@ final class AgentRunner: AgentRunning, Sendable {
     }
 
     private struct PendingInterruption: Sendable {
-        let interruption: AgentInterruption
+        let interruptions: [AgentInterruption]
         let state: RunState
-    }
-
-    private struct ResolvedApprovalDecision: Sendable {
-        let interruptionID: UUID
-        let decision: ApprovalDecision
     }
 
     private func processToolCalls<Context: Sendable, Output: Sendable>(
@@ -362,67 +389,99 @@ final class AgentRunner: AgentRunning, Sendable {
         providerContinuationID: String?,
         rawResponses: [ModelResponse],
         usage: AgentUsage,
-        decisionsByToolCallID: [String: ResolvedApprovalDecision],
+        knownInterruptionsByToolCallID: [String: AgentInterruption],
+        approvalResolutionsByToolCallID: [String: ApprovalResolution],
         allItems: inout [AgentItem],
         newItems: inout [AgentItem],
         events: AsyncThrowingStream<AgentRunEvent, Error>.Continuation
     ) async throws -> PendingInterruption? {
-        var observationImages: [String] = []
-        for (index, call) in calls.enumerated() {
+        var unresolved: [AgentInterruption] = []
+        for call in calls {
             guard let tool = agent.tools.first(where: { $0.definition.name == call.name }) else {
-                appendToolResult(
-                    ToolResultItem(
-                        toolCallID: call.id,
-                        toolName: call.name,
-                        content: AgentError.toolUnavailable(call.name).localizedDescription,
-                        isError: true
-                    ),
-                    allItems: &allItems,
-                    newItems: &newItems,
-                    events: events
-                )
                 continue
             }
-
             let requiresApproval = try await tool.requiresApproval(arguments: call.arguments)
-            if requiresApproval, decisionsByToolCallID[call.id] == nil {
-                let interruption = AgentInterruption(
+            guard requiresApproval,
+                  approvalResolutionsByToolCallID[call.id] == nil else { continue }
+            if let existing = knownInterruptionsByToolCallID[call.id] {
+                unresolved.append(existing)
+            } else {
+                unresolved.append(AgentInterruption(
                     runID: runID,
                     toolCall: call,
                     summary: await tool.approvalSummary(arguments: call.arguments),
                     riskLevel: tool.behavior.riskLevel
-                )
-                let state = RunState(
-                    runID: runID,
-                    currentAgentID: agent.id,
-                    turn: turn,
-                    completedItems: allItems,
-                    pendingToolCalls: Array(calls[index...]),
-                    interruptions: [interruption],
-                    providerContinuationID: providerContinuationID,
-                    rawResponses: rawResponses,
-                    usage: usage,
-                    traceID: traceID,
-                    sessionID: session.id
-                )
-                try await persistInterrupted(items: allItems, state: state, session: session)
-                events.yield(.approvalRequired(interruption))
-                return PendingInterruption(interruption: interruption, state: state)
-            }
-
-            if let resolvedDecision = decisionsByToolCallID[call.id] {
-                let approval = AgentItem.approval(ApprovalItem(
-                    interruptionID: resolvedDecision.interruptionID,
-                    decision: resolvedDecision.decision
                 ))
-                allItems.append(approval)
-                newItems.append(approval)
-                if case .rejected(let reason) = resolvedDecision.decision {
+            }
+        }
+
+        if !unresolved.isEmpty {
+            let latestCompaction = allItems.reversed().compactMap { item -> CompactionItem? in
+                guard case .compaction(let compaction) = item else { return nil }
+                return compaction
+            }.first
+            let state = RunState(
+                runID: runID,
+                currentAgentID: agent.id,
+                turn: turn,
+                completedItems: allItems,
+                pendingToolCalls: calls,
+                interruptions: unresolved,
+                approvalResolutionsByToolCallID: approvalResolutionsByToolCallID,
+                contextCompaction: latestCompaction,
+                providerContinuationID: providerContinuationID,
+                rawResponses: rawResponses,
+                usage: usage,
+                traceID: traceID,
+                sessionID: session.id
+            )
+            try await persistInterrupted(items: allItems, state: state, session: session)
+            for interruption in unresolved { events.yield(.approvalRequired(interruption)) }
+            return PendingInterruption(interruptions: unresolved, state: state)
+        }
+
+        var observationImages: [String] = []
+        if canRunInParallel(calls, tools: agent.tools, configuration: configuration) {
+            for call in calls { events.yield(.toolCallStarted(call)) }
+            var indexedResults: [(Int, ToolResultItem)] = []
+            let batchSize = min(configuration.maximumConcurrentTools, calls.count)
+            var start = 0
+            while start < calls.count {
+                let end = min(start + batchSize, calls.count)
+                let batch = Array(calls[start..<end].enumerated()).map { (start + $0.offset, $0.element) }
+                let results = await withTaskGroup(of: (Int, ToolResultItem).self) { group in
+                    for (index, call) in batch {
+                        let tool = agent.tools.first { $0.definition.name == call.name }!
+                        group.addTask {
+                            let result = await self.executeTool(
+                                call,
+                                tool: tool,
+                                runID: runID,
+                                agentID: agent.id,
+                                sessionID: session.id,
+                                context: context,
+                                configuration: configuration
+                            )
+                            return (index, result)
+                        }
+                    }
+                    return await group.reduce(into: []) { $0.append($1) }
+                }
+                indexedResults.append(contentsOf: results)
+                start = end
+            }
+            for (_, result) in indexedResults.sorted(by: { $0.0 < $1.0 }) {
+                observationImages.append(contentsOf: result.imagePaths)
+                appendToolResult(result, allItems: &allItems, newItems: &newItems, events: events)
+            }
+        } else {
+            for call in calls {
+                guard let tool = agent.tools.first(where: { $0.definition.name == call.name }) else {
                     appendToolResult(
                         ToolResultItem(
                             toolCallID: call.id,
                             toolName: call.name,
-                            content: reason ?? "用户拒绝执行该工具",
+                            content: AgentError.toolUnavailable(call.name).localizedDescription,
                             isError: true
                         ),
                         allItems: &allItems,
@@ -431,49 +490,43 @@ final class AgentRunner: AgentRunning, Sendable {
                     )
                     continue
                 }
-            }
 
-            events.yield(.toolCallStarted(call))
-            let result: ToolResultItem
-            do {
-                let output = try await withTimeout(
-                    tool.behavior.defaultTimeout ?? configuration.toolTimeout,
-                    error: .toolTimedOut(call.name)
-                ) {
-                    try await tool.invoke(
-                        context: ToolContext(
-                            runID: runID,
-                            sessionID: session.id,
-                            agentID: agent.id,
-                            context: context
-                        ),
-                        arguments: call.arguments
-                    )
+                if let resolvedDecision = approvalResolutionsByToolCallID[call.id] {
+                    let approval = AgentItem.approval(ApprovalItem(
+                        interruptionID: resolvedDecision.interruptionID,
+                        decision: resolvedDecision.decision
+                    ))
+                    allItems.append(approval)
+                    newItems.append(approval)
+                    if case .rejected(let reason) = resolvedDecision.decision {
+                        appendToolResult(
+                            ToolResultItem(
+                                toolCallID: call.id,
+                                toolName: call.name,
+                                content: reason ?? "用户拒绝执行该工具",
+                                isError: true
+                            ),
+                            allItems: &allItems,
+                            newItems: &newItems,
+                            events: events
+                        )
+                        continue
+                    }
                 }
-                observationImages.append(contentsOf: output.imagePaths)
-                result = ToolResultItem(
-                    toolCallID: call.id,
-                    toolName: call.name,
-                    content: output.content,
-                    isError: false,
-                    imagePaths: output.imagePaths
+
+                events.yield(.toolCallStarted(call))
+                let result = await executeTool(
+                    call,
+                    tool: tool,
+                    runID: runID,
+                    agentID: agent.id,
+                    sessionID: session.id,
+                    context: context,
+                    configuration: configuration
                 )
-            } catch let error as AgentError {
-                result = ToolResultItem(
-                    toolCallID: call.id,
-                    toolName: call.name,
-                    content: error.localizedDescription,
-                    isError: true
-                )
-            } catch {
-                result = ToolResultItem(
-                    toolCallID: call.id,
-                    toolName: call.name,
-                    content: error.localizedDescription,
-                    isError: true
-                )
+                observationImages.append(contentsOf: result.imagePaths)
+                appendToolResult(result, allItems: &allItems, newItems: &newItems, events: events)
             }
-            appendToolResult(result, allItems: &allItems, newItems: &newItems, events: events)
         }
 
         if !observationImages.isEmpty {
@@ -487,6 +540,88 @@ final class AgentRunner: AgentRunning, Sendable {
             newItems.append(observation)
         }
         return nil
+    }
+
+    private func canRunInParallel<Context: Sendable>(
+        _ calls: [ToolCallItem],
+        tools: [AnyAgentTool<Context>],
+        configuration: RunConfiguration
+    ) -> Bool {
+        guard calls.count > 1,
+              configuration.maximumConcurrentTools > 1,
+              provider.capabilities.supportsParallelTools else { return false }
+        return calls.allSatisfy { call in
+            guard let tool = tools.first(where: { $0.definition.name == call.name }) else {
+                return false
+            }
+            return tool.behavior.allowsParallelExecution
+                && tool.behavior.isReadOnly
+                && tool.behavior.isIdempotent
+                && !tool.behavior.hasExternalSideEffects
+                && !tool.behavior.requiresApproval
+        }
+    }
+
+    private func executeTool<Context: Sendable>(
+        _ call: ToolCallItem,
+        tool: AnyAgentTool<Context>,
+        runID: UUID,
+        agentID: String,
+        sessionID: String,
+        context: Context,
+        configuration: RunConfiguration
+    ) async -> ToolResultItem {
+        let attempts = tool.behavior.isIdempotent && tool.behavior.allowsAutomaticRetry
+            ? configuration.retryPolicy.maximumAttempts
+            : 1
+        var lastError: Error?
+        for attempt in 1...attempts {
+            do {
+                let output = try await withTimeout(
+                    tool.behavior.defaultTimeout ?? configuration.toolTimeout,
+                    error: .toolTimedOut(call.name)
+                ) {
+                    try await tool.invoke(
+                        context: ToolContext(
+                            runID: runID,
+                            sessionID: sessionID,
+                            agentID: agentID,
+                            context: context
+                        ),
+                        arguments: call.arguments
+                    )
+                }
+                return ToolResultItem(
+                    toolCallID: call.id,
+                    toolName: call.name,
+                    content: output.content,
+                    isError: false,
+                    imagePaths: output.imagePaths
+                )
+            } catch is CancellationError {
+                lastError = AgentError.cancelled
+                break
+            } catch {
+                lastError = error
+                if attempt < attempts {
+                    do {
+                        try await Task.sleep(for: configuration.retryPolicy.initialDelay)
+                    } catch {
+                        lastError = AgentError.cancelled
+                        break
+                    }
+                }
+            }
+        }
+        let detail = (lastError as? LocalizedError)?.errorDescription
+            ?? lastError?.localizedDescription
+            ?? "未知错误"
+        return ToolResultItem(
+            toolCallID: call.id,
+            toolName: call.name,
+            content: detail,
+            isError: true
+        )
     }
 
     private func requestModel(
@@ -550,6 +685,11 @@ final class AgentRunner: AgentRunning, Sendable {
         catch { throw AgentError.sessionFailure(error.localizedDescription) }
     }
 
+    private func loadRunState(from session: any AgentSession) async throws -> RunState? {
+        do { return try await session.loadRunState() }
+        catch { throw AgentError.sessionFailure(error.localizedDescription) }
+    }
+
     private func persistCompleted(items: [AgentItem], session: any AgentSession) async throws {
         do {
             try await session.replaceItems(items)
@@ -588,7 +728,7 @@ final class AgentRunner: AgentRunning, Sendable {
         newItems: [AgentItem],
         usage: AgentUsage,
         rawResponses: [ModelResponse],
-        interruption: AgentInterruption,
+        interruptions: [AgentInterruption],
         state: RunState
     ) -> RunResult<Output> {
         RunResult(
@@ -600,7 +740,7 @@ final class AgentRunner: AgentRunning, Sendable {
             usage: usage,
             rawResponses: rawResponses,
             guardrailResults: [],
-            interruptions: [interruption],
+            interruptions: interruptions,
             resumableState: state
         )
     }

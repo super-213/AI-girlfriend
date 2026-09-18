@@ -5,9 +5,14 @@ actor MemoryAgentSession: AgentSession {
     private var items: [AgentItem]
     private var runState: RunState?
 
-    init(id: String = UUID().uuidString, items: [AgentItem] = []) {
+    init(
+        id: String = UUID().uuidString,
+        items: [AgentItem] = [],
+        runState: RunState? = nil
+    ) {
         self.id = id
         self.items = items
+        self.runState = runState
     }
 
     func loadItems() -> [AgentItem] { items }

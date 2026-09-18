@@ -58,6 +58,7 @@ final class AgentRuntime {
 
     private(set) var messages: [AgentMessage] = []
     private(set) var isRunning = false
+    private(set) var sessionSnapshot: AgentSessionSnapshot
 
     private let apiManager: any AgentModelClient
     private let registry: AgentToolRegistry
@@ -67,7 +68,7 @@ final class AgentRuntime {
     private let runConfiguration: RunConfiguration
     private let runner: AgentRunner
 
-    private var session: MemoryAgentSession
+    private var session: any AgentSession
     private var activeRun: AgentRun<String>?
     private var eventTask: Task<Void, Never>?
     private var resultTask: Task<Void, Never>?
@@ -112,7 +113,11 @@ final class AgentRuntime {
         self.runConfiguration = runConfiguration
         self.enabledSkillNameResolver = enabledSkillNameResolver
         self.systemPromptProvider = systemPromptProvider
-        session = MemoryAgentSession()
+        let initialSnapshot = AgentSessionSnapshot(
+            providerConfigurationID: apiManager.contextWindowConfigurationIdentifier
+        )
+        sessionSnapshot = initialSnapshot
+        session = MemoryAgentSession(id: initialSnapshot.sessionID)
 
         let provider = LegacyModelProvider(
             client: apiManager,
@@ -168,15 +173,50 @@ final class AgentRuntime {
     func startNewConversation() {
         cancel()
         messages.removeAll()
-        session = MemoryAgentSession()
+        let snapshot = AgentSessionSnapshot(
+            providerConfigurationID: apiManager.contextWindowConfigurationIdentifier
+        )
+        sessionSnapshot = snapshot
+        session = MemoryAgentSession(id: snapshot.sessionID)
         resetCompactionState()
     }
 
     func restoreConversation(_ history: [AgentMessage]) {
+        restoreSession(AgentSessionSnapshot(
+            legacyMessages: history,
+            providerConfigurationID: apiManager.contextWindowConfigurationIdentifier
+        ))
+    }
+
+    func restoreSession(_ snapshot: AgentSessionSnapshot) {
         cancel()
-        messages = history
-        session = MemoryAgentSession(items: AgentItemLegacyCodec.items(from: history))
+        sessionSnapshot = snapshot
+        messages = snapshot.legacyMessages
+        session = MemoryAgentSession(
+            id: snapshot.sessionID,
+            items: snapshot.items,
+            runState: snapshot.pendingRunState
+        )
         resetCompactionState()
+        guard let state = snapshot.pendingRunState else { return }
+        guard snapshot.schemaVersion == AgentSessionSnapshot.currentSchemaVersion,
+              state.schemaVersion == RunState.currentSchemaVersion,
+              state.sessionID == snapshot.sessionID,
+              state.currentAgentID == snapshot.agentID else {
+            onError?(AgentError.approvalStateInvalid)
+            return
+        }
+        let agent = makeAgent()
+        activeAgent = agent
+        pendingRunState = state
+        pendingInterruption = state.interruptions.first
+        isRunning = true
+        if let interruption = state.interruptions.first {
+            onApprovalRequested?(AgentPendingApproval(
+                toolName: interruption.toolCall.name,
+                summary: interruption.summary
+            ))
+        }
     }
 
     func cancel() {
@@ -285,6 +325,10 @@ final class AgentRuntime {
                 _ = await events.result
                 guard let self, self.runToken == token else { return }
                 self.messages = AgentItemLegacyCodec.messages(from: result.history)
+                self.updateSessionSnapshot(
+                    items: result.history,
+                    pendingRunState: result.resumableState
+                )
                 self.pendingRunState = result.resumableState
                 self.pendingInterruption = result.interruptions.first
                 if result.resumableState == nil {
@@ -292,6 +336,11 @@ final class AgentRuntime {
                     self.activeRun = nil
                     self.activeAgent = nil
                     self.onCompleted?()
+                } else if let interruption = result.interruptions.first {
+                    self.onApprovalRequested?(AgentPendingApproval(
+                        toolName: interruption.toolCall.name,
+                        summary: interruption.summary
+                    ))
                 }
             } catch {
                 _ = await events.result
@@ -329,10 +378,7 @@ final class AgentRuntime {
                 summary: interruption.summary,
                 status: .requested
             )
-            onApprovalRequested?(AgentPendingApproval(
-                toolName: interruption.toolCall.name,
-                summary: interruption.summary
-            ))
+            // UI delivery waits for `RunResult`, after the serializable state has been saved.
         case .contextCompactionStarted:
             onContextCompactionStarted?()
         case .contextCompacted(let event):
@@ -620,5 +666,13 @@ final class AgentRuntime {
         didResolveContextWindow = false
         resolvedContextWindowTokenCount = nil
         lastCompactionAttemptMessageCount = nil
+    }
+
+    private func updateSessionSnapshot(items: [AgentItem], pendingRunState: RunState?) {
+        sessionSnapshot.updatedAt = .now
+        sessionSnapshot.agentID = "desktop-companion"
+        sessionSnapshot.providerConfigurationID = apiManager.contextWindowConfigurationIdentifier
+        sessionSnapshot.items = items
+        sessionSnapshot.pendingRunState = pendingRunState
     }
 }

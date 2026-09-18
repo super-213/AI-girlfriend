@@ -511,6 +511,9 @@ final class PetViewBackend: ObservableObject {
             self.streamedResponse = "Agent 请求调用工具：\(approval.toolName)"
             self.revealOutputBox(autoHideAfter: 30)
             self.stateCoordinator.send(.commandConfirmationRequested(runID))
+            if self.activeRequestKind == .conversation {
+                self.persistPetConversation(at: .now)
+            }
         }
         agentRuntime.onCompleted = { [weak self] in
             guard let self, let runID = self.activeRequestID else { return }
@@ -624,6 +627,7 @@ final class PetViewBackend: ObservableObject {
             return
         }
         loadPetConversation(storedPetConversation)
+        restorePetRuntime(storedPetConversation.agentSession)
         schedulePetConversationExpiration(at: .now)
     }
 
@@ -828,11 +832,11 @@ final class PetViewBackend: ObservableObject {
             return
         }
         loadPetConversation(storedConversation)
-        let history = petConversationSession.historyForNextInput(
+        let snapshot = petConversationSession.snapshotForNextInput(
             at: date,
             timeout: PetConversationRetention.timeout()
         )
-        guard !history.isEmpty else {
+        guard let snapshot, !snapshot.items.isEmpty else {
             conversationStore.deleteConversation(
                 storedConversation.id,
                 sourceID: conversationStoreSourceID
@@ -840,7 +844,7 @@ final class PetViewBackend: ObservableObject {
             clearPetConversationState()
             return
         }
-        agentRuntime.restoreConversation(history)
+        restorePetRuntime(snapshot)
     }
 
     private func recordPetConversationAndScheduleExpiration(at date: Date = .now) {
@@ -859,11 +863,12 @@ final class PetViewBackend: ObservableObject {
             title: "桌宠对话",
             messages: petDialogMessages,
             agentHistory: agentRuntime.messages,
+            agentSession: agentRuntime.sessionSnapshot,
             createdAt: createdAt,
             updatedAt: date,
             kind: .pet
         )
-        petConversationSession.record(history: conversation.agentHistory, at: date)
+        petConversationSession.record(snapshot: conversation.agentSession, at: date)
         conversationStore.upsertPetConversation(conversation, sourceID: conversationStoreSourceID)
     }
 
@@ -878,7 +883,7 @@ final class PetViewBackend: ObservableObject {
             conversationStore.deleteConversation(conversation.id, sourceID: conversationStoreSourceID)
             clearPetConversationState()
         } else {
-            agentRuntime.restoreConversation(conversation.agentHistory)
+            restorePetRuntime(conversation.agentSession)
             schedulePetConversationExpiration(at: date)
         }
     }
@@ -888,8 +893,17 @@ final class PetViewBackend: ObservableObject {
         petDialogMessages = conversation.messages
         activePetAssistantMessageID = nil
         petConversationSession.destroy()
-        petConversationSession.record(history: conversation.agentHistory, at: conversation.updatedAt)
-        agentRuntime.restoreConversation(conversation.agentHistory)
+        petConversationSession.record(snapshot: conversation.agentSession, at: conversation.updatedAt)
+    }
+
+    private func restorePetRuntime(_ snapshot: AgentSessionSnapshot) {
+        if let state = snapshot.pendingRunState {
+            let runID = state.runID
+            activeRequestID = runID
+            activeRequestKind = .conversation
+            stateCoordinator.send(.conversationStarted(runID))
+        }
+        agentRuntime.restoreSession(snapshot)
     }
 
     private func schedulePetConversationExpiration(at date: Date = .now) {

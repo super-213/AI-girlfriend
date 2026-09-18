@@ -32,13 +32,29 @@ extension LegacyAgentTool {
 @MainActor
 final class AgentToolRegistry {
     private var toolsByName: [String: any LegacyAgentTool] = [:]
+    private var typedToolsByName: [String: AnyAgentTool<Void>] = [:]
 
     var definitions: [AgentToolDefinition] {
-        toolsByName.values.map(\.definition).sorted { $0.name < $1.name }
+        let legacy = toolsByName.values.map(\.definition)
+        let typed = typedToolsByName.values.map { tool in
+            AgentToolDefinition(
+                name: tool.definition.name,
+                description: tool.definition.description,
+                parameters: tool.definition.parameters.foundationValue as? [String: Any] ?? [:]
+            )
+        }
+        return (legacy + typed).sorted { $0.name < $1.name }
     }
 
     func register(_ tool: any LegacyAgentTool) {
+        typedToolsByName.removeValue(forKey: tool.definition.name)
         toolsByName[tool.definition.name] = tool
+    }
+
+    func register<T: AgentTool>(_ tool: T) where T.Context == Void {
+        let erased = AnyAgentTool(tool)
+        toolsByName.removeValue(forKey: erased.definition.name)
+        typedToolsByName[erased.definition.name] = erased
     }
 
     func tool(named name: String) -> (any LegacyAgentTool)? {
@@ -49,19 +65,23 @@ final class AgentToolRegistry {
         toolsByName.values.sorted { $0.definition.name < $1.definition.name }
     }
 
+    var allTypedTools: [AnyAgentTool<Void>] {
+        typedToolsByName.values.sorted { $0.definition.name < $1.definition.name }
+    }
+
     static func standard() -> AgentToolRegistry {
         let registry = AgentToolRegistry()
-        registry.register(CurrentDateTimeTool())
+        registry.register(CurrentDateTimeAgentTool())
         registry.register(CompactContextTool())
         registry.register(ReadSkillTool())
         registry.register(ListKnowledgeBasesTool())
         registry.register(AddToKnowledgeBaseTool())
         registry.register(SearchKnowledgeBaseTool())
-        registry.register(ListDirectoryTool())
-        registry.register(ReadFileTool())
+        registry.register(ListDirectoryAgentTool())
+        registry.register(ReadFileAgentTool())
         registry.register(ReadDocumentTool())
         registry.register(GetFileInfoTool())
-        registry.register(SearchFilesTool())
+        registry.register(SearchFilesAgentTool())
         registry.register(OpenFileTool())
         registry.register(RevealInFinderTool())
         registry.register(OpenApplicationTool())

@@ -49,18 +49,35 @@ enum PetConversationRetention {
 }
 
 struct PetConversationSession {
-    private(set) var history: [AgentMessage] = []
+    private(set) var snapshot: AgentSessionSnapshot?
     private(set) var lastConversationAt: Date?
 
+    var history: [AgentMessage] { snapshot?.legacyMessages ?? [] }
     var isEmpty: Bool { history.isEmpty }
 
-    mutating func historyForNextInput(at date: Date, timeout: TimeInterval?) -> [AgentMessage] {
+    mutating func snapshotForNextInput(
+        at date: Date,
+        timeout: TimeInterval?
+    ) -> AgentSessionSnapshot? {
         expireIfNeeded(at: date, timeout: timeout)
-        return history
+        return snapshot
+    }
+
+    mutating func historyForNextInput(at date: Date, timeout: TimeInterval?) -> [AgentMessage] {
+        snapshotForNextInput(at: date, timeout: timeout)?.legacyMessages ?? []
     }
 
     mutating func record(history: [AgentMessage], at date: Date) {
-        self.history = history
+        snapshot = AgentSessionSnapshot(
+            legacyMessages: history,
+            createdAt: lastConversationAt ?? date,
+            updatedAt: date
+        )
+        lastConversationAt = date
+    }
+
+    mutating func record(snapshot: AgentSessionSnapshot, at date: Date) {
+        self.snapshot = snapshot
         lastConversationAt = date
     }
 
@@ -76,7 +93,7 @@ struct PetConversationSession {
     }
 
     mutating func destroy() {
-        history.removeAll()
+        snapshot = nil
         lastConversationAt = nil
     }
 }

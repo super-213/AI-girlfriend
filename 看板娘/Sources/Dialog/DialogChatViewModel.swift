@@ -107,6 +107,7 @@ struct DialogConversation: Identifiable, Equatable, Codable {
     var title: String
     var messages: [DialogMessage]
     var agentHistory: [AgentMessage]
+    var agentSession: AgentSessionSnapshot
     let createdAt: Date
     var updatedAt: Date
     var kind: DialogConversationKind
@@ -117,6 +118,7 @@ struct DialogConversation: Identifiable, Equatable, Codable {
         title: String = "新对话",
         messages: [DialogMessage] = [],
         agentHistory: [AgentMessage] = [],
+        agentSession: AgentSessionSnapshot? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now,
         kind: DialogConversationKind = .standard,
@@ -125,7 +127,14 @@ struct DialogConversation: Identifiable, Equatable, Codable {
         self.id = id
         self.title = title
         self.messages = messages
-        self.agentHistory = agentHistory
+        let resolvedSession = agentSession ?? AgentSessionSnapshot(
+            legacyMessages: agentHistory,
+            sessionID: id.uuidString,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+        self.agentHistory = resolvedSession.legacyMessages
+        self.agentSession = resolvedSession
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.kind = kind
@@ -133,7 +142,7 @@ struct DialogConversation: Identifiable, Equatable, Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, messages, agentHistory, createdAt, updatedAt, kind, projectID
+        case id, title, messages, agentHistory, agentSession, createdAt, updatedAt, kind, projectID
     }
 
     init(from decoder: Decoder) throws {
@@ -141,9 +150,19 @@ struct DialogConversation: Identifiable, Equatable, Codable {
         id = try container.decode(UUID.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
         messages = try container.decode([DialogMessage].self, forKey: .messages)
-        agentHistory = try container.decode([AgentMessage].self, forKey: .agentHistory)
+        agentHistory = try container.decodeIfPresent([AgentMessage].self, forKey: .agentHistory) ?? []
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        agentSession = try container.decodeIfPresent(
+            AgentSessionSnapshot.self,
+            forKey: .agentSession
+        ) ?? AgentSessionSnapshot(
+            legacyMessages: agentHistory,
+            sessionID: id.uuidString,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+        agentHistory = agentSession.legacyMessages
         kind = try container.decodeIfPresent(DialogConversationKind.self, forKey: .kind) ?? .standard
         projectID = try container.decodeIfPresent(UUID.self, forKey: .projectID)
     }
@@ -367,7 +386,7 @@ final class DialogChatViewModel: ObservableObject {
         invocationOptions = AgentInvocationCatalog.options(defaults: defaults)
 
         configureAgentRuntime()
-        self.agentRuntime.restoreConversation(initialConversation.agentHistory)
+        self.agentRuntime.restoreSession(initialConversation.agentSession)
         updateAgentWorkspaceContext()
         conversationStoreCancellable = resolvedConversationStore.changes
             .sink { [weak self] change in
@@ -547,7 +566,7 @@ final class DialogChatViewModel: ObservableObject {
             pendingAttachments = []
             queuedMessages = []
             activeAssistantID = nil
-            agentRuntime.restoreConversation(next.agentHistory)
+            agentRuntime.restoreSession(next.agentSession)
             updateAgentWorkspaceContext()
         }
         persistConversations()
@@ -567,7 +586,7 @@ final class DialogChatViewModel: ObservableObject {
         activeAssistantID = nil
         showToolConfirmation = false
         pendingToolSummary = ""
-        agentRuntime.restoreConversation(conversation.agentHistory)
+        agentRuntime.restoreSession(conversation.agentSession)
         updateAgentWorkspaceContext()
         persistConversations()
     }
@@ -603,7 +622,7 @@ final class DialogChatViewModel: ObservableObject {
             inputText = ""
             pendingAttachments = []
             activeAssistantID = nil
-            agentRuntime.restoreConversation(next.agentHistory)
+            agentRuntime.restoreSession(next.agentSession)
             updateAgentWorkspaceContext()
         }
         persistConversations()
@@ -699,10 +718,12 @@ final class DialogChatViewModel: ObservableObject {
         agentRuntime.onApprovalRequested = { [weak self] approval in
             guard let self else { return }
             self.streamTextCoalescer.flush()
+            self.isRequesting = true
             self.isExecutingTool = false
             self.pendingToolSummary = approval.summary
             self.fillEmptyAssistantMessage("请求调用工具：\(approval.toolName)")
             self.showToolConfirmation = true
+            self.synchronizeSelectedConversation(persist: true)
         }
         agentRuntime.onCompleted = { [weak self] in
             guard let self else { return }
@@ -753,6 +774,7 @@ final class DialogChatViewModel: ObservableObject {
 
         conversations[index].messages = messages
         conversations[index].agentHistory = agentRuntime.messages
+        conversations[index].agentSession = agentRuntime.sessionSnapshot
         conversations[index].title = conversations[index].kind == .pet
             ? "桌宠对话"
             : title(for: messages)
@@ -831,7 +853,7 @@ final class DialogChatViewModel: ObservableObject {
         activeAssistantID = nil
         showToolConfirmation = false
         pendingToolSummary = ""
-        agentRuntime.restoreConversation(selection.agentHistory)
+        agentRuntime.restoreSession(selection.agentSession)
         updateAgentWorkspaceContext()
         defaults.set(selectedConversationID.uuidString, forKey: Self.selectedConversationStorageKey)
     }

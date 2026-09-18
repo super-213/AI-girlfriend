@@ -50,7 +50,8 @@ struct AnyAgentTool<Context: Sendable>: Sendable {
     }
 
     func invoke(context: ToolContext<Context>, arguments: String) async throws -> ToolInvocationOutput {
-        try await invokeValue(context, arguments)
+        try ToolArgumentValidator.validate(arguments, definition: definition)
+        return try await invokeValue(context, arguments)
     }
 
     func requiresApproval(arguments: String) async throws -> Bool {

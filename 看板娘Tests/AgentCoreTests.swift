@@ -5,13 +5,17 @@ import Testing
 struct AgentCoreTests {
     private final class FakeProvider: AgentModelProvider, @unchecked Sendable {
         let id = "fake"
-        let capabilities = ModelCapabilities.chatCompletions
+        let capabilities: ModelCapabilities
         private let lock = NSLock()
         private var responses: [ModelResponse]
         private(set) var requests: [ModelRequest] = []
 
-        init(_ responses: [ModelResponse]) {
+        init(
+            _ responses: [ModelResponse],
+            capabilities: ModelCapabilities = .chatCompletions
+        ) {
             self.responses = responses
+            self.capabilities = capabilities
         }
 
         func streamResponse(request: ModelRequest) -> AsyncThrowingStream<ModelStreamEvent, Error> {
