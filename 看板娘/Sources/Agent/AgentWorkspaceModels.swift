@@ -91,6 +91,17 @@ final class AgentFileAccessStore: ObservableObject {
         return authorizedDirectories.map { URL(fileURLWithPath: $0, isDirectory: true) }
     }
 
+    func makePolicy(additionalRoots: [String] = []) -> AgentFileAccessPolicy {
+        let roots = (authorizedDirectories + Array(sessionGrantedPaths) + additionalRoots)
+            .map(Self.standardized)
+            .uniqued()
+        return AgentFileAccessPolicy(
+            requiresAuthorization: requiresAuthorization,
+            readableRoots: roots,
+            writableRoots: roots
+        )
+    }
+
     static func denialMessage(path: String) -> String {
         "路径尚未授权：\(path)。请将文件拖给角色，或在偏好设置 → 命令权限 → 文件与工具中添加允许的目录。"
     }

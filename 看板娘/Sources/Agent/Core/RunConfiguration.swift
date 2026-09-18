@@ -15,6 +15,8 @@ struct RunConfiguration: Sendable {
     var maximumConcurrentTools: Int
     var retryPolicy: RetryPolicy
     var tracingEnabled: Bool
+    var contextCompactionPolicy: AgentContextCompactionPolicy?
+    var forceContextCompaction: Bool
 
     init(
         maxTurns: Int = 20,
@@ -22,7 +24,9 @@ struct RunConfiguration: Sendable {
         toolTimeout: Duration = .seconds(60),
         maximumConcurrentTools: Int = 1,
         retryPolicy: RetryPolicy = .standard,
-        tracingEnabled: Bool = true
+        tracingEnabled: Bool = true,
+        contextCompactionPolicy: AgentContextCompactionPolicy? = nil,
+        forceContextCompaction: Bool = false
     ) {
         self.maxTurns = maxTurns
         self.modelTimeout = modelTimeout
@@ -30,6 +34,8 @@ struct RunConfiguration: Sendable {
         self.maximumConcurrentTools = maximumConcurrentTools
         self.retryPolicy = retryPolicy
         self.tracingEnabled = tracingEnabled
+        self.contextCompactionPolicy = contextCompactionPolicy
+        self.forceContextCompaction = forceContextCompaction
     }
 
     func validate() throws {

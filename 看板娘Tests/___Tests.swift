@@ -139,7 +139,10 @@ struct AgentFoundationTests {
 
     @Test @MainActor
     func standardRegistryExposesCoreAndAppTools() {
-        let names = Set(AgentToolRegistry.standard().definitions.map(\.name))
+        let registry = AgentToolRegistry.standard()
+        let names = Set(registry.definitions.map(\.name))
+        #expect(registry.allTypedTools.count == registry.definitions.count)
+        #expect(Set(registry.allTypedTools.map(\.definition.name)) == names)
         #expect(names.contains("get_current_datetime"))
         #expect(names.contains("compact_context"))
         #expect(names.contains("read_skill"))
@@ -228,12 +231,14 @@ struct AgentFoundationTests {
     func explicitlyMentionedSkillIsLoadedBeforeTheFirstModelRequest() async {
         let client = FakeModelClient()
         client.responses = [AgentModelResponse(content: "上海天气结果", toolCalls: [])]
+        let tracer = InMemoryAgentTracer()
         let registry = AgentToolRegistry()
         registry.register(TestReadSkillTool())
         registry.register(EchoTool())
         let runtime = AgentRuntime(
             apiManager: client,
             registry: registry,
+            tracer: tracer,
             enabledSkillNameResolver: { $0.caseInsensitiveCompare("weather") == .orderedSame ? "weather" : nil },
             systemPromptProvider: { "system" }
         )
@@ -251,6 +256,38 @@ struct AgentFoundationTests {
         #expect(client.requests[0][3].name == "read_skill")
         #expect(client.requests[0][3].content?.contains("skill:weather") == true)
         #expect(runtime.messages.last?.content == "上海天气结果")
+        let trace = await tracer.records()
+        #expect(trace.contains { $0.definition.kind == .tool && $0.definition.name == "read_skill" })
+    }
+
+    @Test
+    func appToolGuardrailRejectsPathsOutsideRunContext() async throws {
+        let policy = AgentFileAccessPolicy(
+            requiresAuthorization: true,
+            readableRoots: ["/tmp/allowed"],
+            writableRoots: ["/tmp/allowed"]
+        )
+        let context = AgentGuardrailContext(
+            runID: UUID(),
+            sessionID: "scoped",
+            agentID: "desktop-companion",
+            context: AppAgentContext(
+                conversationID: UUID(),
+                fileAccessPolicy: policy
+            )
+        )
+        let result = try await AppAgentToolGuardrail().evaluateInput(
+            context: context,
+            call: ToolCallItem(
+                id: "read-denied",
+                name: "read_file",
+                arguments: #"{"path":"/tmp/outside/secret.txt"}"#
+            ),
+            tool: ToolDefinition(name: "read_file", description: "read")
+        )
+
+        #expect(result.action == .stop)
+        #expect(result.message.contains("路径尚未授权"))
     }
 
     @Test @MainActor
@@ -849,6 +886,7 @@ struct AgentFoundationTests {
     @Test @MainActor
     func explicitCompactContextToolForcesCompactionBelowAutomaticThreshold() async {
         let client = FakeModelClient()
+        let tracer = InMemoryAgentTracer()
         client.responses = [
             AgentModelResponse(content: "第一轮回复", toolCalls: []),
             AgentModelResponse(
@@ -867,6 +905,7 @@ struct AgentFoundationTests {
                 maximumToolResultCharacters: 12_000,
                 maximumSummaryInputCharacters: 20_000
             ),
+            tracer: tracer,
             systemPromptProvider: { "system" }
         )
 
@@ -886,6 +925,10 @@ struct AgentFoundationTests {
         #expect(client.requests[2].contains(where: { $0.content?.contains("第一轮问题") == true }) == false)
         #expect(client.requests[2].contains(where: { $0.name == AgentRuntimeToolName.compactContext }))
         #expect(runtime.messages.last?.content == "上下文已压缩")
+        let trace = await tracer.records()
+        #expect(trace.contains { $0.definition.kind == .tool && $0.definition.name == AgentRuntimeToolName.compactContext })
+        #expect(trace.contains { $0.definition.kind == .compaction && $0.definition.name == "context.compaction" })
+        #expect(trace.contains { $0.definition.kind == .model && $0.definition.name == "context.compaction.model" })
     }
 
     @Test @MainActor

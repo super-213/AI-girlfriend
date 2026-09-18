@@ -138,6 +138,25 @@ struct AgentPhase456Tests {
         }
     }
 
+    @MainActor
+    private final class HangingLegacyTool: LegacyAgentTool {
+        let definition = AgentToolDefinition(
+            name: "hanging_legacy",
+            description: "never completes",
+            parameters: ["type": "object", "properties": [:]]
+        )
+        let requiresConfirmation = false
+
+        func approvalSummary(arguments: [String: Any]) -> String { "hang" }
+
+        func execute(
+            arguments: [String: Any],
+            completion: @escaping @MainActor (AgentToolExecutionResult) -> Void
+        ) {
+            // Deliberately never calls back; cancellation must release the adapter.
+        }
+    }
+
     @Test
     func typedToolRejectsSchemaViolationsBeforeInvocation() async throws {
         let counter = InvocationCounter()
@@ -154,6 +173,33 @@ struct AgentPhase456Tests {
             }
         }
         #expect(await counter.count == 0)
+    }
+
+    @Test @MainActor
+    func legacyToolAdapterReturnsWhenCancelled() async {
+        let tool = LegacyToolAdapter<Void>.erase(HangingLegacyTool())
+        let task = Task {
+            try await tool.invoke(
+                context: ToolContext(
+                    runID: UUID(),
+                    sessionID: "cancel-legacy",
+                    agentID: "agent",
+                    context: ()
+                ),
+                arguments: "{}"
+            )
+        }
+        await Task.yield()
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            Issue.record("取消后兼容工具不应继续等待 callback")
+        } catch let error as AgentError {
+            #expect(error == .cancelled)
+        } catch {
+            Issue.record("错误类型不正确：\(error)")
+        }
     }
 
     @Test

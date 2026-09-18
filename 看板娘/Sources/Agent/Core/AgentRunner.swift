@@ -4,15 +4,18 @@ struct AgentInput: Sendable, Equatable {
     let text: String
     let imagePaths: [String]
     let followingItems: [AgentItem]
+    let preflightToolCalls: [ToolCallItem]
 
     init(
         _ text: String,
         imagePaths: [String] = [],
-        followingItems: [AgentItem] = []
+        followingItems: [AgentItem] = [],
+        preflightToolCalls: [ToolCallItem] = []
     ) {
         self.text = text
         self.imagePaths = imagePaths
         self.followingItems = followingItems
+        self.preflightToolCalls = preflightToolCalls
     }
 }
 
@@ -223,8 +226,27 @@ final class AgentRunner: AgentRunning, Sendable {
                 imagePaths: input.imagePaths
             )))
             newItems.append(contentsOf: input.followingItems)
+            if !input.preflightToolCalls.isEmpty {
+                let assistant = AgentItem.message(AgentMessageItem(role: .assistant, content: nil))
+                newItems.append(assistant)
+                newItems.append(contentsOf: input.preflightToolCalls.map(AgentItem.toolCall))
+            }
             newItems.append(contentsOf: guardrailResults.map { .guardrail(GuardrailItem(result: $0)) })
             allItems.append(contentsOf: newItems)
+
+            try await compactHistoryIfNeeded(
+                runID: runID,
+                agentID: startingAgent.id,
+                model: startingAgent.model,
+                tools: startingAgent.tools.map(\.definition),
+                policy: configuration.contextCompactionPolicy,
+                force: configuration.forceContextCompaction,
+                configuration: configuration,
+                trace: trace,
+                allItems: &allItems,
+                newItems: &newItems,
+                events: events
+            )
 
             let result = try await continueExecution(
                 runID: runID,
@@ -237,7 +259,7 @@ final class AgentRunner: AgentRunning, Sendable {
                 completedTurnCount: 0,
                 allItems: allItems,
                 newItems: newItems,
-                pendingCalls: [],
+                pendingCalls: input.preflightToolCalls,
                 knownInterruptionsByToolCallID: [:],
                 approvalResolutionsByToolCallID: [:],
                 rawResponses: [],
@@ -442,7 +464,8 @@ final class AgentRunner: AgentRunning, Sendable {
                     configuration: configuration,
                     trace: trace,
                     span: modelSpan,
-                    events: events
+                    events: events,
+                    emitTextDeltas: currentAgent.outputGuardrails.isEmpty
                 )
                 if let usage = response.usage { await trace.record(.usage(usage), in: modelSpan) }
                 await trace.end(
@@ -506,6 +529,9 @@ final class AgentRunner: AgentRunning, Sendable {
                     guard result.action == .allow else {
                         throw AgentError.guardrailTriggered(result)
                     }
+                }
+                if !currentAgent.outputGuardrails.isEmpty, !response.content.isEmpty {
+                    events.yield(.textDelta(response.content))
                 }
                 try await persistCompleted(items: allItems, session: session)
                 events.yield(.runCompleted)
@@ -795,7 +821,128 @@ final class AgentRunner: AgentRunning, Sendable {
             allItems.append(observation)
             newItems.append(observation)
         }
+
+        if calls.contains(where: { $0.name == AgentRuntimeToolName.compactContext }) {
+            try await compactHistoryIfNeeded(
+                runID: runID,
+                agentID: agent.id,
+                model: agent.model,
+                tools: agent.tools.map(\.definition),
+                policy: configuration.contextCompactionPolicy ?? .standard,
+                force: true,
+                configuration: configuration,
+                trace: trace,
+                allItems: &allItems,
+                newItems: &newItems,
+                events: events
+            )
+        }
         return nil
+    }
+
+    private func compactHistoryIfNeeded(
+        runID: UUID,
+        agentID: String,
+        model: AgentModelConfiguration,
+        tools: [ToolDefinition],
+        policy: AgentContextCompactionPolicy?,
+        force: Bool,
+        configuration: RunConfiguration,
+        trace: AgentRunTrace,
+        allItems: inout [AgentItem],
+        newItems: inout [AgentItem],
+        events: AsyncThrowingStream<AgentRunEvent, Error>.Continuation
+    ) async throws {
+        guard let policy else { return }
+        let manager = AgentContextManager(policy: policy)
+        let messages = AgentItemLegacyCodec.messages(from: allItems)
+        let legacyTools = tools.map {
+            AgentToolDefinition(
+                name: $0.name,
+                description: $0.description,
+                parameters: $0.parameters.foundationValue as? [String: Any] ?? [:]
+            )
+        }
+        guard let plan = manager.makePlan(
+            messages: messages,
+            tools: legacyTools,
+            force: force
+        ), let system = messages.first(where: { $0.role == .system && $0.contextKind == nil }) else {
+            return
+        }
+
+        events.yield(.contextCompactionStarted)
+        let compactionSpan = await trace.startChild(
+            kind: .compaction,
+            name: "context.compaction",
+            agentID: agentID,
+            attributes: ["summarized_items": String(plan.messagesToSummarize.count)]
+        )
+        let modelSpan = await trace.startChild(
+            kind: .model,
+            name: "context.compaction.model",
+            agentID: agentID,
+            parentSpanID: compactionSpan?.spanID,
+            providerID: model.providerID,
+            modelID: model.modelID
+        )
+        do {
+            let response = try await requestModel(
+                ModelRequest(
+                    runID: runID,
+                    agentID: agentID,
+                    model: model,
+                    items: AgentItemLegacyCodec.items(from: manager.summaryRequestMessages(for: plan)),
+                    tools: [],
+                    purpose: .contextCompaction
+                ),
+                configuration: configuration,
+                trace: trace,
+                span: modelSpan,
+                events: events,
+                emitTextDeltas: false
+            )
+            guard !response.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw AgentError.modelRequestFailed(.invalidResponse("上下文压缩返回空摘要"))
+            }
+            await trace.end(
+                modelSpan,
+                outcome: SpanOutcome(status: .completed, usage: response.usage)
+            )
+            let compactedMessages = manager.compactedMessages(
+                systemMessage: system,
+                summary: response.content,
+                plan: plan
+            )
+            let compaction = CompactionItem(
+                summary: response.content,
+                summarizedItemCount: plan.messagesToSummarize.count
+            )
+            let structuralItems = allItems.filter { item in
+                switch item {
+                case .handoff, .guardrail, .approval:
+                    return true
+                case .message, .toolCall, .toolResult, .compaction:
+                    return false
+                }
+            }
+            allItems = AgentItemLegacyCodec.items(from: compactedMessages).map { item in
+                if case .compaction = item { return .compaction(compaction) }
+                return item
+            } + structuralItems
+            newItems.append(.compaction(compaction))
+            let event = CompactionEvent(
+                summarizedItemCount: plan.messagesToSummarize.count,
+                retainedItemCount: plan.recentMessages.count,
+                estimatedTokensBeforeCompaction: plan.estimatedTokensBeforeCompaction
+            )
+            events.yield(.contextCompacted(event))
+            await trace.end(compactionSpan, outcome: SpanOutcome(status: .completed, usage: response.usage))
+        } catch {
+            await trace.end(modelSpan, outcome: SpanOutcome(status: .failed, error: error))
+            await trace.end(compactionSpan, outcome: SpanOutcome(status: .failed, error: error))
+            throw error
+        }
     }
 
     private func canRunInParallel<Context: Sendable>(
@@ -921,7 +1068,8 @@ final class AgentRunner: AgentRunning, Sendable {
         configuration: RunConfiguration,
         trace: AgentRunTrace,
         span: SpanHandle?,
-        events: AsyncThrowingStream<AgentRunEvent, Error>.Continuation
+        events: AsyncThrowingStream<AgentRunEvent, Error>.Continuation,
+        emitTextDeltas: Bool = true
     ) async throws -> ModelResponse {
         var lastError: Error?
         for attempt in 1...configuration.retryPolicy.maximumAttempts {
@@ -931,7 +1079,8 @@ final class AgentRunner: AgentRunning, Sendable {
                     for try await event in self.provider.streamResponse(request: request) {
                         try Task.checkCancellation()
                         switch event {
-                        case .textDelta(let delta): events.yield(.textDelta(delta))
+                        case .textDelta(let delta):
+                            if emitTextDeltas { events.yield(.textDelta(delta)) }
                         case .completed(let response): completed = response
                         }
                     }

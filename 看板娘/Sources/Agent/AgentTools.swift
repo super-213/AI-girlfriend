@@ -31,11 +31,9 @@ extension LegacyAgentTool {
 
 @MainActor
 final class AgentToolRegistry {
-    private var toolsByName: [String: any LegacyAgentTool] = [:]
-    private var typedToolsByName: [String: AnyAgentTool<Void>] = [:]
+    private var typedToolsByName: [String: AnyAgentTool<AppAgentContext>] = [:]
 
     var definitions: [AgentToolDefinition] {
-        let legacy = toolsByName.values.map(\.definition)
         let typed = typedToolsByName.values.map { tool in
             AgentToolDefinition(
                 name: tool.definition.name,
@@ -43,29 +41,54 @@ final class AgentToolRegistry {
                 parameters: tool.definition.parameters.foundationValue as? [String: Any] ?? [:]
             )
         }
-        return (legacy + typed).sorted { $0.name < $1.name }
+        return typed.sorted { $0.name < $1.name }
     }
 
     func register(_ tool: any LegacyAgentTool) {
-        typedToolsByName.removeValue(forKey: tool.definition.name)
-        toolsByName[tool.definition.name] = tool
-    }
-
-    func register<T: AgentTool>(_ tool: T) where T.Context == Void {
-        let erased = AnyAgentTool(tool)
-        toolsByName.removeValue(forKey: erased.definition.name)
+        let erased = LegacyToolAdapter<AppAgentContext>.erase(tool)
         typedToolsByName[erased.definition.name] = erased
     }
 
-    func tool(named name: String) -> (any LegacyAgentTool)? {
-        toolsByName[name]
+    func register<T: AgentTool>(_ tool: T) where T.Context == AppAgentContext {
+        let erased = AnyAgentTool(tool)
+        typedToolsByName[erased.definition.name] = erased
     }
 
-    var allTools: [any LegacyAgentTool] {
-        toolsByName.values.sorted { $0.definition.name < $1.definition.name }
+    /// Context-free tools remain reusable in tests and extensions while the
+    /// application runtime consistently exposes `AppAgentContext` to tools
+    /// that need workspace or permission information.
+    func register<T: AgentTool>(_ tool: T) where T.Context == Void {
+        let contextFree = AnyAgentTool(tool)
+        let erased = AnyAgentTool<AppAgentContext>(
+            definition: contextFree.definition,
+            behavior: contextFree.behavior,
+            requiresApproval: { arguments in
+                try await contextFree.requiresApproval(arguments: arguments)
+            },
+            approvalSummary: { arguments in
+                await contextFree.approvalSummary(arguments: arguments)
+            },
+            invoke: { context, arguments in
+                try await contextFree.invoke(
+                    context: ToolContext(
+                        runID: context.runID,
+                        sessionID: context.sessionID,
+                        agentID: context.agentID,
+                        context: (),
+                        traceContext: context.traceContext
+                    ),
+                    arguments: arguments
+                )
+            }
+        )
+        typedToolsByName[erased.definition.name] = erased
     }
 
-    var allTypedTools: [AnyAgentTool<Void>] {
+    func containsTool(named name: String) -> Bool {
+        typedToolsByName[name] != nil
+    }
+
+    var allTypedTools: [AnyAgentTool<AppAgentContext>] {
         typedToolsByName.values.sorted { $0.definition.name < $1.definition.name }
     }
 

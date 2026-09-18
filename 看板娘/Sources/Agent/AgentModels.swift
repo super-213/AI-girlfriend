@@ -21,7 +21,7 @@ enum AgentMessageContextKind: String, Codable {
     case desktopObservation
 }
 
-enum AgentRequestPurpose: String {
+enum AgentRequestPurpose: String, Sendable {
     case conversation
     case contextCompaction
 }

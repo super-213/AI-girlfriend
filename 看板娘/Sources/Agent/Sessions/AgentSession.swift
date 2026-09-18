@@ -9,3 +9,21 @@ protocol AgentSession: Sendable {
     func loadRunState() async throws -> RunState?
     func saveRunState(_ state: RunState?) async throws
 }
+
+extension AgentSession {
+    func snapshot(
+        createdAt: Date,
+        agentID: String,
+        providerConfigurationID: String
+    ) async throws -> AgentSessionSnapshot {
+        AgentSessionSnapshot(
+            sessionID: id,
+            createdAt: createdAt,
+            updatedAt: .now,
+            agentID: agentID,
+            providerConfigurationID: providerConfigurationID,
+            items: try await loadItems(),
+            pendingRunState: try await loadRunState()
+        )
+    }
+}

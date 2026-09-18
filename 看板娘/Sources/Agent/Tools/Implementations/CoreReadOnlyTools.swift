@@ -1,10 +1,6 @@
 import Foundation
 
 private enum CoreReadOnlyToolSupport {
-    static func canRead(_ path: String) async -> Bool {
-        await MainActor.run { AgentFileAccessStore.shared.canRead(path) }
-    }
-
     static func denied(_ path: String, toolName: String) -> AgentError {
         .toolExecutionFailed(
             toolName: toolName,
@@ -32,7 +28,7 @@ struct CurrentDateTimeAgentTool: AgentTool {
         }
     }
 
-    typealias Context = Void
+    typealias Context = AppAgentContext
     static let definition = ToolDefinition(
         name: "get_current_datetime",
         description: "读取用户 Mac 当前准确的本地日期、时间、星期和时区。凡是涉及今天、现在、日期、时间或星期的问题都应调用此工具。",
@@ -43,7 +39,7 @@ struct CurrentDateTimeAgentTool: AgentTool {
         ])
     )
 
-    func invoke(context: ToolContext<Void>, arguments: Arguments) async throws -> Output {
+    func invoke(context: ToolContext<AppAgentContext>, arguments: Arguments) async throws -> Output {
         try Task.checkCancellation()
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
@@ -71,7 +67,7 @@ struct ListDirectoryAgentTool: AgentTool {
         }
     }
 
-    typealias Context = Void
+    typealias Context = AppAgentContext
     static let definition = ToolDefinition(
         name: "list_directory",
         description: "列出本地目录内容。路径必须是绝对路径；省略时使用应用当前工作目录。",
@@ -87,11 +83,11 @@ struct ListDirectoryAgentTool: AgentTool {
         ])
     )
 
-    func invoke(context: ToolContext<Void>, arguments: Arguments) async throws -> Output {
+    func invoke(context: ToolContext<AppAgentContext>, arguments: Arguments) async throws -> Output {
         try Task.checkCancellation()
         let path = CoreReadOnlyToolSupport.trimmed(arguments.path)
             ?? FileManager.default.currentDirectoryPath
-        guard await CoreReadOnlyToolSupport.canRead(path) else {
+        guard context.context.fileAccessPolicy.canRead(path) else {
             throw CoreReadOnlyToolSupport.denied(path, toolName: Self.definition.name)
         }
         do {
@@ -118,7 +114,7 @@ struct ReadFileAgentTool: AgentTool {
         let truncated: Bool
     }
 
-    typealias Context = Void
+    typealias Context = AppAgentContext
     static let definition = ToolDefinition(
         name: "read_file",
         description: "读取 UTF-8 文本文件。路径必须是绝对路径；单次最多返回 100000 个字符。",
@@ -135,13 +131,13 @@ struct ReadFileAgentTool: AgentTool {
         ])
     )
 
-    func invoke(context: ToolContext<Void>, arguments: Arguments) async throws -> Output {
+    func invoke(context: ToolContext<AppAgentContext>, arguments: Arguments) async throws -> Output {
         try Task.checkCancellation()
         let path = arguments.path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty else {
             throw AgentError.invalidToolArguments(toolName: Self.definition.name, detail: "path 不能为空")
         }
-        guard await CoreReadOnlyToolSupport.canRead(path) else {
+        guard context.context.fileAccessPolicy.canRead(path) else {
             throw CoreReadOnlyToolSupport.denied(path, toolName: Self.definition.name)
         }
         do {
@@ -204,7 +200,7 @@ struct SearchFilesAgentTool: AgentTool {
         }
     }
 
-    typealias Context = Void
+    typealias Context = AppAgentContext
     static let definition = ToolDefinition(
         name: "search_files",
         description: "使用 macOS Spotlight 按文件名或已索引内容搜索本机文件。用户说‘帮我找文件’时优先使用。",
@@ -221,27 +217,22 @@ struct SearchFilesAgentTool: AgentTool {
         ])
     )
 
-    func invoke(context: ToolContext<Void>, arguments: Arguments) async throws -> Output {
+    func invoke(context: ToolContext<AppAgentContext>, arguments: Arguments) async throws -> Output {
         try Task.checkCancellation()
         let query = arguments.query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
             throw AgentError.invalidToolArguments(toolName: Self.definition.name, detail: "query 不能为空")
         }
         var directory = CoreReadOnlyToolSupport.trimmed(arguments.directory)
-        let authorization = await MainActor.run {
-            (
-                AgentFileAccessStore.shared.requiresAuthorization,
-                AgentFileAccessStore.shared.authorizedDirectories
-            )
-        }
-        if authorization.0, directory == nil {
-            guard authorization.1.count == 1 else {
-                let detail = authorization.1.isEmpty
+        let policy = context.context.fileAccessPolicy
+        if policy.requiresAuthorization, directory == nil {
+            guard policy.readableRoots.count == 1 else {
+                let detail = policy.readableRoots.isEmpty
                     ? "尚未授权任何目录"
-                    : "请指定以下已授权目录之一：\n" + authorization.1.joined(separator: "\n")
+                    : "请指定以下已授权目录之一：\n" + policy.readableRoots.joined(separator: "\n")
                 throw AgentError.toolExecutionFailed(toolName: Self.definition.name, detail: detail)
             }
-            directory = authorization.1[0]
+            directory = policy.readableRoots[0]
         }
         if let directory {
             var isDirectory: ObjCBool = false
@@ -252,7 +243,7 @@ struct SearchFilesAgentTool: AgentTool {
                     detail: "搜索目录不存在或不是目录：\(directory)"
                 )
             }
-            guard await CoreReadOnlyToolSupport.canRead(directory) else {
+            guard policy.canRead(directory) else {
                 throw CoreReadOnlyToolSupport.denied(directory, toolName: Self.definition.name)
             }
         }

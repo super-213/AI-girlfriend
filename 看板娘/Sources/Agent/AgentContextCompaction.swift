@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct AgentContextCompactionPolicy: Equatable {
+struct AgentContextCompactionPolicy: Equatable, Sendable {
     static let dynamicTriggerRatio = 0.85
 
     /// Fallback trigger when the model's context window cannot be resolved.

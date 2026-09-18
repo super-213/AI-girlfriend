@@ -26,7 +26,7 @@ final class LegacyModelProvider: AgentModelProvider, @unchecked Sendable {
                 client.sendAgentStreamRequest(
                     messages: AgentItemLegacyCodec.messages(from: request.items),
                     tools: request.tools.map(Self.legacyDefinition),
-                    purpose: .conversation,
+                    purpose: request.purpose,
                     onReceive: { continuation.yield(.textDelta($0)) },
                     onComplete: { response in
                         continuation.yield(.completed(ModelResponse(

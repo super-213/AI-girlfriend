@@ -55,6 +55,9 @@ final class AgentRuntime {
     var onCompleted: (() -> Void)?
     var onError: ((Error) -> Void)?
     var additionalSystemContext: String?
+    var projectID: UUID?
+    var workspacePath: String?
+    var characterID: String?
 
     private(set) var messages: [AgentMessage] = []
     private(set) var isRunning = false
@@ -72,7 +75,7 @@ final class AgentRuntime {
     private var activeRun: AgentRun<String>?
     private var eventTask: Task<Void, Never>?
     private var resultTask: Task<Void, Never>?
-    private var activeAgent: AgentDefinition<Void, String>?
+    private var activeAgent: AgentDefinition<AppAgentContext, String>?
     private var pendingRunState: RunState?
     private var pendingInterruption: AgentInterruption?
     private var runToken = UUID()
@@ -80,15 +83,6 @@ final class AgentRuntime {
     private var contextWindowLookupIdentifier: String?
     private var didResolveContextWindow = false
     private var resolvedContextWindowTokenCount: Int?
-    private var lastCompactionAttemptMessageCount: Int?
-
-    private var contextManager: AgentContextManager {
-        AgentContextManager(
-            policy: fallbackContextCompactionPolicy.adaptingTrigger(
-                to: resolvedContextWindowTokenCount
-            )
-        )
-    }
 
     init(
         apiManager: any AgentModelClient = APIManager(),
@@ -130,8 +124,8 @@ final class AgentRuntime {
             baseProvider = LegacyModelProvider(client: apiManager)
         }
         let provider = ToolCallNormalizingModelProvider(base: baseProvider) { call in
-            guard registry.tool(named: call.name) == nil,
-                  registry.tool(named: "read_skill") != nil,
+            guard !registry.containsTool(named: call.name),
+                  registry.containsTool(named: "read_skill"),
                   let canonicalName = enabledSkillNameResolver(call.name),
                   let data = try? JSONSerialization.data(
                     withJSONObject: ["name": canonicalName],
@@ -257,11 +251,10 @@ final class AgentRuntime {
         guard runToken == token, isRunning else { return }
         refreshSystemPrompt()
 
-        var followingItems: [AgentItem] = []
-        var forceCompaction = false
+        var preflightToolCalls: [ToolCallItem] = []
         if let explicitInvocation, explicitInvocation.kind == .skill {
             do {
-                followingItems = try await forcedSkillItems(named: explicitInvocation.name)
+                preflightToolCalls = [try forcedSkillCall(named: explicitInvocation.name)]
             } catch {
                 finishWithError(error, token: token)
                 return
@@ -269,26 +262,17 @@ final class AgentRuntime {
         } else if let explicitInvocation,
                   explicitInvocation.kind == .tool,
                   explicitInvocation.name == AgentRuntimeToolName.compactContext {
-            followingItems = forcedCompactionItems()
-            forceCompaction = true
+            preflightToolCalls = [forcedCompactionCall()]
         }
 
         await resolveContextWindowIfNeeded(token: token)
         guard runToken == token, isRunning else { return }
-        let preparedHistory = await compactHistoryIfNeeded(
-            input: text,
-            imagePaths: imagePaths,
-            followingItems: followingItems,
-            force: forceCompaction,
-            token: token
-        )
-        guard runToken == token, isRunning else { return }
-
-        messages = preparedHistory
-        session = MemoryAgentSession(
-            id: session.id,
-            items: AgentItemLegacyCodec.items(from: preparedHistory)
-        )
+        do {
+            try await session.replaceItems(AgentItemLegacyCodec.items(from: messages))
+        } catch {
+            finishWithError(AgentError.sessionFailure(error.localizedDescription), token: token)
+            return
+        }
         let agent = makeAgent()
         activeAgent = agent
         bind(
@@ -297,11 +281,11 @@ final class AgentRuntime {
                 input: AgentInput(
                     text,
                     imagePaths: imagePaths,
-                    followingItems: followingItems
+                    preflightToolCalls: preflightToolCalls
                 ),
-                context: (),
+                context: makeRunContext(),
                 session: session,
-                configuration: runConfiguration
+                configuration: effectiveRunConfiguration(forceCompaction: false)
             ),
             agent: agent,
             token: token
@@ -310,7 +294,7 @@ final class AgentRuntime {
 
     private func bind(
         _ run: AgentRun<String>,
-        agent: AgentDefinition<Void, String>,
+        agent: AgentDefinition<AppAgentContext, String>,
         token: UUID
     ) {
         activeRun = run
@@ -331,10 +315,7 @@ final class AgentRuntime {
                 _ = await events.result
                 guard let self, self.runToken == token else { return }
                 self.messages = AgentItemLegacyCodec.messages(from: result.history)
-                self.updateSessionSnapshot(
-                    items: result.history,
-                    pendingRunState: result.resumableState
-                )
+                await self.updateSessionSnapshot()
                 self.pendingRunState = result.resumableState
                 self.pendingInterruption = result.interruptions.first
                 if result.resumableState == nil {
@@ -398,27 +379,52 @@ final class AgentRuntime {
                 agent: agent,
                 from: state,
                 decisions: [interruption.id: decision],
-                context: (),
+                context: makeRunContext(),
                 session: session,
-                configuration: runConfiguration
+                configuration: effectiveRunConfiguration(forceCompaction: false)
             ),
             agent: agent,
             token: token
         )
     }
 
-    private func makeAgent() -> AgentDefinition<Void, String> {
+    private func makeAgent() -> AgentDefinition<AppAgentContext, String> {
         AgentDefinition(
             id: "desktop-companion",
             name: "Desktop Companion Agent",
             instructions: .fixed(makeSystemPrompt()),
-            tools: LegacyAgentRuntimeAdapter.makeTools(registry: registry)
+            tools: LegacyAgentRuntimeAdapter.makeTools(registry: registry),
+            inputGuardrails: [AnyInputGuardrail(NonEmptyInputGuardrail<AppAgentContext>())],
+            outputGuardrails: [AnyOutputGuardrail(AppAgentOutputGuardrail())],
+            toolGuardrails: [AnyToolGuardrail(AppAgentToolGuardrail())]
         )
     }
 
-    private func forcedSkillItems(named requestedName: String) async throws -> [AgentItem] {
+    private func makeRunContext() -> AppAgentContext {
+        let conversationID = UUID(uuidString: sessionSnapshot.sessionID) ?? UUID()
+        let roots = workspacePath.map { [$0] } ?? []
+        return AppAgentContext(
+            conversationID: conversationID,
+            projectID: projectID,
+            workspacePath: workspacePath,
+            characterID: characterID,
+            fileAccessPolicy: AgentFileAccessStore.shared.makePolicy(additionalRoots: roots),
+            commandPermissionPolicy: CommandPermissionPolicy()
+        )
+    }
+
+    private func effectiveRunConfiguration(forceCompaction: Bool) -> RunConfiguration {
+        var configuration = runConfiguration
+        configuration.contextCompactionPolicy = fallbackContextCompactionPolicy.adaptingTrigger(
+            to: resolvedContextWindowTokenCount
+        )
+        configuration.forceContextCompaction = forceCompaction
+        return configuration
+    }
+
+    private func forcedSkillCall(named requestedName: String) throws -> ToolCallItem {
         guard let canonicalName = enabledSkillNameResolver(requestedName),
-              let tool = registry.tool(named: "read_skill"),
+              registry.containsTool(named: "read_skill"),
               let data = try? JSONSerialization.data(
                   withJSONObject: ["name": canonicalName],
                   options: [.sortedKeys]
@@ -426,62 +432,19 @@ final class AgentRuntime {
               let arguments = String(data: data, encoding: .utf8) else {
             throw AgentRuntimeError.skillUnavailable(requestedName)
         }
-        let call = AgentToolCall(
+        return ToolCallItem(
             id: "forced-skill-\(UUID().uuidString)",
             name: "read_skill",
             arguments: arguments
         )
-        onToolStarted?(call.name)
-        let result = await executeLegacyTool(tool, arguments: ["name": canonicalName])
-        onToolFinished?(call.name, result)
-        guard !result.isError else {
-            throw AgentError.toolExecutionFailed(toolName: call.name, detail: result.content)
-        }
-        return [
-            .message(AgentMessageItem(role: .assistant, content: nil)),
-            .toolCall(ToolCallItem(id: call.id, name: call.name, arguments: call.arguments)),
-            .toolResult(ToolResultItem(
-                toolCallID: call.id,
-                toolName: call.name,
-                content: result.modelContent,
-                isError: false,
-                imagePaths: result.imagePaths
-            ))
-        ]
     }
 
-    private func forcedCompactionItems() -> [AgentItem] {
-        let call = AgentToolCall(
+    private func forcedCompactionCall() -> ToolCallItem {
+        ToolCallItem(
             id: "forced-tool-\(UUID().uuidString)",
             name: AgentRuntimeToolName.compactContext,
             arguments: "{}"
         )
-        let result = AgentToolExecutionResult.success(
-            "已请求压缩当前会话上下文；Runtime 将保留最新完整轮次，并摘要更早内容。"
-        )
-        onToolStarted?(call.name)
-        onToolFinished?(call.name, result)
-        return [
-            .message(AgentMessageItem(role: .assistant, content: nil)),
-            .toolCall(ToolCallItem(id: call.id, name: call.name, arguments: call.arguments)),
-            .toolResult(ToolResultItem(
-                toolCallID: call.id,
-                toolName: call.name,
-                content: result.modelContent,
-                isError: false
-            ))
-        ]
-    }
-
-    private func executeLegacyTool(
-        _ tool: any LegacyAgentTool,
-        arguments: [String: Any]
-    ) async -> AgentToolExecutionResult {
-        await withCheckedContinuation { continuation in
-            tool.execute(arguments: arguments) { result in
-                continuation.resume(returning: result)
-            }
-        }
     }
 
     private func resolveContextWindowIfNeeded(token: UUID) async {
@@ -490,7 +453,6 @@ final class AgentRuntime {
             contextWindowLookupIdentifier = identifier
             didResolveContextWindow = false
             resolvedContextWindowTokenCount = nil
-            lastCompactionAttemptMessageCount = nil
         }
         guard !didResolveContextWindow else { return }
         let count = await withCheckedContinuation { continuation in
@@ -500,78 +462,6 @@ final class AgentRuntime {
               apiManager.contextWindowConfigurationIdentifier == identifier else { return }
         didResolveContextWindow = true
         resolvedContextWindowTokenCount = count
-    }
-
-    private func compactHistoryIfNeeded(
-        input: String,
-        imagePaths: [String],
-        followingItems: [AgentItem],
-        force: Bool,
-        token: UUID
-    ) async -> [AgentMessage] {
-        let inputMessage = AgentMessage.user(input, imagePaths: imagePaths)
-        let followingMessages = AgentItemLegacyCodec.messages(from: followingItems)
-        let currentSequence = [inputMessage] + followingMessages
-        let candidate = messages + currentSequence
-        guard force || lastCompactionAttemptMessageCount != candidate.count,
-              let plan = contextManager.makePlan(
-                  messages: candidate,
-                  tools: registry.definitions,
-                  previousMeasurement: nil,
-                  force: force
-              ),
-              let systemMessage = candidate.first(where: {
-                  $0.role == .system && $0.contextKind == nil
-              }) else {
-            return messages
-        }
-
-        lastCompactionAttemptMessageCount = candidate.count
-        consume(.contextCompactionStarted)
-        let response = await requestCompaction(plan: plan, token: token)
-        guard runToken == token,
-              let response,
-              !response.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return messages
-        }
-        var compacted = contextManager.compactedMessages(
-            systemMessage: systemMessage,
-            summary: response.content,
-            plan: plan
-        )
-        if compacted.count >= currentSequence.count,
-           Array(compacted.suffix(currentSequence.count)) == currentSequence {
-            compacted.removeLast(currentSequence.count)
-        }
-        lastCompactionAttemptMessageCount = nil
-        consume(.contextCompacted(CompactionEvent(
-            summarizedItemCount: plan.messagesToSummarize.count,
-            retainedItemCount: plan.recentMessages.count,
-            estimatedTokensBeforeCompaction: plan.estimatedTokensBeforeCompaction
-        )))
-        return compacted
-    }
-
-    private func requestCompaction(
-        plan: AgentContextCompactionPlan,
-        token: UUID
-    ) async -> AgentModelResponse? {
-        await withCheckedContinuation { continuation in
-            var resumed = false
-            func finish(_ response: AgentModelResponse?) {
-                guard !resumed else { return }
-                resumed = true
-                continuation.resume(returning: response)
-            }
-            apiManager.sendAgentStreamRequest(
-                messages: contextManager.summaryRequestMessages(for: plan),
-                tools: [],
-                purpose: .contextCompaction,
-                onReceive: { _ in },
-                onComplete: { response in finish(response) },
-                onError: { _ in finish(nil) }
-            )
-        }
     }
 
     private func decoratedInput(
@@ -651,14 +541,19 @@ final class AgentRuntime {
         contextWindowLookupIdentifier = nil
         didResolveContextWindow = false
         resolvedContextWindowTokenCount = nil
-        lastCompactionAttemptMessageCount = nil
     }
 
-    private func updateSessionSnapshot(items: [AgentItem], pendingRunState: RunState?) {
-        sessionSnapshot.updatedAt = .now
-        sessionSnapshot.agentID = "desktop-companion"
-        sessionSnapshot.providerConfigurationID = apiManager.contextWindowConfigurationIdentifier
-        sessionSnapshot.items = items
-        sessionSnapshot.pendingRunState = pendingRunState
+    private func updateSessionSnapshot() async {
+        do {
+            sessionSnapshot = try await session.snapshot(
+                createdAt: sessionSnapshot.createdAt,
+                agentID: "desktop-companion",
+                providerConfigurationID: apiManager.contextWindowConfigurationIdentifier
+            )
+        } catch {
+            // Runner already retains the in-memory result. Keep the last export if
+            // a custom session cannot be read back, and surface persistence errors
+            // through the normal terminal path on its next operation.
+        }
     }
 }

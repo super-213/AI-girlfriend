@@ -43,30 +43,37 @@ private final class LegacyToolBox: @unchecked Sendable {
     }
 
     func invoke(rawArguments: String) async throws -> ToolInvocationOutput {
-        return try await withCheckedThrowingContinuation { continuation in
-            Task { @MainActor [tool] in
-                guard let data = rawArguments.data(using: .utf8),
-                      let arguments = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    continuation.resume(throwing: AgentError.invalidToolArguments(
-                        toolName: tool.definition.name,
-                        detail: "参数不是 JSON 对象"
-                    ))
-                    return
-                }
-                tool.execute(arguments: arguments) { result in
-                    if result.isError {
-                        continuation.resume(throwing: AgentError.toolExecutionFailed(
+        let bridge = LegacyInvocationBridge()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                bridge.install(continuation)
+                Task { @MainActor [tool] in
+                    guard !bridge.isCancelled else { return }
+                    guard let data = rawArguments.data(using: .utf8),
+                          let arguments = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                        bridge.resume(throwing: AgentError.invalidToolArguments(
                             toolName: tool.definition.name,
-                            detail: result.content
+                            detail: "参数不是 JSON 对象"
                         ))
-                    } else {
-                        continuation.resume(returning: ToolInvocationOutput(
-                            content: result.modelContent,
-                            imagePaths: result.imagePaths
-                        ))
+                        return
+                    }
+                    tool.execute(arguments: arguments) { result in
+                        if result.isError {
+                            bridge.resume(throwing: AgentError.toolExecutionFailed(
+                                toolName: tool.definition.name,
+                                detail: result.content
+                            ))
+                        } else {
+                            bridge.resume(returning: ToolInvocationOutput(
+                                content: result.modelContent,
+                                imagePaths: result.imagePaths
+                            ))
+                        }
                     }
                 }
             }
+        } onCancel: {
+            bridge.cancel()
         }
     }
 
@@ -94,5 +101,54 @@ private final class LegacyToolBox: @unchecked Sendable {
             throw AgentError.invalidToolArguments(toolName: toolName, detail: "参数不是 JSON 对象")
         }
         return arguments
+    }
+}
+
+private final class LegacyInvocationBridge: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<ToolInvocationOutput, Error>?
+    private var completed = false
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.withLock { cancelled }
+    }
+
+    func install(_ continuation: CheckedContinuation<ToolInvocationOutput, Error>) {
+        let shouldCancel = lock.withLock { () -> Bool in
+            if completed { return true }
+            self.continuation = continuation
+            return cancelled
+        }
+        if shouldCancel { cancel() }
+    }
+
+    func resume(returning output: ToolInvocationOutput) {
+        finish(.success(output))
+    }
+
+    func resume(throwing error: Error) {
+        finish(.failure(error))
+    }
+
+    func cancel() {
+        let continuation = lock.withLock { () -> CheckedContinuation<ToolInvocationOutput, Error>? in
+            cancelled = true
+            guard !completed, let continuation else { return nil }
+            completed = true
+            self.continuation = nil
+            return continuation
+        }
+        continuation?.resume(throwing: AgentError.cancelled)
+    }
+
+    private func finish(_ result: Result<ToolInvocationOutput, Error>) {
+        let continuation = lock.withLock { () -> CheckedContinuation<ToolInvocationOutput, Error>? in
+            guard !completed, let continuation else { return nil }
+            completed = true
+            self.continuation = nil
+            return continuation
+        }
+        continuation?.resume(with: result)
     }
 }

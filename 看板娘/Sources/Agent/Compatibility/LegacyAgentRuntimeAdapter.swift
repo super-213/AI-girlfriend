@@ -9,17 +9,7 @@ enum LegacyAgentRuntimeAdapter {
     }
 
     @MainActor
-    static func makeTools<Context: Sendable>(
-        registry: AgentToolRegistry
-    ) -> [AnyAgentTool<Context>] {
-        registry.allTools.map(LegacyToolAdapter<Context>.erase)
-    }
-
-    @MainActor
-    static func makeTools(registry: AgentToolRegistry) -> [AnyAgentTool<Void>] {
-        let legacy = registry.allTools.map(LegacyToolAdapter<Void>.erase)
-        return (legacy + registry.allTypedTools).sorted {
-            $0.definition.name < $1.definition.name
-        }
+    static func makeTools(registry: AgentToolRegistry) -> [AnyAgentTool<AppAgentContext>] {
+        registry.allTypedTools
     }
 }

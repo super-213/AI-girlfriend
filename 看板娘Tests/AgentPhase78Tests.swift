@@ -552,15 +552,24 @@ struct AgentPhase78Tests {
             instructions: .fixed("system"),
             outputGuardrails: [AnyOutputGuardrail(BlockingOutputGuardrail())]
         )
-        await expectGuardrailFailure(
-            AgentRunner(provider: outputProvider).run(
-                agent: outputAgent,
-                input: AgentInput("run"),
-                context: (),
-                session: MemoryAgentSession()
-            ),
-            stage: .output
+        let outputRun = AgentRunner(provider: outputProvider).run(
+            agent: outputAgent,
+            input: AgentInput("run"),
+            context: (),
+            session: MemoryAgentSession()
         )
+        await expectGuardrailFailure(outputRun, stage: .output)
+        var leakedUnsafeDelta = false
+        do {
+            for try await event in outputRun.events {
+                if case .textDelta(let delta) = event, delta == "unsafe" {
+                    leakedUnsafeDelta = true
+                }
+            }
+        } catch {
+            // The event stream terminates with the same guardrail failure.
+        }
+        #expect(!leakedUnsafeDelta)
     }
 
     @Test

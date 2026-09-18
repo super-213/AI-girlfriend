@@ -861,11 +861,15 @@ final class DialogChatViewModel: ObservableObject {
     private func updateAgentWorkspaceContext() {
         guard let project = selectedProject else {
             agentRuntime.additionalSystemContext = nil
+            agentRuntime.projectID = nil
+            agentRuntime.workspacePath = nil
             return
         }
         AgentFileAccessStore.shared.grantSessionAccess(to: [
             URL(fileURLWithPath: project.sourceDirectory, isDirectory: true)
         ])
+        agentRuntime.projectID = project.id
+        agentRuntime.workspacePath = project.sourceDirectory
         agentRuntime.additionalSystemContext = """
 
         ## 当前项目工作区

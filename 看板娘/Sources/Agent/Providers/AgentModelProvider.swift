@@ -7,6 +7,7 @@ struct ModelRequest: Sendable {
     let items: [AgentItem]
     let tools: [ToolDefinition]
     let outputSchema: AgentOutputSchema?
+    let purpose: AgentRequestPurpose
 
     init(
         runID: UUID,
@@ -14,7 +15,8 @@ struct ModelRequest: Sendable {
         model: AgentModelConfiguration,
         items: [AgentItem],
         tools: [ToolDefinition],
-        outputSchema: AgentOutputSchema? = nil
+        outputSchema: AgentOutputSchema? = nil,
+        purpose: AgentRequestPurpose = .conversation
     ) {
         self.runID = runID
         self.agentID = agentID
@@ -22,6 +24,7 @@ struct ModelRequest: Sendable {
         self.items = items
         self.tools = tools
         self.outputSchema = outputSchema
+        self.purpose = purpose
     }
 }
 
