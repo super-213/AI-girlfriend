@@ -18,8 +18,7 @@ struct PetQuickMenuView: View {
             item("对话", "bubble.left.and.bubble.right.fill") { AppWindowRouter.shared.showDialog() }
             item("设置", "gearshape.fill") { AppWindowRouter.shared.showPreferences() }
             item("换角色", "arrow.triangle.2.circlepath") { backend.cycleCharacter() }
-            item("自动化", "clock.arrow.circlepath") { AppWindowRouter.shared.showPreferences(section: .automation) }
-            item("触发器", "bolt.badge.clock.fill") { AppWindowRouter.shared.showPreferences(section: .triggers) }
+            item("自动执行", "clock.arrow.circlepath") { AppWindowRouter.shared.showPreferences(section: .automaticExecution) }
             item(isMuted ? "取消静音" : "静音", isMuted ? "speaker.wave.2.fill" : "speaker.slash.fill") { isMuted.toggle() }
             item("收起", "chevron.down") { onDismiss() }
             item("退出", "power", tint: .red) { NSApp.terminate(nil) }

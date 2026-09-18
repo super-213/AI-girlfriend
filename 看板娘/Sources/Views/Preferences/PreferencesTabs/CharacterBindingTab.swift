@@ -7,12 +7,29 @@
 
 import SwiftUI
 
+private enum CharacterSettingsSection: String, CaseIterable, Identifiable {
+    case overview = "概览"
+    case conversation = "对话"
+    case assets = "素材"
+
+    var id: String { rawValue }
+}
+
 struct CharacterBindingTab: View {
     let allCharacters: [PetCharacter]
     let customCharacters: [PetCharacter]
     let builtInCharactersCount: Int
     let currentCharacterID: String
 
+    @Binding var selectedCharacterID: String
+    @Binding var systemPrompt: String
+    @Binding var inputPlaceholder: String
+    @Binding var staticMessages: [String]
+    var focusedField: FocusState<PreferencesView.FocusableField?>.Binding
+
+    let onSaveStyle: () -> Void
+    let onCancelStyle: () -> Void
+    let styleHasUnsavedChanges: Bool
     let onCharacterChange: (Int) -> Void
     let onImport: (URL?, URL?, String) -> Bool
     let onDelete: (Int) -> Void
@@ -23,7 +40,7 @@ struct CharacterBindingTab: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @State private var selectedCharacterID: String?
+    @State private var selectedSection: CharacterSettingsSection = .overview
     @State private var characterPendingDeletion: PetCharacter?
     @State private var isShowingImporter = false
     @State private var selectNewestCharacterAfterImport = false
@@ -49,7 +66,7 @@ struct CharacterBindingTab: View {
             normalizeSelection(preferCurrentCharacter: true)
         }
         .onChange(of: currentCharacterID) { _, _ in
-            normalizeSelection(preferCurrentCharacter: selectedCharacterID == nil)
+            normalizeSelection(preferCurrentCharacter: selectedCharacter == nil)
         }
         .onChange(of: customCharacters.map(\.id)) { _, newIDs in
             if selectNewestCharacterAfterImport, let newestID = newIDs.last {
@@ -93,12 +110,12 @@ struct CharacterBindingTab: View {
             Text(importErrorMessage)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("角色绑定")
+        .accessibilityLabel("角色设置")
     }
 
     private var header: some View {
         HStack(alignment: .center, spacing: DesignSpacing.lg) {
-            Text("角色绑定")
+            Text("角色")
                 .font(.title2.weight(.semibold))
 
             Spacer()
@@ -192,32 +209,86 @@ struct CharacterBindingTab: View {
     @ViewBuilder
     private var detailArea: some View {
         if let character = selectedCharacter {
-            CharacterDetailPane(
-                character: character,
-                isCustom: customIndex(for: character) != nil,
-                isCurrent: character.id == currentCharacterID,
-                statusMessage: statusMessage,
-                onBind: { bind(character) },
-                onConfigure: customIndex(for: character).map { index in
-                    { onConfigure(index) }
-                },
-                onDelete: customIndex(for: character).map { _ in
-                    { characterPendingDeletion = character }
+            VStack(spacing: 0) {
+                detailHeader(for: character)
+
+                Divider()
+
+                Group {
+                    switch selectedSection {
+                    case .overview:
+                        CharacterDetailPane(
+                            character: character,
+                            isCustom: customIndex(for: character) != nil,
+                            isCurrent: character.id == currentCharacterID,
+                            statusMessage: statusMessage,
+                            onBind: { bind(character) },
+                            onConfigure: nil,
+                            onDelete: customIndex(for: character).map { _ in
+                                { characterPendingDeletion = character }
+                            }
+                        )
+                    case .conversation:
+                        CharacterConversationSettingsPane(
+                            characterName: character.name,
+                            systemPrompt: $systemPrompt,
+                            inputPlaceholder: $inputPlaceholder,
+                            staticMessages: $staticMessages,
+                            focusedField: focusedField,
+                            onSave: onSaveStyle,
+                            onCancel: onCancelStyle,
+                            hasUnsavedChanges: styleHasUnsavedChanges
+                        )
+                    case .assets:
+                        CharacterAssetsSettingsPane(
+                            character: character,
+                            isCustom: customIndex(for: character) != nil,
+                            onConfigure: customIndex(for: character).map { index in
+                                { onConfigure(index) }
+                            }
+                        )
+                    }
                 }
-            )
-            .id(character.id)
-            .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.985)))
+                .id("\(character.id)-\(selectedSection.id)")
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.99)))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         } else {
             ContentUnavailableView(
                 "没有可用角色",
                 systemImage: "person.crop.circle.badge.questionmark",
-                description: Text("导入一个角色后即可进行绑定。")
+                description: Text("导入一个角色后即可开始配置。")
             )
         }
     }
 
+    private func detailHeader(for character: PetCharacter) -> some View {
+        HStack(spacing: DesignSpacing.lg) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(character.name)
+                    .font(.headline)
+                    .lineLimit(1)
+                Text(character.id == currentCharacterID ? "当前角色" : "正在编辑")
+                    .font(.caption)
+                    .foregroundStyle(character.id == currentCharacterID ? .green : .secondary)
+            }
+
+            Spacer()
+
+            Picker("角色设置区域", selection: $selectedSection) {
+                ForEach(CharacterSettingsSection.allCases) { section in
+                    Text(section.rawValue).tag(section)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 250)
+        }
+        .padding(.horizontal, DesignSpacing.xl)
+        .padding(.vertical, DesignSpacing.md)
+    }
+
     private var selectedCharacter: PetCharacter? {
-        guard let selectedCharacterID else { return nil }
         return allCharacters.first(where: { $0.id == selectedCharacterID })
     }
 
@@ -246,7 +317,7 @@ struct CharacterBindingTab: View {
 
         if wasSelected {
             selectedCharacterID = currentCharacterID == character.id
-                ? allCharacters.first?.id
+                ? allCharacters.first?.id ?? ""
                 : currentCharacterID
         }
     }
@@ -257,11 +328,176 @@ struct CharacterBindingTab: View {
             return
         }
 
-        guard let selectedCharacterID,
-              allCharacters.contains(where: { $0.id == selectedCharacterID }) else {
-            self.selectedCharacterID = allCharacters.first(where: { $0.id == currentCharacterID })?.id
+        guard allCharacters.contains(where: { $0.id == selectedCharacterID }) else {
+            selectedCharacterID = allCharacters.first(where: { $0.id == currentCharacterID })?.id
                 ?? allCharacters.first?.id
+                ?? ""
             return
         }
+    }
+}
+
+private struct CharacterConversationSettingsPane: View {
+    let characterName: String
+    @Binding var systemPrompt: String
+    @Binding var inputPlaceholder: String
+    @Binding var staticMessages: [String]
+    var focusedField: FocusState<PreferencesView.FocusableField?>.Binding
+    let onSave: () -> Void
+    let onCancel: () -> Void
+    let hasUnsavedChanges: Bool
+
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: DesignSpacing.xxl) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs) {
+                        Text("对话风格")
+                            .font(.title3.weight(.semibold))
+                        Text("这些设置仅对“\(characterName)”生效。")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    settingsSection(title: "临时对话框") {
+                        VStack(alignment: .leading, spacing: LayoutConstants.fieldSpacing) {
+                            Text("输入框提示语")
+                                .font(.subheadline.weight(.semibold))
+                            TextField("留空则不显示提示语", text: $inputPlaceholder)
+                                .textFieldStyle(.roundedBorder)
+                                .font(DesignFonts.input)
+                            Text("鼠标移到桌宠上时，临时输入框中显示的灰色文字。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            HStack {
+                                Spacer()
+                                Button("恢复默认") {
+                                    inputPlaceholder = PetConversationStyle.defaultInputPlaceholder
+                                }
+                                .buttonStyle(.borderless)
+                                .font(.caption)
+                                .disabled(inputPlaceholder == PetConversationStyle.defaultInputPlaceholder)
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    settingsSection(title: "角色风格") {
+                        SystemPromptEditor(
+                            text: $systemPrompt,
+                            defaultPrompt: PreferencesData.default.systemPrompt,
+                            focusedField: focusedField
+                        )
+                    }
+
+                    Divider()
+
+                    settingsSection(title: "随机主动消息") {
+                        StaticMessagesEditor(messages: $staticMessages)
+                    }
+                }
+                .padding(DesignSpacing.xl)
+                .frame(maxWidth: 680, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+
+            Divider()
+
+            EnhancedActionButtons(
+                onSave: onSave,
+                onCancel: onCancel,
+                isSaveDisabled: !hasUnsavedChanges,
+                hasUnsavedChanges: hasUnsavedChanges,
+                secondaryTitle: "放弃更改",
+                isCancelDisabled: !hasUnsavedChanges
+            )
+            .padding(.horizontal, DesignSpacing.xl)
+            .padding(.vertical, DesignSpacing.md)
+            .background(
+                reduceTransparency
+                    ? AnyShapeStyle(Color(nsColor: .windowBackgroundColor))
+                    : AnyShapeStyle(.bar)
+            )
+        }
+    }
+
+    private func settingsSection<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: DesignSpacing.lg) {
+            Text(title)
+                .font(.headline)
+            content()
+        }
+    }
+}
+
+private struct CharacterAssetsSettingsPane: View {
+    let character: PetCharacter
+    let isCustom: Bool
+    let onConfigure: (() -> Void)?
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: DesignSpacing.xl) {
+                CharacterThumbnail(character: character, size: 150, cornerRadius: 20, showsBackground: true)
+
+                VStack(spacing: DesignSpacing.xs) {
+                    Text("状态素材")
+                        .font(.title3.weight(.semibold))
+                    Text(isCustom
+                         ? "为站立、工作、思考等状态配置不同素材。"
+                         : "内置角色的状态素材由应用提供，不能在此修改。")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                HStack(spacing: 0) {
+                    assetMetric(value: "\(configuredStateCount)", label: "已配置状态")
+                    Divider().frame(height: 34)
+                    assetMetric(value: "\(totalAssetCount)", label: "状态素材")
+                    Divider().frame(height: 34)
+                    assetMetric(value: character.interactionAssets.isEmpty ? "无" : "有", label: "互动素材")
+                }
+                .padding(.vertical, DesignSpacing.md)
+                .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                if let onConfigure {
+                    Button(action: onConfigure) {
+                        Label("编辑状态素材", systemImage: "photo.on.rectangle.angled")
+                            .frame(minWidth: 180)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                }
+            }
+            .frame(maxWidth: 500)
+            .frame(maxWidth: .infinity)
+            .padding(DesignSpacing.xxl)
+        }
+    }
+
+    private func assetMetric(value: String, label: String) -> some View {
+        VStack(spacing: DesignSpacing.xs) {
+            Text(value)
+                .font(.headline.monospacedDigit())
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var configuredStateCount: Int {
+        character.assetsByState.values.filter { !$0.isEmpty }.count
+    }
+
+    private var totalAssetCount: Int {
+        character.assetsByState.values.reduce(0) { $0 + $1.count }
     }
 }

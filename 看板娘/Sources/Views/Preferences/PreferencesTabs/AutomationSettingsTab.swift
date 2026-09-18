@@ -7,6 +7,65 @@
 
 import SwiftUI
 
+struct AutomaticExecutionSettingsTab: View {
+    @ObservedObject var store: AutomationStore
+    @ObservedObject var triggerStore: TriggerStore
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var selectedWorkspace: Workspace = .schedules
+
+    private enum Workspace: String, CaseIterable, Identifiable {
+        case schedules = "计划任务"
+        case triggers = "意图触发"
+
+        var id: String { rawValue }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: DesignSpacing.xl) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs) {
+                    Text("自动执行")
+                        .font(.title2.weight(.semibold))
+                    Text("按计划运行提示词，或根据用户意图触发动作。")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Picker("自动执行区域", selection: $selectedWorkspace) {
+                    ForEach(Workspace.allCases) { workspace in
+                        Text(workspace.rawValue).tag(workspace)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 240)
+            }
+            .padding(.horizontal, DesignSpacing.xl)
+            .padding(.vertical, DesignSpacing.lg)
+
+            Divider()
+
+            Group {
+                switch selectedWorkspace {
+                case .schedules:
+                    AutomationSettingsTab(store: store, triggerStore: triggerStore)
+                case .triggers:
+                    TriggerSettingsTab(store: triggerStore)
+                }
+            }
+            .id(selectedWorkspace)
+            .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.99)))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .animation(reduceMotion ? nil : DesignAnimation.spring, value: selectedWorkspace)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("自动执行设置")
+    }
+}
+
 struct AutomationSettingsTab: View {
     @ObservedObject var store: AutomationStore
     @ObservedObject var triggerStore: TriggerStore
@@ -40,12 +99,12 @@ struct AutomationSettingsTab: View {
             selectIfNeeded()
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("自动化设置标签")
+        .accessibilityLabel("计划任务设置")
     }
 
     private var header: some View {
         HStack(alignment: .center) {
-            Text("自动化")
+            Text("计划任务")
                 .font(DesignFonts.title)
 
             Spacer()

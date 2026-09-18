@@ -14,7 +14,6 @@ struct LayoutSettingsTab: View {
     @Binding var petContentScale: Double
     @Binding var sleepMinutes: Double
     @Binding var petConversationRetentionMinutes: Double
-    @Binding var commandConfirmationStyle: String
     @Binding var bubbleAutoHideDuration: Double
 
     let character: PetCharacter
@@ -33,9 +32,10 @@ struct LayoutSettingsTab: View {
                     contentScale: $petContentScale,
                     character: character
                 )
-                .frame(height: 500)
+                .frame(height: 360)
 
-                behaviorSection
+                petBehaviorSection
+                conversationSection
 
                 EnhancedActionButtons(
                     onSave: onSave,
@@ -56,12 +56,17 @@ struct LayoutSettingsTab: View {
     }
 
     private var pageHeader: some View {
-        Text("布局")
-            .font(.system(size: 22, weight: .semibold))
+        VStack(alignment: .leading, spacing: DesignSpacing.xs) {
+            Text("桌面与交互")
+                .font(.system(size: 22, weight: .semibold))
+            Text("调整桌宠在桌面上的位置，以及日常交互行为。")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
     }
 
-    private var behaviorSection: some View {
-        SettingsCard(title: "界面行为", systemImage: "switch.2") {
+    private var petBehaviorSection: some View {
+        SettingsCard(title: "桌宠行为", systemImage: "sparkles") {
             VStack(alignment: .leading, spacing: DesignSpacing.sm) {
                 settingTitle(
                     "空闲休息",
@@ -70,9 +75,11 @@ struct LayoutSettingsTab: View {
                 Slider(value: $sleepMinutes, in: 0...30, step: 1)
                     .accessibilityValue(sleepMinutes == 0 ? "关闭" : "\(Int(sleepMinutes)) 分钟")
             }
+        }
+    }
 
-            Divider()
-
+    private var conversationSection: some View {
+        SettingsCard(title: "对话界面", systemImage: "bubble.left.and.bubble.right") {
             VStack(alignment: .leading, spacing: DesignSpacing.sm) {
                 HStack(spacing: DesignSpacing.lg) {
                     VStack(alignment: .leading, spacing: DesignSpacing.xs) {
@@ -102,23 +109,6 @@ struct LayoutSettingsTab: View {
                     )
                     .accessibilityValue(PetConversationRetention.description(for: petConversationRetentionMinutes))
                 }
-            }
-
-            Divider()
-
-            HStack(spacing: DesignSpacing.lg) {
-                Text("系统命令确认位置")
-                    .font(.system(size: 13, weight: .medium))
-
-                Spacer()
-
-                Picker("命令确认方式", selection: $commandConfirmationStyle) {
-                    Text("宠物附近").tag("nearPet")
-                    Text("系统弹窗").tag("systemAlert")
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .fixedSize()
             }
 
             Divider()

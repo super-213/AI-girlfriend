@@ -61,11 +61,8 @@ struct PetApp: App {
             Button("切换角色") {
                 backend.cycleCharacter()
             }
-            Button("自动化") {
-                AppWindowRouter.shared.showPreferences(section: .automation)
-            }
-            Button("触发器") {
-                AppWindowRouter.shared.showPreferences(section: .triggers)
+            Button("自动执行") {
+                AppWindowRouter.shared.showPreferences(section: .automaticExecution)
             }
             Divider()
             Toggle("静音", isOn: Binding(
@@ -89,7 +86,7 @@ final class AppWindowRouter {
 
     private weak var petViewBackend: PetViewBackend?
     private var preferencesWindow: NSWindow?
-    private(set) var pendingPreferenceSection: PreferencesViewBackend.PreferenceSection = .style
+    private(set) var pendingPreferenceSection: PreferencesViewBackend.PreferenceSection = .character
 
     private init() {}
 
@@ -105,7 +102,7 @@ final class AppWindowRouter {
         DialogWindowController.shared.startNewConversation()
     }
 
-    func showPreferences(section: PreferencesViewBackend.PreferenceSection = .style) {
+    func showPreferences(section: PreferencesViewBackend.PreferenceSection = .character) {
         pendingPreferenceSection = section
         guard let backend = petViewBackend else { return }
 

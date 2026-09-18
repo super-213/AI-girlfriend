@@ -20,7 +20,7 @@ final class PreferencesViewBackend: ObservableObject {
     // MARK: - 属性
     
     /// 当前选中的设置分区
-    @Published var selectedSection: PreferenceSection? = .style
+    @Published var selectedSection: PreferenceSection? = .character
     
     /// 是否显示成功消息
     @Published var showSuccessMessage: Bool = false
@@ -642,30 +642,32 @@ extension PreferencesViewBackend {
 extension PreferencesViewBackend {
     /// 偏好设置分区枚举
     enum PreferenceSection: String, CaseIterable, Identifiable {
-        case style = "风格"
-        case model = "模型设置"
-        case commandPermissions = "命令权限"
-        case layout = "布局"
+        case character = "角色"
+        case model = "模型"
+        case desktopInteraction = "桌面与交互"
         case knowledgeBases = "知识库"
         case skills = "技能"
-        case automation = "自动化"
-        case triggers = "触发器"
-        case characterBinding = "角色绑定"
+        case automaticExecution = "自动执行"
+        case securityPrivacy = "安全与隐私"
         case about = "关于"
+
+        static let sidebarGroups: [[PreferenceSection]] = [
+            [.character, .model, .desktopInteraction],
+            [.knowledgeBases, .skills, .automaticExecution],
+            [.securityPrivacy, .about]
+        ]
         
         var id: String { rawValue }
         
         var icon: String {
             switch self {
-            case .style: return "text.quote"
+            case .character: return "person.crop.square"
             case .model: return "cpu"
-            case .commandPermissions: return "checkmark.shield"
-            case .layout: return "rectangle.3.group"
+            case .desktopInteraction: return "rectangle.3.group"
             case .knowledgeBases: return "books.vertical"
             case .skills: return "puzzlepiece"
-            case .automation: return "clock"
-            case .triggers: return "bolt"
-            case .characterBinding: return "person.crop.square"
+            case .automaticExecution: return "clock.arrow.circlepath"
+            case .securityPrivacy: return "lock.shield"
             case .about: return "info.circle"
             }
         }

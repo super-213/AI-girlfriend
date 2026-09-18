@@ -24,7 +24,6 @@ struct PreferencesView: View {
     @AppStorage("overlapRatio") private var overlapRatio: Double = 0.3
     @AppStorage(PetHorizontalPosition.storageKey) private var petHorizontalPosition = PetHorizontalPosition.defaultValue
     @AppStorage("petSleepMinutes") private var sleepMinutes: Double = 6
-    @AppStorage("commandConfirmationStyle") private var commandConfirmationStyle = "nearPet"
     @AppStorage("bubbleAutoHideDuration") private var bubbleAutoHideDuration: Double = 15
     @AppStorage(PetConversationRetention.storageKey) private var petConversationRetentionMinutes = PetConversationRetention.defaultMinutes
 
@@ -126,9 +125,21 @@ struct PreferencesView: View {
 
 extension PreferencesView {
     private var sidebar: some View {
-        List(PreferencesViewBackend.PreferenceSection.allCases, selection: $backend.selectedSection) { section in
-            NavigationLink(value: section) {
-                Label(section.rawValue, systemImage: section.icon)
+        List(selection: $backend.selectedSection) {
+            ForEach(Array(PreferencesViewBackend.PreferenceSection.sidebarGroups.enumerated()), id: \.offset) { groupIndex, sections in
+                if groupIndex > 0 {
+                    Color.clear
+                        .frame(height: DesignSpacing.lg)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .accessibilityHidden(true)
+                }
+
+                ForEach(sections) { section in
+                    NavigationLink(value: section) {
+                        Label(section.rawValue, systemImage: section.icon)
+                    }
+                }
             }
         }
         .navigationSplitViewColumnWidth(min: 160, ideal: 176, max: 192)
@@ -176,17 +187,28 @@ extension PreferencesView {
     @ViewBuilder
     private func detailView(for section: PreferencesViewBackend.PreferenceSection) -> some View {
         switch section {
-        case .style:
-            StyleSettingsTab(
-                characters: allCharacters,
+        case .character:
+            CharacterBindingTab(
+                allCharacters: allCharacters,
+                customCharacters: backend.customCharacters,
+                builtInCharactersCount: availableCharacters.count,
+                currentCharacterID: petViewBackend.currentCharacter.id,
                 selectedCharacterID: $selectedStyleCharacterID,
                 systemPrompt: selectedStyleSystemPrompt,
                 inputPlaceholder: selectedStyleInputPlaceholder,
                 staticMessages: selectedStyleStaticMessages,
                 focusedField: $focusedField,
-                onSave: saveStyleSettings,
-                onCancel: restoreStyleDraft,
-                hasUnsavedChanges: styleHasUnsavedChanges
+                onSaveStyle: saveStyleSettings,
+                onCancelStyle: restoreStyleDraft,
+                styleHasUnsavedChanges: styleHasUnsavedChanges,
+                onCharacterChange: handleCharacterChange,
+                onImport: { idleURL, interactionURL, name in
+                    backend.importGIF(normalGif: idleURL, clickGif: interactionURL, name: name)
+                },
+                onDelete: deleteCustomCharacter,
+                onConfigure: { editingCharacterIndex = $0 },
+                showImportError: $backend.showImportError,
+                importErrorMessage: $backend.importErrorMessage
             )
             
         case .model:
@@ -200,17 +222,16 @@ extension PreferencesView {
                 hasUnsavedChanges: backend.hasUnsavedChanges || modelConfigurationsHaveUnsavedChanges
             )
 
-        case .commandPermissions:
+        case .securityPrivacy:
             CommandPermissionsSettingsTab()
             
-        case .layout:
+        case .desktopInteraction:
             LayoutSettingsTab(
                 overlapRatio: $overlapRatio,
                 petHorizontalPosition: $petHorizontalPosition,
                 petContentScale: $petContentScale,
                 sleepMinutes: $sleepMinutes,
                 petConversationRetentionMinutes: $petConversationRetentionMinutes,
-                commandConfirmationStyle: $commandConfirmationStyle,
                 bubbleAutoHideDuration: $bubbleAutoHideDuration,
                 character: petViewBackend.currentCharacter,
                 onSave: saveSettings,
@@ -239,27 +260,8 @@ extension PreferencesView {
                 onCreateSkill: backend.createSkillFile(named:)
             )
 
-        case .automation:
-            AutomationSettingsTab(store: automationStore, triggerStore: triggerStore)
-
-        case .triggers:
-            TriggerSettingsTab(store: triggerStore)
-            
-        case .characterBinding:
-            CharacterBindingTab(
-                allCharacters: allCharacters,
-                customCharacters: backend.customCharacters,
-                builtInCharactersCount: availableCharacters.count,
-                currentCharacterID: petViewBackend.currentCharacter.id,
-                onCharacterChange: handleCharacterChange,
-                onImport: { idleURL, interactionURL, name in
-                    backend.importGIF(normalGif: idleURL, clickGif: interactionURL, name: name)
-                },
-                onDelete: deleteCustomCharacter,
-                onConfigure: { editingCharacterIndex = $0 },
-                showImportError: $backend.showImportError,
-                importErrorMessage: $backend.importErrorMessage
-            )
+        case .automaticExecution:
+            AutomaticExecutionSettingsTab(store: automationStore, triggerStore: triggerStore)
             
         case .about:
             AboutTab(

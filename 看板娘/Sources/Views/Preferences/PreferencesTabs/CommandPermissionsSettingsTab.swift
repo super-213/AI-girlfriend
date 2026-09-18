@@ -13,6 +13,7 @@ struct CommandPermissionsSettingsTab: View {
     @AppStorage(AgentWorkspaceSettings.showCloudTransferNoticeKey) private var showCloudTransferNotice = false
     @AppStorage(AgentWorkspaceSettings.showDirectoryAccessStatusKey) private var showDirectoryAccessStatus = false
     @AppStorage(AgentWorkspaceSettings.showToolAuditInConversationKey) private var showToolAuditInConversation = false
+    @AppStorage("commandConfirmationStyle") private var commandConfirmationStyle = "nearPet"
     @StateObject private var fileAccess = AgentFileAccessStore.shared
     @StateObject private var auditStore = AgentToolAuditStore.shared
     @State private var showAllowAllConfirmation = false
@@ -24,18 +25,17 @@ struct CommandPermissionsSettingsTab: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DesignSpacing.xl) {
-                Text("命令权限")
+                Text("安全与隐私")
                     .font(.system(size: 22, weight: .semibold))
 
                 permissionNotice
                 modeCard
-                fileWorkspaceCard
-                auditCard
-
                 if selectedMode == .blacklist {
                     blacklistCard
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
+                fileWorkspaceCard
+                auditCard
             }
             .frame(maxWidth: 680)
             .padding(.horizontal, DesignSpacing.xxl)
@@ -44,7 +44,7 @@ struct CommandPermissionsSettingsTab: View {
             .animation(DesignAnimation.spring, value: selectedMode)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("命令权限设置")
+        .accessibilityLabel("安全与隐私设置")
         .alert("允许所有命令？", isPresented: $showAllowAllConfirmation) {
             Button("取消", role: .cancel) { }
             Button("允许", role: .destructive) {
@@ -181,6 +181,28 @@ struct CommandPermissionsSettingsTab: View {
                 Text("风险识别采用保守规则：不能明确判断为只读的命令也会询问。")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
+            }
+
+            Divider()
+
+            HStack(spacing: DesignSpacing.lg) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs) {
+                    Text("命令确认位置")
+                        .font(.system(size: 13, weight: .medium))
+                    Text("选择审批请求出现在桌宠附近还是系统弹窗中。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Picker("命令确认位置", selection: $commandConfirmationStyle) {
+                    Text("宠物附近").tag("nearPet")
+                    Text("系统弹窗").tag("systemAlert")
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .fixedSize()
             }
         }
     }
