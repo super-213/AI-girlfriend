@@ -20,18 +20,15 @@ struct LayoutSettingsTab: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DesignSpacing.xl) {
-                pageHeader
-
                 OverlapPreview(
                     overlapRatio: $overlapRatio,
                     horizontalPosition: $petHorizontalPosition,
                     contentScale: $petContentScale,
                     character: character
                 )
-                .frame(height: 360)
+                .frame(height: 320)
 
-                petBehaviorSection
-                conversationSection
+                compactSettingsSection
             }
             .frame(maxWidth: 680)
             .padding(.horizontal, DesignSpacing.xxl)
@@ -42,69 +39,62 @@ struct LayoutSettingsTab: View {
         .accessibilityLabel("布局设置标签")
     }
 
-    private var pageHeader: some View {
-        VStack(alignment: .leading, spacing: DesignSpacing.xs) {
-            Text("桌面与交互")
-                .font(.system(size: 22, weight: .semibold))
-            Text("调整桌宠在桌面上的位置与日常交互行为，更改会自动保存。")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var petBehaviorSection: some View {
-        SettingsCard(title: "桌宠行为", systemImage: "sparkles") {
+    private var compactSettingsSection: some View {
+        SettingsCard {
             compactSliderRow(
-                title: "空闲休息",
+                title: "进入待机状态",
                 value: sleepMinutes == 0 ? "关闭" : "\(Int(sleepMinutes)) 分钟",
                 binding: $sleepMinutes,
                 range: 0...30,
                 step: 1
             )
-        }
-    }
 
-    private var conversationSection: some View {
-        SettingsCard(title: "对话界面", systemImage: "bubble.left.and.bubble.right") {
-            HStack(spacing: DesignSpacing.lg) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("桌宠对话上下文")
-                        .font(.system(size: 13, weight: .medium))
-                    Text("超时后自动开始新会话")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
+            Divider()
 
-                Spacer(minLength: DesignSpacing.md)
+            HStack(spacing: DesignSpacing.md) {
+                Text("对话保留")
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 112, alignment: .leading)
 
-                Toggle("不销毁", isOn: conversationNeverExpires)
+                Slider(
+                    value: conversationRetentionBinding,
+                    in: PetConversationRetention.minimumMinutes...PetConversationRetention.maximumMinutes,
+                    step: PetConversationRetention.stepMinutes
+                )
+                .controlSize(.small)
+                .disabled(petConversationRetentionMinutes == 0)
+                .accessibilityLabel("对话保留时长")
+                .accessibilityValue(conversationRetentionValue)
+
+                Text(conversationRetentionValue)
+                    .font(.system(size: 12).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
+                    .frame(width: 64, alignment: .trailing)
+
+                Toggle("永久保留对话", isOn: conversationNeverExpires)
+                    .labelsHidden()
                     .toggleStyle(.switch)
                     .controlSize(.small)
                     .fixedSize()
             }
 
-            if petConversationRetentionMinutes > 0 {
-                Divider()
-
-                compactSliderRow(
-                    title: "保留时长",
-                    value: PetConversationRetention.description(for: petConversationRetentionMinutes),
-                    binding: conversationRetentionBinding,
-                    range: PetConversationRetention.minimumMinutes...PetConversationRetention.maximumMinutes,
-                    step: PetConversationRetention.stepMinutes
-                )
-            }
-
             Divider()
 
             compactSliderRow(
-                title: "气泡自动收起",
+                title: "气泡收起",
                 value: "\(Int(bubbleAutoHideDuration)) 秒",
                 binding: $bubbleAutoHideDuration,
                 range: 5...60,
                 step: 5
             )
         }
+    }
+
+    private var conversationRetentionValue: String {
+        petConversationRetentionMinutes == 0
+            ? "永久"
+            : PetConversationRetention.description(for: petConversationRetentionMinutes)
     }
 
     private func compactSliderRow(
@@ -154,16 +144,10 @@ struct LayoutSettingsTab: View {
 }
 
 private struct SettingsCard<Content: View>: View {
-    let title: String
-    let systemImage: String
     @ViewBuilder let content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignSpacing.md) {
-            Label(title, systemImage: systemImage)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.secondary)
-
             content
         }
         .padding(DesignSpacing.md)

@@ -58,11 +58,6 @@ struct OverlapPreview: View {
             GeometryReader { proxy in
                 previewScene(size: proxy.size)
             }
-
-            Divider()
-                .opacity(0.45)
-
-            previewToolbar
         }
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
@@ -76,37 +71,19 @@ struct OverlapPreview: View {
 
     private var previewHeader: some View {
         HStack(spacing: DesignSpacing.sm) {
-            ZStack {
-                Circle()
-                    .fill(Color.accentColor.opacity(0.13))
-                    .frame(width: 24, height: 24)
-                Image(systemName: "move.3d")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
-            }
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text("直接调整")
-                    .font(.system(size: 12, weight: .semibold))
-                Text("拖动角色改变位置")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer()
+            Spacer(minLength: 0)
 
             previewValueBadge(
-                title: "横向",
                 value: horizontalPercentage,
                 systemImage: "arrow.left.and.right"
             )
 
             previewValueBadge(
-                title: "纵向",
                 value: percentage,
                 systemImage: "arrow.up.and.down"
             )
+
+            sizeControls
 
             Button(action: restoreDefaultLayout) {
                 Image(systemName: "arrow.counterclockwise")
@@ -117,13 +94,13 @@ struct OverlapPreview: View {
             .help("恢复默认布局")
             .accessibilityLabel("恢复默认布局")
         }
-        .padding(.horizontal, DesignSpacing.lg)
-        .frame(height: 52)
+        .padding(.horizontal, DesignSpacing.md)
+        .frame(height: 44)
     }
 
-    private func previewValueBadge(title: String, value: Int, systemImage: String) -> some View {
+    private func previewValueBadge(value: Int, systemImage: String) -> some View {
         Label {
-            Text("\(title) \(value)%")
+            Text("\(value)%")
                 .monospacedDigit()
                 .contentTransition(.numericText())
         } icon: {
@@ -135,6 +112,35 @@ struct OverlapPreview: View {
         .padding(.vertical, 5)
         .background(.quaternary, in: Capsule())
         .lineLimit(1)
+    }
+
+    private var sizeControls: some View {
+        HStack(spacing: 0) {
+            Button { adjustSize(by: -0.05) } label: {
+                Image(systemName: "minus")
+                    .frame(width: 22, height: 22)
+            }
+            .disabled(contentScale <= minimumScale + 0.001)
+            .accessibilityLabel("缩小桌宠")
+
+            Text("\(sizePercentage)%")
+                .font(.system(size: 10.5, weight: .semibold, design: .rounded).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 40)
+                .contentTransition(.numericText())
+                .accessibilityLabel("桌宠大小 \(sizePercentage)%")
+
+            Button { adjustSize(by: 0.05) } label: {
+                Image(systemName: "plus")
+                    .frame(width: 22, height: 22)
+            }
+            .disabled(contentScale >= maximumScale - 0.001)
+            .accessibilityLabel("放大桌宠")
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 2)
+        .padding(.vertical, 1)
+        .background(.quaternary, in: Capsule())
     }
 
     private func previewScene(size: CGSize) -> some View {
@@ -198,46 +204,6 @@ struct OverlapPreview: View {
         .clipped()
     }
 
-    private var previewToolbar: some View {
-        HStack(spacing: DesignSpacing.md) {
-            Label("拖动定位 · 双指捏合缩放", systemImage: "hand.draw")
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-
-            Spacer(minLength: DesignSpacing.sm)
-
-            HStack(spacing: 2) {
-                Button { adjustSize(by: -0.05) } label: {
-                    Image(systemName: "minus")
-                        .frame(width: 24, height: 24)
-                }
-                .disabled(contentScale <= minimumScale + 0.001)
-                .accessibilityLabel("缩小桌宠")
-
-                Text("\(sizePercentage)%")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 44)
-                    .contentTransition(.numericText())
-                    .accessibilityLabel("桌宠大小 \(sizePercentage)%")
-
-                Button { adjustSize(by: 0.05) } label: {
-                    Image(systemName: "plus")
-                        .frame(width: 24, height: 24)
-                }
-                .disabled(contentScale >= maximumScale - 0.001)
-                .accessibilityLabel("放大桌宠")
-            }
-            .buttonStyle(.borderless)
-            .padding(.horizontal, 3)
-            .padding(.vertical, 2)
-            .background(.quaternary, in: Capsule())
-        }
-        .padding(.horizontal, DesignSpacing.lg)
-        .frame(height: 48)
-    }
-
     private func speechBubble(scale: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 9 * scale) {
             HStack(spacing: 8 * scale) {
@@ -252,7 +218,7 @@ struct OverlapPreview: View {
             }
             .font(.system(size: 11 * scale, weight: .medium))
 
-            Text("指挥官，你好。布局变化会在这里即时呈现。")
+            Text("指挥官，你好。")
                 .font(.system(size: 13 * scale))
                 .lineSpacing(3 * scale)
                 .lineLimit(2)
