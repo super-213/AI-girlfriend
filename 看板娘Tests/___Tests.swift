@@ -42,7 +42,7 @@ struct AgentFoundationTests {
     }
 
     @MainActor
-    private final class EchoTool: AgentTool {
+    private final class EchoTool: LegacyAgentTool {
         let definition = AgentToolDefinition(
             name: "echo",
             description: "echo test",
@@ -59,7 +59,7 @@ struct AgentFoundationTests {
     }
 
     @MainActor
-    private final class TestReadSkillTool: AgentTool {
+    private final class TestReadSkillTool: LegacyAgentTool {
         let definition = AgentToolDefinition(
             name: "read_skill",
             description: "read skill test",
@@ -76,7 +76,7 @@ struct AgentFoundationTests {
     }
 
     @MainActor
-    private final class ImageObservationTool: AgentTool {
+    private final class ImageObservationTool: LegacyAgentTool {
         let definition = AgentToolDefinition(
             name: "image_observation",
             description: "image observation test",

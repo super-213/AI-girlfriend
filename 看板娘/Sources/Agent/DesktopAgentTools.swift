@@ -92,7 +92,7 @@ private enum DirectProcessRunner {
 }
 
 @MainActor
-final class OpenApplicationTool: AgentTool {
+final class OpenApplicationTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "open_application",
         description: "在用户 Mac 上按应用名称或 bundle identifier 查找并启动应用。用户要求打开软件时优先使用，不要通过 Shell 拼接 open 命令。",
@@ -202,7 +202,7 @@ final class OpenApplicationTool: AgentTool {
 }
 
 @MainActor
-final class SearchFilesTool: AgentTool {
+final class SearchFilesTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "search_files",
         description: "使用 macOS Spotlight 按文件名或已索引内容搜索本机文件。用户说‘帮我找文件’时优先使用。",
@@ -353,7 +353,7 @@ final class SearchFilesTool: AgentTool {
 }
 
 @MainActor
-final class GetFileInfoTool: AgentTool {
+final class GetFileInfoTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "get_file_info",
         description: "读取本机文件或目录的名称、类型、大小和修改时间，不读取内容。",
@@ -409,7 +409,7 @@ final class GetFileInfoTool: AgentTool {
 }
 
 @MainActor
-final class ReadDocumentTool: AgentTool {
+final class ReadDocumentTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "read_document",
         description: "读取并提取本机文档内容。支持文本、代码、Markdown、JSON、CSV、PDF、RTF、Word/OpenDocument 文档、常见图片 OCR，以及系统 Spotlight 可提取文字的其他文档；也可列出目录。用户拖入文件后优先使用。",
@@ -541,7 +541,7 @@ final class ReadDocumentTool: AgentTool {
 }
 
 @MainActor
-final class OpenFileTool: AgentTool {
+final class OpenFileTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "open_file",
         description: "使用 macOS 默认应用打开一个已确定的本机文件或目录。",
@@ -565,7 +565,7 @@ final class OpenFileTool: AgentTool {
 }
 
 @MainActor
-final class RevealInFinderTool: AgentTool {
+final class RevealInFinderTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "reveal_in_finder",
         description: "在 Finder 中显示并选中一个已确定的本机文件。",
@@ -588,7 +588,7 @@ final class RevealInFinderTool: AgentTool {
 }
 
 @MainActor
-final class WriteTextFileTool: AgentTool {
+final class WriteTextFileTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "write_text_file",
         description: "新建或覆盖 UTF-8 文本文件。用于把分析或处理结果保存到用户指定位置；执行前始终需要用户确认。",
@@ -647,7 +647,7 @@ final class WriteTextFileTool: AgentTool {
 }
 
 @MainActor
-final class CopyFileTool: AgentTool {
+final class CopyFileTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "copy_file",
         description: "复制本机文件或目录到新路径；执行前需要用户确认，且不覆盖已有目标。",
@@ -663,7 +663,7 @@ final class CopyFileTool: AgentTool {
 }
 
 @MainActor
-final class MoveFileTool: AgentTool {
+final class MoveFileTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "move_file",
         description: "移动或重命名本机文件或目录；执行前需要用户确认，且不覆盖已有目标。",

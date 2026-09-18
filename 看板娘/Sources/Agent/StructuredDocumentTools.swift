@@ -109,7 +109,7 @@ enum OfficeDocumentExtractor {
 }
 
 @MainActor
-final class WriteDocumentTool: AgentTool {
+final class WriteDocumentTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "write_document",
         description: "创建或覆盖 PDF、DOCX、XLSX 或 PPTX 文档。DOCX/PDF 使用 title 和 content；XLSX 使用 rows 二维字符串数组；PPTX 使用 slides（title/body）。写入前显示计划并需确认，可撤销。",

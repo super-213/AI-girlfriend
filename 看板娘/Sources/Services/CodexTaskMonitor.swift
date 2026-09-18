@@ -509,7 +509,7 @@ final class CodexTaskMonitor: ObservableObject {
 }
 
 @MainActor
-final class GetCodexTaskStatusTool: AgentTool {
+final class GetCodexTaskStatusTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "get_codex_task_status",
         description: "读取本机 Codex CLI 和 Codex Desktop 当前正在运行、执行工具或等待用户回复的任务。用户询问 Codex 在做什么、进度或是否完成时调用。",

@@ -62,9 +62,10 @@ final class AgentRuntime {
     private let systemPromptProvider: () -> String
     private let enabledSkillNameResolver: (String) -> String?
     private let fallbackContextCompactionPolicy: AgentContextCompactionPolicy
+    private let runConfiguration: RunConfiguration
     private var pendingCalls: [AgentToolCall] = []
     private var pendingObservationImagePaths: [String] = []
-    private var pendingApproval: (call: AgentToolCall, tool: any AgentTool, arguments: [String: Any])?
+    private var pendingApproval: (call: AgentToolCall, tool: any LegacyAgentTool, arguments: [String: Any])?
     private var previousContextMeasurement: AgentContextMeasurement?
     private var inFlightEstimatedTokens: Int?
     private var lastCompactionAttemptMessageCount: Int?
@@ -75,6 +76,7 @@ final class AgentRuntime {
     private var isResolvingContextWindow = false
     private var resolvedContextWindowTokenCount: Int?
     private var runToken = UUID()
+    private var currentTurnCount = 0
 
     private var contextManager: AgentContextManager {
         AgentContextManager(
@@ -88,6 +90,7 @@ final class AgentRuntime {
         apiManager: any AgentModelClient = APIManager(),
         registry: AgentToolRegistry = .standard(),
         contextCompactionPolicy: AgentContextCompactionPolicy = .standard,
+        runConfiguration: RunConfiguration = RunConfiguration(),
         enabledSkillNameResolver: @escaping (String) -> String? = {
             if let skill = SkillLibrary.enabledSkill(named: $0) {
                 return skill.name
@@ -103,6 +106,7 @@ final class AgentRuntime {
         self.apiManager = apiManager
         self.registry = registry
         fallbackContextCompactionPolicy = contextCompactionPolicy
+        self.runConfiguration = runConfiguration
         self.enabledSkillNameResolver = enabledSkillNameResolver
         self.systemPromptProvider = systemPromptProvider
     }
@@ -115,7 +119,13 @@ final class AgentRuntime {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         guard !isRunning else {
-            onError?(AgentRuntimeError.busy)
+            onError?(AgentError.busy)
+            return
+        }
+        do {
+            try runConfiguration.validate()
+        } catch {
+            onError?(error)
             return
         }
 
@@ -136,6 +146,7 @@ final class AgentRuntime {
         }
         messages.append(.user(modelText, imagePaths: imagePaths))
         isRunning = true
+        currentTurnCount = 0
 
         if let explicitInvocation, explicitInvocation.kind == .skill {
             loadExplicitSkill(named: explicitInvocation.name)
@@ -226,6 +237,11 @@ final class AgentRuntime {
 
     private func performModelRequest() {
         guard isRunning else { return }
+        guard currentTurnCount < runConfiguration.maxTurns else {
+            finishWithError(AgentError.maxTurnsExceeded(limit: runConfiguration.maxTurns))
+            return
+        }
+        currentTurnCount += 1
 
         let token = runToken
         inFlightEstimatedTokens = contextManager.estimatedTokenCount(
@@ -382,7 +398,7 @@ final class AgentRuntime {
 
     private func execute(
         _ call: AgentToolCall,
-        with tool: any AgentTool,
+        with tool: any LegacyAgentTool,
         arguments: [String: Any]
     ) {
         let token = runToken

@@ -2571,7 +2571,7 @@ private final class UIActionRecoveryCoordinator {
 }
 
 @MainActor
-final class ObserveDesktopTool: AgentTool {
+final class ObserveDesktopTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "observe_desktop",
         description: "观察当前 macOS 应用界面，返回稳定窗口/元素句柄、AX 树增量变化、焦点/选中/禁用/弹窗状态与截图。AX 信息稀疏时自动 OCR 并返回 visual_handle。",
@@ -2623,7 +2623,7 @@ final class ObserveDesktopTool: AgentTool {
 }
 
 @MainActor
-final class PerformUIActionTool: AgentTool {
+final class PerformUIActionTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "perform_ui_action",
         description: "执行完整 macOS 界面动作：AX 按压/设值、鼠标移动/悬停/按住/释放/点击/精确拖拽、分段惯性滚动、布局自适应键盘、剪贴板、文件选择与保存面板、层级菜单和跨应用文件传递。动作后自动验证；失败时强制 OCR 重新观察，仅对可安全重放的幂等动作自动恢复。",

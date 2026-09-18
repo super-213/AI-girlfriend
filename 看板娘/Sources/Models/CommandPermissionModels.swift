@@ -70,7 +70,7 @@ enum CommandPermissionDecision: Equatable {
     case deny(matchedRule: String)
 }
 
-struct CommandPermissionPolicy {
+struct CommandPermissionPolicy: @unchecked Sendable {
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {

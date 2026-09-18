@@ -10,7 +10,7 @@ import PDFKit
 import Vision
 
 @MainActor
-final class ListKnowledgeBasesTool: AgentTool {
+final class ListKnowledgeBasesTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "list_knowledge_bases",
         description: "列出用户已配置的外置 RAG 知识库名称、目录和启用状态。",
@@ -44,7 +44,7 @@ final class ListKnowledgeBasesTool: AgentTool {
 }
 
 @MainActor
-final class AddToKnowledgeBaseTool: AgentTool {
+final class AddToKnowledgeBaseTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "add_to_knowledge_base",
         description: "把用户提供的文本或本机文档提取、分块并写入指定的外置 RAG 知识库。已有同一文档路径时会更新索引。",
@@ -153,7 +153,7 @@ final class AddToKnowledgeBaseTool: AgentTool {
 }
 
 @MainActor
-final class SearchKnowledgeBaseTool: AgentTool {
+final class SearchKnowledgeBaseTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "search_knowledge_base",
         description: "使用语义向量与关键词混合检索外置 RAG 知识库，返回可引用的文档片段和来源。",

@@ -12,7 +12,7 @@ enum AgentRuntimeToolName {
 }
 
 @MainActor
-protocol AgentTool: AnyObject {
+protocol LegacyAgentTool: AnyObject {
     var definition: AgentToolDefinition { get }
     var requiresConfirmation: Bool { get }
     func requiresConfirmation(arguments: [String: Any]) -> Bool
@@ -23,7 +23,7 @@ protocol AgentTool: AnyObject {
     )
 }
 
-extension AgentTool {
+extension LegacyAgentTool {
     func requiresConfirmation(arguments: [String: Any]) -> Bool {
         requiresConfirmation
     }
@@ -31,18 +31,22 @@ extension AgentTool {
 
 @MainActor
 final class AgentToolRegistry {
-    private var toolsByName: [String: any AgentTool] = [:]
+    private var toolsByName: [String: any LegacyAgentTool] = [:]
 
     var definitions: [AgentToolDefinition] {
         toolsByName.values.map(\.definition).sorted { $0.name < $1.name }
     }
 
-    func register(_ tool: any AgentTool) {
+    func register(_ tool: any LegacyAgentTool) {
         toolsByName[tool.definition.name] = tool
     }
 
-    func tool(named name: String) -> (any AgentTool)? {
+    func tool(named name: String) -> (any LegacyAgentTool)? {
         toolsByName[name]
+    }
+
+    var allTools: [any LegacyAgentTool] {
+        toolsByName.values.sorted { $0.definition.name < $1.definition.name }
     }
 
     static func standard() -> AgentToolRegistry {
@@ -84,7 +88,7 @@ final class AgentToolRegistry {
 }
 
 @MainActor
-final class CompactContextTool: AgentTool {
+final class CompactContextTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: AgentRuntimeToolName.compactContext,
         description: "主动压缩当前会话上下文。当用户明确要求压缩、整理或缩短当前上下文时调用。Runtime 会保留最新完整轮次，并将更早的对话和工具结果整理为结构化摘要。",
@@ -109,7 +113,7 @@ final class CompactContextTool: AgentTool {
 }
 
 @MainActor
-final class ReadSkillTool: AgentTool {
+final class ReadSkillTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "read_skill",
         description: "按可用 Skills 目录中的 name 读取已启用 Skill 的完整 SKILL.md 指令。当用户任务匹配某项 Skill 时调用。",
@@ -167,7 +171,7 @@ final class ReadSkillTool: AgentTool {
 }
 
 @MainActor
-private final class CurrentDateTimeTool: AgentTool {
+private final class CurrentDateTimeTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "get_current_datetime",
         description: "读取用户 Mac 当前准确的本地日期、时间、星期和时区。凡是涉及今天、现在、日期、时间或星期的问题都应调用此工具。",
@@ -203,7 +207,7 @@ private final class CurrentDateTimeTool: AgentTool {
 }
 
 @MainActor
-private final class ListDirectoryTool: AgentTool {
+private final class ListDirectoryTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "list_directory",
         description: "列出本地目录内容。路径必须是绝对路径；省略时使用应用当前工作目录。",
@@ -244,7 +248,7 @@ private final class ListDirectoryTool: AgentTool {
 }
 
 @MainActor
-private final class ReadFileTool: AgentTool {
+private final class ReadFileTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "read_file",
         description: "读取 UTF-8 文本文件。路径必须是绝对路径；单次最多返回 100000 个字符。",
@@ -289,7 +293,7 @@ private final class ReadFileTool: AgentTool {
 }
 
 @MainActor
-private final class RunCommandTool: AgentTool {
+private final class RunCommandTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "run_command",
         description: "在本机通过 /bin/zsh -lc 执行一条非交互式命令。是否需要确认由用户的命令权限设置决定。",
@@ -359,7 +363,7 @@ private final class RunCommandTool: AgentTool {
 }
 
 @MainActor
-private final class ListCharactersTool: AgentTool {
+private final class ListCharactersTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "list_pet_characters",
         description: "列出桌宠应用当前可切换的全部角色。",
@@ -385,7 +389,7 @@ private final class ListCharactersTool: AgentTool {
 }
 
 @MainActor
-private final class SwitchCharacterTool: AgentTool {
+private final class SwitchCharacterTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "switch_pet_character",
         description: "按角色名称、ID 或序号切换当前桌宠角色。此操作会改变应用状态。",
@@ -425,7 +429,7 @@ private final class SwitchCharacterTool: AgentTool {
 }
 
 @MainActor
-private final class ListAutomationsTool: AgentTool {
+private final class ListAutomationsTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "list_automations",
         description: "列出桌宠应用中已有的自动化任务及其 ID、启用状态和下次运行时间。",
@@ -450,7 +454,7 @@ private final class ListAutomationsTool: AgentTool {
 }
 
 @MainActor
-private final class RunAutomationTool: AgentTool {
+private final class RunAutomationTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "run_automation",
         description: "执行指定 ID 的已有自动化任务。此操作会改变应用状态，执行前必须由用户确认。",

@@ -32,7 +32,7 @@ private enum AutomationProcess {
 }
 
 @MainActor
-final class ListShortcutsTool: AgentTool {
+final class ListShortcutsTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "list_shortcuts",
         description: "列出用户在 macOS 快捷指令中可用的快捷指令名称。",
@@ -49,7 +49,7 @@ final class ListShortcutsTool: AgentTool {
 }
 
 @MainActor
-final class RunShortcutTool: AgentTool {
+final class RunShortcutTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "run_shortcut",
         description: "运行一个已安装的 macOS 快捷指令。可传入文本或文件作为输入；执行前需要用户确认。",
@@ -80,7 +80,7 @@ final class RunShortcutTool: AgentTool {
 }
 
 @MainActor
-final class RunAppleScriptTool: AgentTool {
+final class RunAppleScriptTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "run_applescript",
         description: "执行 AppleScript 以操作脚本化的 macOS 应用。执行前始终展示完整脚本并需要用户确认。",
@@ -102,7 +102,7 @@ final class RunAppleScriptTool: AgentTool {
 }
 
 @MainActor
-final class ControlApplicationTool: AgentTool {
+final class ControlApplicationTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "control_application",
         description: "通过 macOS 辅助功能激活应用、点击菜单项或输入键盘文本。这类界面操作执行前需要用户确认。",
@@ -153,7 +153,7 @@ final class ControlApplicationTool: AgentTool {
 }
 
 @MainActor
-final class PresentActionPlanTool: AgentTool {
+final class PresentActionPlanTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "present_action_plan",
         description: "在对多个文件或外部应用做变更前，向用户展示操作计划和受影响路径并等待确认。",
@@ -180,7 +180,7 @@ final class PresentActionPlanTool: AgentTool {
 }
 
 @MainActor
-final class UndoLastFileOperationTool: AgentTool {
+final class UndoLastFileOperationTool: LegacyAgentTool {
     let definition = AgentToolDefinition(
         name: "undo_last_file_operation",
         description: "撤销 Agent 最近一次可撤销的文件写入、复制或移动。",
