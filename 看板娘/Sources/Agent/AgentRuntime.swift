@@ -2,7 +2,7 @@
 //  AgentRuntime.swift
 //  看板娘
 //
-//  Iterative model -> tool -> observation runtime with human approval support.
+//  Source-compatible UI facade backed by AgentRunner.
 //
 
 import Foundation
@@ -41,6 +41,8 @@ struct AgentPendingApproval {
     let summary: String
 }
 
+/// Compatibility facade for existing AppKit/SwiftUI consumers.
+/// All model/tool iteration and run state are owned by `AgentRunner`.
 @MainActor
 final class AgentRuntime {
     var onAssistantResponseStarted: (() -> Void)?
@@ -59,24 +61,25 @@ final class AgentRuntime {
 
     private let apiManager: any AgentModelClient
     private let registry: AgentToolRegistry
-    private let systemPromptProvider: () -> String
-    private let enabledSkillNameResolver: (String) -> String?
+    private let systemPromptProvider: @MainActor @Sendable () -> String
+    private let enabledSkillNameResolver: @MainActor @Sendable (String) -> String?
     private let fallbackContextCompactionPolicy: AgentContextCompactionPolicy
     private let runConfiguration: RunConfiguration
-    private var pendingCalls: [AgentToolCall] = []
-    private var pendingObservationImagePaths: [String] = []
-    private var pendingApproval: (call: AgentToolCall, tool: any LegacyAgentTool, arguments: [String: Any])?
-    private var previousContextMeasurement: AgentContextMeasurement?
-    private var inFlightEstimatedTokens: Int?
-    private var lastCompactionAttemptMessageCount: Int?
-    private var isContextCompactionRequested = false
-    private var isCompacting = false
+    private let runner: AgentRunner
+
+    private var session: MemoryAgentSession
+    private var activeRun: AgentRun<String>?
+    private var eventTask: Task<Void, Never>?
+    private var resultTask: Task<Void, Never>?
+    private var activeAgent: AgentDefinition<Void, String>?
+    private var pendingRunState: RunState?
+    private var pendingInterruption: AgentInterruption?
+    private var runToken = UUID()
+
     private var contextWindowLookupIdentifier: String?
     private var didResolveContextWindow = false
-    private var isResolvingContextWindow = false
     private var resolvedContextWindowTokenCount: Int?
-    private var runToken = UUID()
-    private var currentTurnCount = 0
+    private var lastCompactionAttemptMessageCount: Int?
 
     private var contextManager: AgentContextManager {
         AgentContextManager(
@@ -91,7 +94,7 @@ final class AgentRuntime {
         registry: AgentToolRegistry = .standard(),
         contextCompactionPolicy: AgentContextCompactionPolicy = .standard,
         runConfiguration: RunConfiguration = RunConfiguration(),
-        enabledSkillNameResolver: @escaping (String) -> String? = {
+        enabledSkillNameResolver: @escaping @MainActor @Sendable (String) -> String? = {
             if let skill = SkillLibrary.enabledSkill(named: $0) {
                 return skill.name
             }
@@ -101,7 +104,7 @@ final class AgentRuntime {
             }
             return nil
         },
-        systemPromptProvider: @escaping () -> String
+        systemPromptProvider: @escaping @MainActor @Sendable () -> String
     ) {
         self.apiManager = apiManager
         self.registry = registry
@@ -109,6 +112,25 @@ final class AgentRuntime {
         self.runConfiguration = runConfiguration
         self.enabledSkillNameResolver = enabledSkillNameResolver
         self.systemPromptProvider = systemPromptProvider
+        session = MemoryAgentSession()
+
+        let provider = LegacyModelProvider(
+            client: apiManager,
+            normalizeToolCall: { call in
+                guard registry.tool(named: call.name) == nil,
+                      registry.tool(named: "read_skill") != nil,
+                      let canonicalName = enabledSkillNameResolver(call.name),
+                      let data = try? JSONSerialization.data(
+                          withJSONObject: ["name": canonicalName],
+                          options: [.sortedKeys]
+                      ),
+                      let arguments = String(data: data, encoding: .utf8) else {
+                    return call
+                }
+                return AgentToolCall(id: call.id, name: "read_skill", arguments: arguments)
+            }
+        )
+        runner = AgentRunner(provider: provider)
     }
 
     func send(
@@ -129,411 +151,416 @@ final class AgentRuntime {
             return
         }
 
-        if messages.isEmpty {
-            messages.append(.system(makeSystemPrompt()))
-        }
-        let modelText: String
-        if let explicitInvocation, explicitInvocation.kind == .tool {
-            modelText = """
-            \(text)
-
-            <explicit-tool-context name="\(explicitInvocation.name)">
-            用户通过输入框将此工具显式附加到本轮上下文。请将它视为与当前任务可能相关的工具，但不要因此排除其他工具，也不要在不需要时强行调用它。根据任务实际需要选择一个或多个可用工具。
-            </explicit-tool-context>
-            """
-        } else {
-            modelText = text
-        }
-        messages.append(.user(modelText, imagePaths: imagePaths))
         isRunning = true
-        currentTurnCount = 0
-
-        if let explicitInvocation, explicitInvocation.kind == .skill {
-            loadExplicitSkill(named: explicitInvocation.name)
-        } else if let explicitInvocation,
-                  explicitInvocation.kind == .tool,
-                  explicitInvocation.name == AgentRuntimeToolName.compactContext,
-                  let tool = registry.tool(named: AgentRuntimeToolName.compactContext) {
-            let call = AgentToolCall(
-                id: "forced-tool-\(UUID().uuidString)",
-                name: AgentRuntimeToolName.compactContext,
-                arguments: "{}"
+        let token = UUID()
+        runToken = token
+        let modelText = decoratedInput(text, explicitInvocation: explicitInvocation)
+        Task { @MainActor [weak self] in
+            await self?.prepareAndStart(
+                text: modelText,
+                imagePaths: imagePaths,
+                explicitInvocation: explicitInvocation,
+                token: token
             )
-            messages.append(.assistant(content: nil, toolCalls: [call]))
-            execute(call, with: tool, arguments: [:])
-        } else {
-            requestModel()
         }
     }
 
     func startNewConversation() {
         cancel()
         messages.removeAll()
+        session = MemoryAgentSession()
+        resetCompactionState()
     }
 
-    /// Restores a previously selected conversation so the next request keeps
-    /// its original model and tool context.
     func restoreConversation(_ history: [AgentMessage]) {
         cancel()
         messages = history
+        session = MemoryAgentSession(items: AgentItemLegacyCodec.items(from: history))
+        resetCompactionState()
     }
 
     func cancel() {
         runToken = UUID()
+        activeRun?.cancel()
+        eventTask?.cancel()
+        resultTask?.cancel()
         apiManager.cancelStreamRequest()
-        pendingCalls.removeAll()
-        pendingObservationImagePaths.removeAll()
-        pendingApproval = nil
-        previousContextMeasurement = nil
-        inFlightEstimatedTokens = nil
-        lastCompactionAttemptMessageCount = nil
-        isContextCompactionRequested = false
-        isCompacting = false
-        isResolvingContextWindow = false
+        activeRun = nil
+        eventTask = nil
+        resultTask = nil
+        activeAgent = nil
+        pendingRunState = nil
+        pendingInterruption = nil
         isRunning = false
     }
 
     func approvePendingTool() {
-        guard let pendingApproval else { return }
-        self.pendingApproval = nil
-        AgentToolAuditStore.shared.record(
-            toolName: pendingApproval.call.name,
-            summary: pendingApproval.tool.approvalSummary(arguments: pendingApproval.arguments),
-            status: .approved
-        )
-        execute(pendingApproval.call, with: pendingApproval.tool, arguments: pendingApproval.arguments)
+        resumePendingTool(with: .approved)
     }
 
     func declinePendingTool() {
-        guard let pendingApproval else { return }
-        self.pendingApproval = nil
-        AgentToolAuditStore.shared.record(
-            toolName: pendingApproval.call.name,
-            summary: pendingApproval.tool.approvalSummary(arguments: pendingApproval.arguments),
-            status: .declined
-        )
-        let result = AgentToolExecutionResult.failure("用户拒绝执行该工具")
-        messages.append(.tool(
-            call: pendingApproval.call,
-            content: contextManager.boundedToolResult(result.modelContent)
-        ))
-        onToolFinished?(pendingApproval.call.name, result)
-        executeNextToolCall()
+        resumePendingTool(with: .rejected(reason: "用户拒绝执行该工具"))
     }
 
-    private func requestModel() {
-        guard isRunning else { return }
+    private func prepareAndStart(
+        text: String,
+        imagePaths: [String],
+        explicitInvocation: AgentInvocation?,
+        token: UUID
+    ) async {
+        guard runToken == token, isRunning else { return }
         refreshSystemPrompt()
 
-        if resolveContextWindowIfNeeded() {
-            return
-        }
-        if startContextCompactionIfNeeded() {
-            return
-        }
-        isContextCompactionRequested = false
-        performModelRequest()
-    }
-
-    private func performModelRequest() {
-        guard isRunning else { return }
-        guard currentTurnCount < runConfiguration.maxTurns else {
-            finishWithError(AgentError.maxTurnsExceeded(limit: runConfiguration.maxTurns))
-            return
-        }
-        currentTurnCount += 1
-
-        let token = runToken
-        inFlightEstimatedTokens = contextManager.estimatedTokenCount(
-            messages: messages,
-            tools: registry.definitions
-        )
-        onAssistantResponseStarted?()
-        apiManager.sendAgentStreamRequest(
-            messages: messages,
-            tools: registry.definitions,
-            purpose: .conversation,
-            onReceive: { [weak self] text in
-                guard let self, self.runToken == token else { return }
-                self.onAssistantText?(text)
-            },
-            onComplete: { [weak self] response in
-                guard let self, self.runToken == token else { return }
-                self.handle(response)
-            },
-            onError: { [weak self] error in
-                guard let self, self.runToken == token else { return }
-                self.finishWithError(error)
+        var followingItems: [AgentItem] = []
+        var forceCompaction = false
+        if let explicitInvocation, explicitInvocation.kind == .skill {
+            do {
+                followingItems = try await forcedSkillItems(named: explicitInvocation.name)
+            } catch {
+                finishWithError(error, token: token)
+                return
             }
+        } else if let explicitInvocation,
+                  explicitInvocation.kind == .tool,
+                  explicitInvocation.name == AgentRuntimeToolName.compactContext {
+            followingItems = forcedCompactionItems()
+            forceCompaction = true
+        }
+
+        await resolveContextWindowIfNeeded(token: token)
+        guard runToken == token, isRunning else { return }
+        let preparedHistory = await compactHistoryIfNeeded(
+            input: text,
+            imagePaths: imagePaths,
+            followingItems: followingItems,
+            force: forceCompaction,
+            token: token
+        )
+        guard runToken == token, isRunning else { return }
+
+        messages = preparedHistory
+        session = MemoryAgentSession(
+            id: session.id,
+            items: AgentItemLegacyCodec.items(from: preparedHistory)
+        )
+        let agent = makeAgent()
+        activeAgent = agent
+        bind(
+            runner.run(
+                agent: agent,
+                input: AgentInput(
+                    text,
+                    imagePaths: imagePaths,
+                    followingItems: followingItems
+                ),
+                context: (),
+                session: session,
+                configuration: runConfiguration
+            ),
+            agent: agent,
+            token: token
         )
     }
 
-    private func loadExplicitSkill(named requestedName: String) {
+    private func bind(
+        _ run: AgentRun<String>,
+        agent: AgentDefinition<Void, String>,
+        token: UUID
+    ) {
+        activeRun = run
+        let events = Task { @MainActor [weak self] in
+            do {
+                for try await event in run.events {
+                    guard let self, self.runToken == token else { return }
+                    self.consume(event)
+                }
+            } catch {
+                // Result task owns terminal error delivery to avoid duplicate UI callbacks.
+            }
+        }
+        eventTask = events
+        resultTask = Task { @MainActor [weak self] in
+            do {
+                let result = try await run.result.value
+                _ = await events.result
+                guard let self, self.runToken == token else { return }
+                self.messages = AgentItemLegacyCodec.messages(from: result.history)
+                self.pendingRunState = result.resumableState
+                self.pendingInterruption = result.interruptions.first
+                if result.resumableState == nil {
+                    self.isRunning = false
+                    self.activeRun = nil
+                    self.activeAgent = nil
+                    self.onCompleted?()
+                }
+            } catch {
+                _ = await events.result
+                guard let self, self.runToken == token else { return }
+                self.finishWithError(error, token: token)
+            }
+        }
+    }
+
+    private func consume(_ event: AgentRunEvent) {
+        switch event {
+        case .modelStarted:
+            onAssistantResponseStarted?()
+        case .textDelta(let text):
+            onAssistantText?(text)
+        case .toolCallStarted(let call):
+            AgentToolAuditStore.shared.record(
+                toolName: call.name,
+                summary: "执行工具 \(call.name)",
+                status: .running
+            )
+            onToolStarted?(call.name)
+        case .toolCallCompleted(let item):
+            let result = legacyResult(from: item)
+            AgentToolAuditStore.shared.record(
+                toolName: item.toolName,
+                summary: "执行工具 \(item.toolName)",
+                status: result.isError ? .failed : .succeeded,
+                detail: result.content
+            )
+            onToolFinished?(item.toolName, result)
+        case .approvalRequired(let interruption):
+            AgentToolAuditStore.shared.record(
+                toolName: interruption.toolCall.name,
+                summary: interruption.summary,
+                status: .requested
+            )
+            onApprovalRequested?(AgentPendingApproval(
+                toolName: interruption.toolCall.name,
+                summary: interruption.summary
+            ))
+        case .contextCompactionStarted:
+            onContextCompactionStarted?()
+        case .contextCompacted(let event):
+            onContextCompacted?(AgentContextCompactionEvent(
+                summarizedMessageCount: event.summarizedItemCount,
+                retainedMessageCount: event.retainedItemCount,
+                estimatedTokensBeforeCompaction: event.estimatedTokensBeforeCompaction
+            ))
+        case .runStarted, .agentStarted, .modelCompleted, .usageUpdated,
+             .handoff, .runCompleted, .runFailed:
+            break
+        }
+    }
+
+    private func resumePendingTool(with decision: ApprovalDecision) {
+        guard isRunning,
+              let state = pendingRunState,
+              let interruption = pendingInterruption,
+              let agent = activeAgent else { return }
+
+        pendingRunState = nil
+        pendingInterruption = nil
+        AgentToolAuditStore.shared.record(
+            toolName: interruption.toolCall.name,
+            summary: interruption.summary,
+            status: decision == .approved ? .approved : .declined
+        )
+        let token = runToken
+        bind(
+            runner.resume(
+                agent: agent,
+                from: state,
+                decisions: [interruption.id: decision],
+                context: (),
+                session: session,
+                configuration: runConfiguration
+            ),
+            agent: agent,
+            token: token
+        )
+    }
+
+    private func makeAgent() -> AgentDefinition<Void, String> {
+        AgentDefinition(
+            id: "desktop-companion",
+            name: "Desktop Companion Agent",
+            instructions: .fixed(makeSystemPrompt()),
+            tools: LegacyAgentRuntimeAdapter.makeTools(registry: registry)
+        )
+    }
+
+    private func forcedSkillItems(named requestedName: String) async throws -> [AgentItem] {
         guard let canonicalName = enabledSkillNameResolver(requestedName),
               let tool = registry.tool(named: "read_skill"),
-              let argumentsData = try? JSONSerialization.data(
-                withJSONObject: ["name": canonicalName],
-                options: [.sortedKeys]
+              let data = try? JSONSerialization.data(
+                  withJSONObject: ["name": canonicalName],
+                  options: [.sortedKeys]
               ),
-              let arguments = String(data: argumentsData, encoding: .utf8) else {
-            finishWithError(AgentRuntimeError.skillUnavailable(requestedName))
-            return
+              let arguments = String(data: data, encoding: .utf8) else {
+            throw AgentRuntimeError.skillUnavailable(requestedName)
         }
-
         let call = AgentToolCall(
             id: "forced-skill-\(UUID().uuidString)",
             name: "read_skill",
             arguments: arguments
         )
-        messages.append(.assistant(content: nil, toolCalls: [call]))
-        execute(call, with: tool, arguments: ["name": canonicalName])
-    }
-
-    private func handle(_ response: AgentModelResponse) {
-        if let measuredTokens = response.usage?.promptTokens,
-           let estimatedTokens = inFlightEstimatedTokens {
-            previousContextMeasurement = AgentContextMeasurement(
-                estimatedTokens: estimatedTokens,
-                measuredTokens: measuredTokens
-            )
+        onToolStarted?(call.name)
+        let result = await executeLegacyTool(tool, arguments: ["name": canonicalName])
+        onToolFinished?(call.name, result)
+        guard !result.isError else {
+            throw AgentError.toolExecutionFailed(toolName: call.name, detail: result.content)
         }
-        inFlightEstimatedTokens = nil
-        let toolCalls = response.toolCalls.map(normalizeSkillToolCall)
-        messages.append(.assistant(
-            content: response.content.isEmpty ? nil : response.content,
-            toolCalls: toolCalls
-        ))
-
-        guard !toolCalls.isEmpty else {
-            isRunning = false
-            onCompleted?()
-            return
-        }
-
-        pendingCalls = toolCalls
-        executeNextToolCall()
-    }
-
-    /// Some models confuse a Skill catalog entry with a native function and
-    /// emit `weather(...)` instead of `read_skill({"name":"weather"})`.
-    /// Rewrite only exact enabled Skill names so the assistant/tool message
-    /// pair remains protocol-valid and the model can continue the workflow.
-    private func normalizeSkillToolCall(_ call: AgentToolCall) -> AgentToolCall {
-        guard registry.tool(named: call.name) == nil,
-              registry.tool(named: "read_skill") != nil,
-              let canonicalName = enabledSkillNameResolver(call.name),
-              let data = try? JSONSerialization.data(
-                withJSONObject: ["name": canonicalName],
-                options: [.sortedKeys]
-              ),
-              let arguments = String(data: data, encoding: .utf8) else {
-            return call
-        }
-        return AgentToolCall(id: call.id, name: "read_skill", arguments: arguments)
-    }
-
-    private func executeNextToolCall() {
-        guard isRunning else { return }
-        guard !pendingCalls.isEmpty else {
-            if !pendingObservationImagePaths.isEmpty {
-                // Desktop screenshots are ephemeral observations. Keep their textual
-                // history, but only send the latest bitmap on subsequent requests.
-                for index in messages.indices where messages[index].contextKind == .desktopObservation {
-                    messages[index].imageAttachments = nil
-                }
-                messages.append(.desktopObservation(
-                    "以下图像是桌面观察工具在上一步操作后捕获的最新界面。请将它与工具返回的 Accessibility 状态一起用于判断下一步。",
-                    imagePaths: pendingObservationImagePaths
-                ))
-                pendingObservationImagePaths.removeAll()
-            }
-            requestModel()
-            return
-        }
-
-        let call = pendingCalls.removeFirst()
-        guard let tool = registry.tool(named: call.name) else {
-            let error = AgentRuntimeError.toolUnavailable(call.name)
-            let result = AgentToolExecutionResult.failure(error.localizedDescription)
-            messages.append(.tool(
-                call: call,
-                content: contextManager.boundedToolResult(result.modelContent)
-            ))
-            onToolFinished?(call.name, result)
-            executeNextToolCall()
-            return
-        }
-
-        let arguments: [String: Any]
-        do {
-            arguments = try call.decodedArguments()
-        } catch {
-            let result = AgentToolExecutionResult.failure(error.localizedDescription)
-            messages.append(.tool(
-                call: call,
-                content: contextManager.boundedToolResult(result.modelContent)
-            ))
-            onToolFinished?(call.name, result)
-            executeNextToolCall()
-            return
-        }
-
-        if tool.requiresConfirmation(arguments: arguments) {
-            pendingApproval = (call, tool, arguments)
-            AgentToolAuditStore.shared.record(
+        return [
+            .message(AgentMessageItem(role: .assistant, content: nil)),
+            .toolCall(ToolCallItem(id: call.id, name: call.name, arguments: call.arguments)),
+            .toolResult(ToolResultItem(
+                toolCallID: call.id,
                 toolName: call.name,
-                summary: tool.approvalSummary(arguments: arguments),
-                status: .requested
-            )
-            onApprovalRequested?(
-                AgentPendingApproval(
-                    toolName: call.name,
-                    summary: tool.approvalSummary(arguments: arguments)
-                )
-            )
-            return
-        }
-        execute(call, with: tool, arguments: arguments)
+                content: result.modelContent,
+                isError: false,
+                imagePaths: result.imagePaths
+            ))
+        ]
     }
 
-    private func execute(
-        _ call: AgentToolCall,
-        with tool: any LegacyAgentTool,
-        arguments: [String: Any]
-    ) {
-        let token = runToken
-        let summary = tool.approvalSummary(arguments: arguments)
-        AgentToolAuditStore.shared.record(
-            toolName: call.name,
-            summary: summary,
-            status: .running
+    private func forcedCompactionItems() -> [AgentItem] {
+        let call = AgentToolCall(
+            id: "forced-tool-\(UUID().uuidString)",
+            name: AgentRuntimeToolName.compactContext,
+            arguments: "{}"
+        )
+        let result = AgentToolExecutionResult.success(
+            "已请求压缩当前会话上下文；Runtime 将保留最新完整轮次，并摘要更早内容。"
         )
         onToolStarted?(call.name)
-        tool.execute(arguments: arguments) { [weak self] result in
-            guard let self, self.runToken == token, self.isRunning else { return }
-            self.messages.append(.tool(
-                call: call,
-                content: self.contextManager.boundedToolResult(result.modelContent)
-            ))
-            if !result.isError, call.name == AgentRuntimeToolName.compactContext {
-                self.isContextCompactionRequested = true
-            }
-            self.pendingObservationImagePaths.append(contentsOf: result.imagePaths)
-            self.onToolFinished?(call.name, result)
-            AgentToolAuditStore.shared.record(
+        onToolFinished?(call.name, result)
+        return [
+            .message(AgentMessageItem(role: .assistant, content: nil)),
+            .toolCall(ToolCallItem(id: call.id, name: call.name, arguments: call.arguments)),
+            .toolResult(ToolResultItem(
+                toolCallID: call.id,
                 toolName: call.name,
-                summary: summary,
-                status: result.isError ? .failed : .succeeded,
-                detail: result.content
-            )
-            self.executeNextToolCall()
-        }
+                content: result.modelContent,
+                isError: false
+            ))
+        ]
     }
 
-    private func finishWithError(_ error: Error) {
-        isRunning = false
-        pendingCalls.removeAll()
-        pendingApproval = nil
-        isCompacting = false
-        onError?(error)
-    }
-
-    private func startContextCompactionIfNeeded() -> Bool {
-        let force = isContextCompactionRequested
-        guard !isCompacting,
-              (force || lastCompactionAttemptMessageCount != messages.count),
-              let plan = contextManager.makePlan(
-                messages: messages,
-                tools: registry.definitions,
-                previousMeasurement: previousContextMeasurement,
-                force: force
-              ),
-              let systemMessage = messages.first(where: {
-                $0.role == .system && $0.contextKind == nil
-              }) else {
-            return false
-        }
-
-        isCompacting = true
-        isContextCompactionRequested = false
-        lastCompactionAttemptMessageCount = messages.count
-        onContextCompactionStarted?()
-        let token = runToken
-        apiManager.sendAgentStreamRequest(
-            messages: contextManager.summaryRequestMessages(for: plan),
-            tools: [],
-            purpose: .contextCompaction,
-            onReceive: { _ in },
-            onComplete: { [weak self] response in
-                guard let self, self.runToken == token, self.isRunning else { return }
-                self.isCompacting = false
-                let summary = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !summary.isEmpty {
-                    self.messages = self.contextManager.compactedMessages(
-                        systemMessage: systemMessage,
-                        summary: summary,
-                        plan: plan
-                    )
-                    self.previousContextMeasurement = nil
-                    self.lastCompactionAttemptMessageCount = nil
-                    self.onContextCompacted?(
-                        AgentContextCompactionEvent(
-                            summarizedMessageCount: plan.messagesToSummarize.count,
-                            retainedMessageCount: plan.recentMessages.count,
-                            estimatedTokensBeforeCompaction: plan.estimatedTokensBeforeCompaction
-                        )
-                    )
-                }
-                self.performModelRequest()
-            },
-            onError: { [weak self] _ in
-                guard let self, self.runToken == token, self.isRunning else { return }
-                self.isCompacting = false
-                // Compaction is an optimization. A transient summarization failure
-                // must not discard history or block the user's actual request.
-                self.performModelRequest()
+    private func executeLegacyTool(
+        _ tool: any LegacyAgentTool,
+        arguments: [String: Any]
+    ) async -> AgentToolExecutionResult {
+        await withCheckedContinuation { continuation in
+            tool.execute(arguments: arguments) { result in
+                continuation.resume(returning: result)
             }
-        )
-        return true
+        }
     }
 
-    private func resolveContextWindowIfNeeded() -> Bool {
+    private func resolveContextWindowIfNeeded(token: UUID) async {
         let identifier = apiManager.contextWindowConfigurationIdentifier
         if contextWindowLookupIdentifier != identifier {
             contextWindowLookupIdentifier = identifier
             didResolveContextWindow = false
-            isResolvingContextWindow = false
             resolvedContextWindowTokenCount = nil
-            previousContextMeasurement = nil
             lastCompactionAttemptMessageCount = nil
         }
-
-        guard !didResolveContextWindow else { return false }
-        guard !isResolvingContextWindow else { return true }
-
-        isResolvingContextWindow = true
-        let token = runToken
-        apiManager.resolveContextWindowTokenCount { [weak self] tokenCount in
-            guard let self, self.runToken == token, self.isRunning else { return }
-            self.isResolvingContextWindow = false
-
-            guard self.apiManager.contextWindowConfigurationIdentifier == identifier else {
-                self.requestModel()
-                return
-            }
-
-            self.didResolveContextWindow = true
-            self.resolvedContextWindowTokenCount = tokenCount
-            self.requestModel()
+        guard !didResolveContextWindow else { return }
+        let count = await withCheckedContinuation { continuation in
+            apiManager.resolveContextWindowTokenCount { continuation.resume(returning: $0) }
         }
-        return true
+        guard runToken == token,
+              apiManager.contextWindowConfigurationIdentifier == identifier else { return }
+        didResolveContextWindow = true
+        resolvedContextWindowTokenCount = count
+    }
+
+    private func compactHistoryIfNeeded(
+        input: String,
+        imagePaths: [String],
+        followingItems: [AgentItem],
+        force: Bool,
+        token: UUID
+    ) async -> [AgentMessage] {
+        let inputMessage = AgentMessage.user(input, imagePaths: imagePaths)
+        let followingMessages = AgentItemLegacyCodec.messages(from: followingItems)
+        let currentSequence = [inputMessage] + followingMessages
+        let candidate = messages + currentSequence
+        guard force || lastCompactionAttemptMessageCount != candidate.count,
+              let plan = contextManager.makePlan(
+                  messages: candidate,
+                  tools: registry.definitions,
+                  previousMeasurement: nil,
+                  force: force
+              ),
+              let systemMessage = candidate.first(where: {
+                  $0.role == .system && $0.contextKind == nil
+              }) else {
+            return messages
+        }
+
+        lastCompactionAttemptMessageCount = candidate.count
+        consume(.contextCompactionStarted)
+        let response = await requestCompaction(plan: plan, token: token)
+        guard runToken == token,
+              let response,
+              !response.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return messages
+        }
+        var compacted = contextManager.compactedMessages(
+            systemMessage: systemMessage,
+            summary: response.content,
+            plan: plan
+        )
+        if compacted.count >= currentSequence.count,
+           Array(compacted.suffix(currentSequence.count)) == currentSequence {
+            compacted.removeLast(currentSequence.count)
+        }
+        lastCompactionAttemptMessageCount = nil
+        consume(.contextCompacted(CompactionEvent(
+            summarizedItemCount: plan.messagesToSummarize.count,
+            retainedItemCount: plan.recentMessages.count,
+            estimatedTokensBeforeCompaction: plan.estimatedTokensBeforeCompaction
+        )))
+        return compacted
+    }
+
+    private func requestCompaction(
+        plan: AgentContextCompactionPlan,
+        token: UUID
+    ) async -> AgentModelResponse? {
+        await withCheckedContinuation { continuation in
+            var resumed = false
+            func finish(_ response: AgentModelResponse?) {
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume(returning: response)
+            }
+            apiManager.sendAgentStreamRequest(
+                messages: contextManager.summaryRequestMessages(for: plan),
+                tools: [],
+                purpose: .contextCompaction,
+                onReceive: { _ in },
+                onComplete: { response in finish(response) },
+                onError: { _ in finish(nil) }
+            )
+        }
+    }
+
+    private func decoratedInput(
+        _ text: String,
+        explicitInvocation: AgentInvocation?
+    ) -> String {
+        guard let explicitInvocation, explicitInvocation.kind == .tool else { return text }
+        return """
+        \(text)
+
+        <explicit-tool-context name="\(explicitInvocation.name)">
+        用户通过输入框将此工具显式附加到本轮上下文。请将它视为与当前任务可能相关的工具，但不要因此排除其他工具，也不要在不需要时强行调用它。根据任务实际需要选择一个或多个可用工具。
+        </explicit-tool-context>
+        """
     }
 
     private func refreshSystemPrompt() {
         let prompt = makeSystemPrompt()
         if messages.first?.role == .system {
             messages[0].content = prompt
-        } else {
+        } else if !messages.isEmpty {
             messages.insert(.system(prompt), at: 0)
         }
     }
@@ -558,5 +585,40 @@ final class AgentRuntime {
         不要在普通文本中伪造工具调用，不要输出“命令:”或“[命令]”协议。
         """
         return systemPromptProvider() + environment + (additionalSystemContext ?? "")
+    }
+
+    private func legacyResult(from item: ToolResultItem) -> AgentToolExecutionResult {
+        guard let data = item.content.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ok = object["ok"] as? Bool,
+              let result = object["result"] as? String else {
+            return AgentToolExecutionResult(
+                content: item.content,
+                isError: item.isError,
+                imagePaths: item.imagePaths
+            )
+        }
+        return AgentToolExecutionResult(
+            content: result,
+            isError: item.isError || !ok,
+            imagePaths: item.imagePaths
+        )
+    }
+
+    private func finishWithError(_ error: Error, token: UUID) {
+        guard runToken == token else { return }
+        isRunning = false
+        activeRun = nil
+        activeAgent = nil
+        pendingRunState = nil
+        pendingInterruption = nil
+        onError?(error)
+    }
+
+    private func resetCompactionState() {
+        contextWindowLookupIdentifier = nil
+        didResolveContextWindow = false
+        resolvedContextWindowTokenCount = nil
+        lastCompactionAttemptMessageCount = nil
     }
 }

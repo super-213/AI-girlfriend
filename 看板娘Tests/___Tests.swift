@@ -42,6 +42,17 @@ struct AgentFoundationTests {
     }
 
     @MainActor
+    private func runToCompletion(
+        _ runtime: AgentRuntime,
+        action: () -> Void
+    ) async {
+        action()
+        while runtime.isRunning {
+            await Task.yield()
+        }
+    }
+
+    @MainActor
     private final class EchoTool: LegacyAgentTool {
         let definition = AgentToolDefinition(
             name: "echo",
@@ -181,7 +192,7 @@ struct AgentFoundationTests {
     }
 
     @Test @MainActor
-    func explicitToolKeepsTheFullCatalogAndAddsVisibleAgentContext() {
+    func explicitToolKeepsTheFullCatalogAndAddsVisibleAgentContext() async {
         let client = FakeModelClient()
         client.responses = [
             AgentModelResponse(
@@ -199,10 +210,12 @@ struct AgentFoundationTests {
             systemPromptProvider: { "system" }
         )
 
-        runtime.send(
-            "执行回显",
-            explicitInvocation: AgentInvocation(kind: .tool, name: "echo")
-        )
+        await runToCompletion(runtime) {
+            runtime.send(
+                "执行回显",
+                explicitInvocation: AgentInvocation(kind: .tool, name: "echo")
+            )
+        }
 
         #expect(Set(client.requestedToolNames[0]) == ["echo", "read_skill"])
         #expect(Set(client.requestedToolNames[1]) == ["echo", "read_skill"])
@@ -212,7 +225,7 @@ struct AgentFoundationTests {
     }
 
     @Test @MainActor
-    func explicitlyMentionedSkillIsLoadedBeforeTheFirstModelRequest() {
+    func explicitlyMentionedSkillIsLoadedBeforeTheFirstModelRequest() async {
         let client = FakeModelClient()
         client.responses = [AgentModelResponse(content: "上海天气结果", toolCalls: [])]
         let registry = AgentToolRegistry()
@@ -225,10 +238,12 @@ struct AgentFoundationTests {
             systemPromptProvider: { "system" }
         )
 
-        runtime.send(
-            "上海天气",
-            explicitInvocation: AgentInvocation(kind: .skill, name: "weather")
-        )
+        await runToCompletion(runtime) {
+            runtime.send(
+                "上海天气",
+                explicitInvocation: AgentInvocation(kind: .skill, name: "weather")
+            )
+        }
 
         #expect(client.requests.count == 1)
         #expect(Set(client.requestedToolNames[0]) == ["echo", "read_skill"])
@@ -239,7 +254,7 @@ struct AgentFoundationTests {
     }
 
     @Test @MainActor
-    func desktopToolImagesAreFedBackAfterTheToolResult() {
+    func desktopToolImagesAreFedBackAfterTheToolResult() async {
         let client = FakeModelClient()
         client.responses = [
             AgentModelResponse(
@@ -256,7 +271,9 @@ struct AgentFoundationTests {
             systemPromptProvider: { "system" }
         )
 
-        runtime.send("observe")
+        await runToCompletion(runtime) {
+            runtime.send("observe")
+        }
 
         #expect(client.requests.count == 2)
         let secondRequest = client.requests[1]
@@ -625,7 +642,7 @@ struct AgentFoundationTests {
     }
 
     @Test @MainActor
-    func runtimeFeedsToolObservationBackAndContinuesUntilFinalAnswer() {
+    func runtimeFeedsToolObservationBackAndContinuesUntilFinalAnswer() async {
         let client = FakeModelClient()
         client.responses = [
             AgentModelResponse(
@@ -646,7 +663,9 @@ struct AgentFoundationTests {
         var completed = false
         runtime.onCompleted = { completed = true }
 
-        runtime.send("test")
+        await runToCompletion(runtime) {
+            runtime.send("test")
+        }
 
         #expect(completed)
         #expect(client.requests.count == 2)
@@ -659,7 +678,7 @@ struct AgentFoundationTests {
     }
 
     @Test @MainActor
-    func runtimeContinuesBeyondFormerIterationLimit() {
+    func runtimeContinuesBeyondFormerIterationLimit() async {
         let client = FakeModelClient()
         client.responses = (1...17).map { index in
             AgentModelResponse(
@@ -685,7 +704,9 @@ struct AgentFoundationTests {
         runtime.onCompleted = { completed = true }
         runtime.onError = { _ in failed = true }
 
-        runtime.send("test")
+        await runToCompletion(runtime) {
+            runtime.send("test")
+        }
 
         #expect(completed)
         #expect(!failed)
@@ -694,7 +715,7 @@ struct AgentFoundationTests {
     }
 
     @Test @MainActor
-    func runtimeRewritesAnEnabledSkillNameMistakenForATool() {
+    func runtimeRewritesAnEnabledSkillNameMistakenForATool() async {
         let client = FakeModelClient()
         client.responses = [
             AgentModelResponse(
@@ -716,7 +737,9 @@ struct AgentFoundationTests {
         var exposedToolNames: [String] = []
         runtime.onToolStarted = { exposedToolNames.append($0) }
 
-        runtime.send("上海今天天气怎么样")
+        await runToCompletion(runtime) {
+            runtime.send("上海今天天气怎么样")
+        }
 
         #expect(client.requests.count == 2)
         #expect(exposedToolNames == ["read_skill"])
@@ -727,7 +750,7 @@ struct AgentFoundationTests {
     }
 
     @Test @MainActor
-    func runtimeDoesNotRewriteAnUnknownUnregisteredTool() {
+    func runtimeDoesNotRewriteAnUnknownUnregisteredTool() async {
         let client = FakeModelClient()
         client.responses = [
             AgentModelResponse(
@@ -745,7 +768,9 @@ struct AgentFoundationTests {
             systemPromptProvider: { "system" }
         )
 
-        runtime.send("test")
+        await runToCompletion(runtime) {
+            runtime.send("test")
+        }
 
         #expect(runtime.messages[2].toolCalls?.first?.name == "weather")
         #expect(runtime.messages[3].name == "weather")
@@ -753,7 +778,7 @@ struct AgentFoundationTests {
     }
 
     @Test @MainActor
-    func startingNewConversationDropsPreviousTurnContext() {
+    func startingNewConversationDropsPreviousTurnContext() async {
         let client = FakeModelClient()
         client.responses = [
             AgentModelResponse(content: "first", toolCalls: []),
@@ -765,9 +790,13 @@ struct AgentFoundationTests {
             systemPromptProvider: { "system" }
         )
 
-        runtime.send("one")
+        await runToCompletion(runtime) {
+            runtime.send("one")
+        }
         runtime.startNewConversation()
-        runtime.send("two")
+        await runToCompletion(runtime) {
+            runtime.send("two")
+        }
 
         #expect(client.requests.count == 2)
         #expect(client.requests[1].count == 2)
@@ -776,7 +805,7 @@ struct AgentFoundationTests {
     }
 
     @Test @MainActor
-    func runtimeCompactsOlderTurnsIntoAStructuredSummary() {
+    func runtimeCompactsOlderTurnsIntoAStructuredSummary() async {
         let client = FakeModelClient()
         client.responses = [
             AgentModelResponse(content: String(repeating: "旧回复", count: 160), toolCalls: []),
@@ -801,8 +830,12 @@ struct AgentFoundationTests {
         var events: [AgentContextCompactionEvent] = []
         runtime.onContextCompacted = { events.append($0) }
 
-        runtime.send("第一个问题")
-        runtime.send("第二个问题")
+        await runToCompletion(runtime) {
+            runtime.send("第一个问题")
+        }
+        await runToCompletion(runtime) {
+            runtime.send("第二个问题")
+        }
 
         #expect(client.requestPurposes == [.conversation, .contextCompaction, .conversation])
         #expect(events.count == 1)
@@ -814,7 +847,7 @@ struct AgentFoundationTests {
     }
 
     @Test @MainActor
-    func explicitCompactContextToolForcesCompactionBelowAutomaticThreshold() {
+    func explicitCompactContextToolForcesCompactionBelowAutomaticThreshold() async {
         let client = FakeModelClient()
         client.responses = [
             AgentModelResponse(content: "第一轮回复", toolCalls: []),
@@ -837,11 +870,15 @@ struct AgentFoundationTests {
             systemPromptProvider: { "system" }
         )
 
-        runtime.send("第一轮问题")
-        runtime.send(
-            "请立即压缩当前会话上下文。",
-            explicitInvocation: AgentInvocation(kind: .tool, name: AgentRuntimeToolName.compactContext)
-        )
+        await runToCompletion(runtime) {
+            runtime.send("第一轮问题")
+        }
+        await runToCompletion(runtime) {
+            runtime.send(
+                "请立即压缩当前会话上下文。",
+                explicitInvocation: AgentInvocation(kind: .tool, name: AgentRuntimeToolName.compactContext)
+            )
+        }
 
         #expect(client.requestPurposes == [.conversation, .contextCompaction, .conversation])
         #expect(client.requests[1].contains(where: { $0.content?.contains("第一轮问题") == true }))
@@ -852,7 +889,7 @@ struct AgentFoundationTests {
     }
 
     @Test @MainActor
-    func runtimeUsesEightyFivePercentOfResolvedContextWindowAsTrigger() {
+    func runtimeUsesEightyFivePercentOfResolvedContextWindowAsTrigger() async {
         let client = FakeModelClient()
         client.contextWindowTokenCount = 1_000_000
         client.responses = [
@@ -872,8 +909,12 @@ struct AgentFoundationTests {
             systemPromptProvider: { "system" }
         )
 
-        runtime.send("第一个问题")
-        runtime.send("第二个问题")
+        await runToCompletion(runtime) {
+            runtime.send("第一个问题")
+        }
+        await runToCompletion(runtime) {
+            runtime.send("第二个问题")
+        }
 
         #expect(client.contextWindowLookupCount == 1)
         #expect(client.requestPurposes == [.conversation, .conversation])

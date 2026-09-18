@@ -6,17 +6,30 @@ enum AgentItemRole: String, Codable, Sendable {
     case assistant
 }
 
+enum AgentItemContextKind: String, Codable, Sendable {
+    case compactionSummary
+    case desktopObservation
+}
+
 struct AgentMessageItem: Codable, Equatable, Sendable {
     let id: UUID
     let role: AgentItemRole
     let content: String?
     let imagePaths: [String]
+    let contextKind: AgentItemContextKind?
 
-    init(id: UUID = UUID(), role: AgentItemRole, content: String?, imagePaths: [String] = []) {
+    init(
+        id: UUID = UUID(),
+        role: AgentItemRole,
+        content: String?,
+        imagePaths: [String] = [],
+        contextKind: AgentItemContextKind? = nil
+    ) {
         self.id = id
         self.role = role
         self.content = content
         self.imagePaths = imagePaths
+        self.contextKind = contextKind
     }
 }
 

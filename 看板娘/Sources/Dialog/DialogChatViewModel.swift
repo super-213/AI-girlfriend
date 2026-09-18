@@ -444,6 +444,9 @@ final class DialogChatViewModel: ObservableObject {
             userInstruction: modelInstruction,
             attachments: attachments
         )
+        // `AgentRunner` starts asynchronously. Mark the turn busy before handing it off so
+        // messages submitted in the same main-actor turn are queued instead of racing `send`.
+        isRequesting = true
         agentRuntime.send(
             prompt,
             imagePaths: attachments.filter(\.isImage).map(\.path),

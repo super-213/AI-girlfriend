@@ -21,7 +21,13 @@ struct LegacyToolAdapter<Context: Sendable>: Sendable {
                 defaultTimeout: nil,
                 allowsAutomaticRetry: false,
                 riskLevel: tool.requiresConfirmation ? .high : .low
-            )
+            ),
+            requiresApproval: { rawArguments in
+                try await box.requiresApproval(rawArguments: rawArguments)
+            },
+            approvalSummary: { rawArguments in
+                await box.approvalSummary(rawArguments: rawArguments)
+            }
         ) { _, rawArguments in
             try await box.invoke(rawArguments: rawArguments)
         }
@@ -62,5 +68,31 @@ private final class LegacyToolBox: @unchecked Sendable {
                 }
             }
         }
+    }
+
+    func requiresApproval(rawArguments: String) async throws -> Bool {
+        try await MainActor.run {
+            let arguments = try Self.arguments(from: rawArguments, toolName: tool.definition.name)
+            return tool.requiresConfirmation(arguments: arguments)
+        }
+    }
+
+    func approvalSummary(rawArguments: String) async -> String {
+        await MainActor.run {
+            guard let arguments = try? Self.arguments(
+                from: rawArguments,
+                toolName: tool.definition.name
+            ) else { return "执行工具 \(tool.definition.name)" }
+            return tool.approvalSummary(arguments: arguments)
+        }
+    }
+
+    @MainActor
+    private static func arguments(from rawArguments: String, toolName: String) throws -> [String: Any] {
+        guard let data = rawArguments.data(using: .utf8),
+              let arguments = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AgentError.invalidToolArguments(toolName: toolName, detail: "参数不是 JSON 对象")
+        }
+        return arguments
     }
 }

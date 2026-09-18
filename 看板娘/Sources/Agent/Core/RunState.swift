@@ -11,6 +11,8 @@ struct RunState: Codable, Equatable, Sendable {
     let pendingToolCalls: [ToolCallItem]
     let interruptions: [AgentInterruption]
     let providerContinuationID: String?
+    let rawResponses: [ModelResponse]
+    let usage: AgentUsage
     let traceID: UUID
     let sessionID: String
 
@@ -23,6 +25,8 @@ struct RunState: Codable, Equatable, Sendable {
         pendingToolCalls: [ToolCallItem],
         interruptions: [AgentInterruption],
         providerContinuationID: String? = nil,
+        rawResponses: [ModelResponse] = [],
+        usage: AgentUsage = .zero,
         traceID: UUID,
         sessionID: String
     ) {
@@ -34,6 +38,8 @@ struct RunState: Codable, Equatable, Sendable {
         self.pendingToolCalls = pendingToolCalls
         self.interruptions = interruptions
         self.providerContinuationID = providerContinuationID
+        self.rawResponses = rawResponses
+        self.usage = usage
         self.traceID = traceID
         self.sessionID = sessionID
     }

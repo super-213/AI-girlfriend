@@ -29,6 +29,18 @@ struct HandoffEvent: Sendable, Equatable {
 
 struct CompactionEvent: Sendable, Equatable {
     let summarizedItemCount: Int
+    let retainedItemCount: Int
+    let estimatedTokensBeforeCompaction: Int
+
+    init(
+        summarizedItemCount: Int,
+        retainedItemCount: Int = 0,
+        estimatedTokensBeforeCompaction: Int = 0
+    ) {
+        self.summarizedItemCount = summarizedItemCount
+        self.retainedItemCount = retainedItemCount
+        self.estimatedTokensBeforeCompaction = estimatedTokensBeforeCompaction
+    }
 }
 
 enum AgentRunEvent: Sendable, Equatable {

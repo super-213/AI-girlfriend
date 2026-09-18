@@ -22,8 +22,8 @@ struct DialogProjectTests {
     }
 
     @Test @MainActor
-    func creatingProjectPersistsWorkspaceAndScopesAgentContext() throws {
-        try withWorkspace { viewModel, client, defaults, directory in
+    func creatingProjectPersistsWorkspaceAndScopesAgentContext() async throws {
+        try await withWorkspace { viewModel, client, defaults, directory in
             #expect(viewModel.createProject(name: "演示项目", sourceDirectory: directory))
             let project = try #require(viewModel.projects.first)
 
@@ -36,6 +36,7 @@ struct DialogProjectTests {
             })
 
             viewModel.send("浏览项目代码")
+            await waitUntil { !client.requests.isEmpty }
             let request = try #require(client.requests.first)
             #expect(request.first?.role == .system)
             #expect(request.first?.content?.contains("当前项目工作区") == true)
@@ -51,8 +52,8 @@ struct DialogProjectTests {
     }
 
     @Test @MainActor
-    func removingProjectKeepsItsSourceDirectoryOnDisk() throws {
-        try withWorkspace { viewModel, _, _, directory in
+    func removingProjectKeepsItsSourceDirectoryOnDisk() async throws {
+        try await withWorkspace { viewModel, _, _, directory in
             #expect(viewModel.createProject(name: "不删源文件", sourceDirectory: directory))
             let projectID = try #require(viewModel.projects.first?.id)
 
@@ -65,8 +66,8 @@ struct DialogProjectTests {
     }
 
     @Test @MainActor
-    func projectConversationCanCreateAnotherConversationInSameProject() throws {
-        try withWorkspace { viewModel, _, _, directory in
+    func projectConversationCanCreateAnotherConversationInSameProject() async throws {
+        try await withWorkspace { viewModel, _, _, directory in
             #expect(viewModel.createProject(name: "多对话", sourceDirectory: directory))
             let projectID = try #require(viewModel.selectedProject?.id)
             let firstConversationID = viewModel.selectedConversationID
@@ -82,8 +83,8 @@ struct DialogProjectTests {
     }
 
     @Test @MainActor
-    func deletingTheLastProjectConversationKeepsTheProjectActive() throws {
-        try withWorkspace { viewModel, _, _, directory in
+    func deletingTheLastProjectConversationKeepsTheProjectActive() async throws {
+        try await withWorkspace { viewModel, _, _, directory in
             #expect(viewModel.createProject(name: "保留项目", sourceDirectory: directory))
             let projectID = try #require(viewModel.selectedProject?.id)
             let conversationID = viewModel.selectedConversationID
@@ -100,13 +101,13 @@ struct DialogProjectTests {
 
     @MainActor
     private func withWorkspace(
-        _ body: (
+        _ body: @MainActor (
             DialogChatViewModel,
             RecordingModelClient,
             UserDefaults,
             URL
-        ) throws -> Void
-    ) throws {
+        ) async throws -> Void
+    ) async throws {
         let suiteName = "DialogProjectTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         let directory = FileManager.default.temporaryDirectory
@@ -129,6 +130,15 @@ struct DialogProjectTests {
             agentRuntime: runtime,
             conversationStore: store
         )
-        try body(viewModel, client, defaults, directory)
+        try await body(viewModel, client, defaults, directory)
+    }
+
+    @MainActor
+    private func waitUntil(_ condition: () -> Bool) async {
+        for _ in 0..<10_000 {
+            if condition() { return }
+            await Task.yield()
+        }
+        Issue.record("等待异步 Agent 状态超时")
     }
 }

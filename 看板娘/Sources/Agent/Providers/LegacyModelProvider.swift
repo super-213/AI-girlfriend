@@ -5,30 +5,33 @@ final class LegacyModelProvider: AgentModelProvider, @unchecked Sendable {
     let id: String
     let capabilities: ModelCapabilities
     private let client: any AgentModelClient
+    private let normalizeToolCall: @MainActor @Sendable (AgentToolCall) -> AgentToolCall
 
     @MainActor
     init(
         id: String = "legacy-chat-provider",
         capabilities: ModelCapabilities = .chatCompletions,
-        client: any AgentModelClient
+        client: any AgentModelClient,
+        normalizeToolCall: @escaping @MainActor @Sendable (AgentToolCall) -> AgentToolCall = { $0 }
     ) {
         self.id = id
         self.capabilities = capabilities
         self.client = client
+        self.normalizeToolCall = normalizeToolCall
     }
 
     func streamResponse(request: ModelRequest) -> AsyncThrowingStream<ModelStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             Task { @MainActor [client] in
                 client.sendAgentStreamRequest(
-                    messages: Self.legacyMessages(from: request.items),
+                    messages: AgentItemLegacyCodec.messages(from: request.items),
                     tools: request.tools.map(Self.legacyDefinition),
                     purpose: .conversation,
                     onReceive: { continuation.yield(.textDelta($0)) },
                     onComplete: { response in
                         continuation.yield(.completed(ModelResponse(
                             content: response.content,
-                            toolCalls: response.toolCalls.map {
+                            toolCalls: response.toolCalls.map(self.normalizeToolCall).map {
                                 ToolCallItem(id: $0.id, name: $0.name, arguments: $0.arguments)
                             },
                             usage: response.usage.map {
@@ -45,7 +48,8 @@ final class LegacyModelProvider: AgentModelProvider, @unchecked Sendable {
                     onError: { error in continuation.finish(throwing: error) }
                 )
             }
-            continuation.onTermination = { @Sendable _ in
+            continuation.onTermination = { @Sendable termination in
+                guard case .cancelled = termination else { return }
                 Task { @MainActor [client = self.client] in client.cancelStreamRequest() }
             }
         }
@@ -64,44 +68,4 @@ final class LegacyModelProvider: AgentModelProvider, @unchecked Sendable {
         )
     }
 
-    @MainActor
-    private static func legacyMessages(from items: [AgentItem]) -> [AgentMessage] {
-        var messages: [AgentMessage] = []
-        for item in items {
-            switch item {
-            case .message(let item):
-                switch item.role {
-                case .system:
-                    messages.append(.system(item.content ?? ""))
-                case .user:
-                    messages.append(.user(item.content ?? "", imagePaths: item.imagePaths))
-                case .assistant:
-                    messages.append(.assistant(content: item.content))
-                }
-            case .toolCall(let item):
-                let call = AgentToolCall(id: item.id, name: item.name, arguments: item.arguments)
-                if messages.last?.role == .assistant {
-                    var calls = messages[messages.count - 1].toolCalls ?? []
-                    calls.append(call)
-                    messages[messages.count - 1].toolCalls = calls
-                } else {
-                    messages.append(.assistant(content: nil, toolCalls: [call]))
-                }
-            case .toolResult(let item):
-                messages.append(.tool(
-                    call: AgentToolCall(
-                        id: item.toolCallID,
-                        name: item.toolName,
-                        arguments: "{}"
-                    ),
-                    content: item.content
-                ))
-            case .compaction(let item):
-                messages.append(.contextSummary(item.summary))
-            case .handoff, .guardrail, .approval:
-                continue
-            }
-        }
-        return messages
-    }
 }

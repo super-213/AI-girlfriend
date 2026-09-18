@@ -38,8 +38,8 @@ struct DialogPetConversationTests {
     }
 
     @Test @MainActor
-    func storeKeepsOnlyTheNewestPetConversation() throws {
-        try withStore { store, _ in
+    func storeKeepsOnlyTheNewestPetConversation() async throws {
+        try await withStore { store, _ in
             let sourceID = UUID()
             let regular = DialogConversation(title: "普通对话")
             let olderPet = DialogConversation(
@@ -61,8 +61,8 @@ struct DialogPetConversationTests {
     }
 
     @Test @MainActor
-    func fullDialogContinuesAndCanDeleteThePetConversation() throws {
-        try withStore { store, defaults in
+    func fullDialogContinuesAndCanDeleteThePetConversation() async throws {
+        try await withStore { store, defaults in
             let petConversation = DialogConversation(
                 title: "桌宠对话",
                 messages: [
@@ -94,10 +94,12 @@ struct DialogPetConversationTests {
             #expect(viewModel.messages.map(\.content) == ["桌宠里的问题", "桌宠里的回复"])
 
             viewModel.send("在完整模式中继续")
+            await waitUntil { !client.requests.isEmpty }
             #expect(client.requests.first?.dropFirst().contains(.user("桌宠里的问题")) == true)
             #expect(client.requests.first?.last == .user("在完整模式中继续"))
 
             client.complete(with: "已接力")
+            await waitUntil { store.petConversation?.agentHistory.last == .assistant(content: "已接力") }
             #expect(store.petConversation?.agentHistory.last == .assistant(content: "已接力"))
 
             viewModel.deleteConversation(petConversation.id)
@@ -123,11 +125,20 @@ struct DialogPetConversationTests {
 
     @MainActor
     private func withStore(
-        _ body: (DialogConversationStore, UserDefaults) throws -> Void
-    ) throws {
+        _ body: @MainActor (DialogConversationStore, UserDefaults) async throws -> Void
+    ) async throws {
         let suiteName = "DialogPetConversationTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        try body(DialogConversationStore(defaults: defaults), defaults)
+        try await body(DialogConversationStore(defaults: defaults), defaults)
+    }
+
+    @MainActor
+    private func waitUntil(_ condition: () -> Bool) async {
+        for _ in 0..<10_000 {
+            if condition() { return }
+            await Task.yield()
+        }
+        Issue.record("等待异步 Agent 状态超时")
     }
 }

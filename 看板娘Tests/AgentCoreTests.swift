@@ -156,20 +156,29 @@ struct AgentCoreTests {
             tools: [AnyAgentTool(EchoTool())]
         )
 
+        let run = runner.run(
+            agent: agent,
+            input: AgentInput("loop"),
+            context: "ctx",
+            session: MemoryAgentSession(),
+            configuration: RunConfiguration(maxTurns: 2, retryPolicy: .none)
+        )
         do {
-            _ = try await runner.run(
-                agent: agent,
-                input: AgentInput("loop"),
-                context: "ctx",
-                session: MemoryAgentSession(),
-                configuration: RunConfiguration(maxTurns: 2, retryPolicy: .none)
-            ).result.value
+            _ = try await run.result.value
             Issue.record("应该触发 maxTurnsExceeded")
         } catch let error as AgentError {
             #expect(error == .maxTurnsExceeded(limit: 2))
         } catch {
             Issue.record("错误类型不正确：\(error)")
         }
+
+        var events: [AgentRunEvent] = []
+        do {
+            for try await event in run.events { events.append(event) }
+        } catch {
+            // The throwing stream and result intentionally expose the same terminal failure.
+        }
+        #expect(events.last == .runFailed(.maxTurnsExceeded(limit: 2)))
     }
 
     @Test
@@ -235,5 +244,68 @@ struct AgentCoreTests {
         #expect(result.resumableState?.sessionID == "approval-session")
         #expect(await session.loadRunState() == result.resumableState)
         #expect(try JSONEncoder().encode(result.resumableState).isEmpty == false)
+    }
+
+    @Test
+    func approvalResumeContinuesTheSameRunWithoutRepeatingTheModelTurn() async throws {
+        let provider = FakeProvider([
+            ModelResponse(
+                id: "response-before-approval",
+                content: "",
+                toolCalls: [ToolCallItem(
+                    id: "risky-resume-1",
+                    name: "risky_echo",
+                    arguments: #"{"value":"do it"}"#
+                )]
+            ),
+            ModelResponse(content: "已完成")
+        ])
+        let runner = AgentRunner(provider: provider)
+        let session = MemoryAgentSession(id: "resume-session")
+        let agent = AgentDefinition<String, String>(
+            id: "desktop",
+            name: "Desktop Agent",
+            instructions: .fixed("system"),
+            tools: [AnyAgentTool(RiskyEchoTool())]
+        )
+
+        let paused = try await runner.run(
+            agent: agent,
+            input: AgentInput("mutate"),
+            context: "ctx",
+            session: session
+        ).result.value
+        let state = try #require(paused.resumableState)
+        let interruption = try #require(paused.interruptions.first)
+
+        let resumedRun = runner.resume(
+            agent: agent,
+            from: state,
+            decisions: [interruption.id: .approved],
+            context: "ctx",
+            session: session
+        )
+        let resumed = try await resumedRun.result.value
+        var events: [AgentRunEvent] = []
+        for try await event in resumedRun.events { events.append(event) }
+
+        #expect(resumed.runID == paused.runID)
+        #expect(resumed.finalOutput == "已完成")
+        #expect(resumed.rawResponses.count == 2)
+        #expect(provider.requests.count == 2)
+        #expect(resumed.newItems.contains(where: {
+            guard case .approval(let item) = $0 else { return false }
+            return item.interruptionID == interruption.id && item.decision == .approved
+        }))
+        #expect(resumed.newItems.contains(where: {
+            guard case .toolResult(let item) = $0 else { return false }
+            return item.toolCallID == interruption.toolCall.id && !item.isError
+        }))
+        #expect(events.first.map {
+            guard case .runStarted(let snapshot) = $0 else { return false }
+            return snapshot.runID == paused.runID
+        } == true)
+        #expect(events.last == .runCompleted)
+        #expect(await session.loadRunState() == nil)
     }
 }
