@@ -456,9 +456,15 @@ final class AgentRunner: AgentRunning, Sendable {
                 modelID: currentAgent.model.modelID,
                 attributes: ["turn": String(turnCount)]
             )
-            let response: ModelResponse
+            let guardrailContext = AgentGuardrailContext(
+                runID: runID,
+                sessionID: session.id,
+                agentID: currentAgent.id,
+                context: context
+            )
+            let modelResult: ModelStreamResult
             do {
-                response = try await requestModel(
+                modelResult = try await requestModel(
                     ModelRequest(
                         runID: runID,
                         agentID: currentAgent.id,
@@ -472,8 +478,10 @@ final class AgentRunner: AgentRunning, Sendable {
                     trace: trace,
                     span: modelSpan,
                     events: events,
-                    emitTextDeltas: currentAgent.outputGuardrails.isEmpty
+                    outputGuardrails: currentAgent.outputGuardrails,
+                    guardrailContext: guardrailContext
                 )
+                let response = modelResult.response
                 if let usage = response.usage { await trace.record(.usage(usage), in: modelSpan) }
                 await trace.end(
                     modelSpan,
@@ -483,6 +491,7 @@ final class AgentRunner: AgentRunning, Sendable {
                 await trace.end(modelSpan, outcome: SpanOutcome(status: .failed, error: error))
                 throw error
             }
+            let response = modelResult.response
             rawResponses.append(response)
             usage.add(response.usage)
             events.yield(.modelCompleted(ModelResponseSnapshot(turn: turnCount, response: response)))
@@ -515,12 +524,6 @@ final class AgentRunner: AgentRunning, Sendable {
 
             guard !response.toolCalls.isEmpty else {
                 let output = try decode(response.content, using: currentAgent.outputDecoder)
-                let guardrailContext = AgentGuardrailContext(
-                    runID: runID,
-                    sessionID: session.id,
-                    agentID: currentAgent.id,
-                    context: context
-                )
                 for guardrail in currentAgent.outputGuardrails {
                     let result = await evaluateOutputGuardrail(
                         guardrail,
@@ -537,7 +540,7 @@ final class AgentRunner: AgentRunning, Sendable {
                         throw AgentError.guardrailTriggered(result)
                     }
                 }
-                if !currentAgent.outputGuardrails.isEmpty, !response.content.isEmpty {
+                if !modelResult.didStreamText, !response.content.isEmpty {
                     events.yield(.textDelta(response.content))
                 }
                 try await persistCompleted(items: allItems, session: session)
@@ -894,7 +897,7 @@ final class AgentRunner: AgentRunning, Sendable {
             modelID: model.modelID
         )
         do {
-            let response = try await requestModel(
+            let modelResult = try await requestModel(
                 ModelRequest(
                     runID: runID,
                     agentID: agentID,
@@ -907,8 +910,11 @@ final class AgentRunner: AgentRunning, Sendable {
                 trace: trace,
                 span: modelSpan,
                 events: events,
+                outputGuardrails: [AnyOutputGuardrail<Void, String>](),
+                guardrailContext: nil,
                 emitTextDeltas: false
             )
+            let response = modelResult.response
             guard !response.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw AgentError.modelRequestFailed(.invalidResponse("上下文压缩返回空摘要"))
             }
@@ -1070,34 +1076,110 @@ final class AgentRunner: AgentRunning, Sendable {
         return result
     }
 
-    private func requestModel(
+    private struct ModelStreamResult: Sendable {
+        let response: ModelResponse
+        let didStreamText: Bool
+    }
+
+    private func requestModel<Context: Sendable, Output: Sendable>(
         _ request: ModelRequest,
         configuration: RunConfiguration,
         trace: AgentRunTrace,
         span: SpanHandle?,
         events: AsyncThrowingStream<AgentRunEvent, Error>.Continuation,
+        outputGuardrails: [AnyOutputGuardrail<Context, Output>] = [],
+        guardrailContext: AgentGuardrailContext<Context>? = nil,
         emitTextDeltas: Bool = true
-    ) async throws -> ModelResponse {
+    ) async throws -> ModelStreamResult {
         var lastError: Error?
         for attempt in 1...configuration.retryPolicy.maximumAttempts {
             do {
                 return try await withTimeout(configuration.modelTimeout, error: .modelTimedOut) {
                     var completed: ModelResponse?
+                    let canStreamSafely = emitTextDeltas && (
+                        outputGuardrails.isEmpty
+                            || outputGuardrails.allSatisfy { $0.streamingBufferSize != nil }
+                    )
+                    let bufferSize = outputGuardrails.compactMap(\.streamingBufferSize).max() ?? 0
+                    var pendingText = ""
+                    var emittedContext = ""
+                    var streamedText = ""
                     for try await event in self.provider.streamResponse(request: request) {
                         try Task.checkCancellation()
                         switch event {
                         case .textDelta(let delta):
-                            if emitTextDeltas { events.yield(.textDelta(delta)) }
+                            guard canStreamSafely else { continue }
+                            streamedText += delta
+                            guard !outputGuardrails.isEmpty else {
+                                events.yield(.textDelta(delta))
+                                continue
+                            }
+                            pendingText += delta
+                            guard let guardrailContext else {
+                                throw AgentError.invalidConfiguration(
+                                    "增量输出 Guardrail 缺少运行上下文"
+                                )
+                            }
+                            let candidate = emittedContext + pendingText
+                            for guardrail in outputGuardrails {
+                                let result: GuardrailResult
+                                do {
+                                    let rawResult = try await guardrail.evaluateStreamingText(
+                                        context: guardrailContext,
+                                        text: candidate
+                                    ) ?? GuardrailResult(
+                                        action: .stop,
+                                        message: "输出 Guardrail 不支持增量校验"
+                                    )
+                                    result = self.decorate(
+                                        rawResult,
+                                        name: guardrail.name,
+                                        stage: .output
+                                    )
+                                } catch {
+                                    result = self.guardrailFailure(
+                                        name: guardrail.name,
+                                        stage: .output,
+                                        error: error
+                                    )
+                                }
+                                guard result.action == .allow else {
+                                    events.yield(.guardrailEvaluated(result))
+                                    throw AgentError.guardrailTriggered(result)
+                                }
+                            }
+                            if pendingText.count > bufferSize {
+                                let end = pendingText.index(
+                                    pendingText.endIndex,
+                                    offsetBy: -bufferSize
+                                )
+                                let safeText = String(pendingText[..<end])
+                                pendingText = String(pendingText[end...])
+                                events.yield(.textDelta(safeText))
+                                emittedContext = String(
+                                    (emittedContext + safeText).suffix(bufferSize)
+                                )
+                            }
                         case .completed(let response): completed = response
                         }
                     }
                     guard let completed else {
                         throw AgentError.modelRequestFailed(.invalidResponse("模型流未返回完成事件"))
                     }
-                    return completed
+                    if canStreamSafely, !outputGuardrails.isEmpty, !pendingText.isEmpty {
+                        events.yield(.textDelta(pendingText))
+                    }
+                    return ModelStreamResult(
+                        response: completed,
+                        didStreamText: canStreamSafely && streamedText == completed.content
+                    )
                 }
             } catch is CancellationError {
                 throw AgentError.cancelled
+            } catch AgentError.guardrailTriggered(let result) {
+                throw AgentError.guardrailTriggered(result)
+            } catch AgentError.invalidConfiguration(let detail) {
+                throw AgentError.invalidConfiguration(detail)
             } catch {
                 lastError = error
                 if attempt < configuration.retryPolicy.maximumAttempts {

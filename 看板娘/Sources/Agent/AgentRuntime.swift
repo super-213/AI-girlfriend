@@ -386,7 +386,7 @@ final class AgentRuntime {
             instructions: .fixed(makeSystemPrompt()),
             tools: registry.allTypedTools,
             inputGuardrails: [AnyInputGuardrail(NonEmptyInputGuardrail<AppAgentContext>())],
-            outputGuardrails: [AnyOutputGuardrail(AppAgentOutputGuardrail())],
+            outputGuardrails: [AnyOutputGuardrail(streaming: AppAgentOutputGuardrail())],
             toolGuardrails: [AnyToolGuardrail(AppAgentToolGuardrail())]
         )
     }

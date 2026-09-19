@@ -84,7 +84,7 @@ struct AppAgentToolGuardrail: ToolGuardrail {
     }
 }
 
-struct AppAgentOutputGuardrail: OutputGuardrail {
+struct AppAgentOutputGuardrail: StreamingTextOutputGuardrail {
     typealias Context = AppAgentContext
     typealias Output = String
     let name = "app_output_safety"

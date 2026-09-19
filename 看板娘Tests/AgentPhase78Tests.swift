@@ -70,6 +70,36 @@ struct AgentPhase78Tests {
         var lastRequest: ModelRequest? { lock.withLock { recordedRequests.last } }
     }
 
+    private final class ChunkedProvider: AgentModelProvider, @unchecked Sendable {
+        let id = "phase-78-chunked"
+        let capabilities = ModelCapabilities(
+            supportsTools: true,
+            supportsParallelTools: true,
+            supportsStructuredOutput: true,
+            supportsImageInput: true,
+            supportsServerManagedState: false,
+            supportsPromptCaching: false,
+            supportsResponsesAPI: false
+        )
+        private let chunks: [String]
+        private let response: ModelResponse
+
+        init(chunks: [String]) {
+            self.chunks = chunks
+            response = ModelResponse(content: chunks.joined())
+        }
+
+        func streamResponse(request: ModelRequest) -> AsyncThrowingStream<ModelStreamEvent, Error> {
+            let chunks = chunks
+            let response = response
+            return AsyncThrowingStream { continuation in
+                for chunk in chunks { continuation.yield(.textDelta(chunk)) }
+                continuation.yield(.completed(response))
+                continuation.finish()
+            }
+        }
+    }
+
     private struct ValueArguments: Codable, Sendable { let value: String }
     private struct ValueOutput: Codable, Sendable { let value: String }
     private struct StructuredOutput: Codable, Equatable, Sendable { let answer: String }
@@ -570,6 +600,83 @@ struct AgentPhase78Tests {
             // The event stream terminates with the same guardrail failure.
         }
         #expect(!leakedUnsafeDelta)
+    }
+
+    @Test
+    func streamingOutputGuardrailPreservesSafeIncrementalText() async throws {
+        let chunks = [
+            String(repeating: "A", count: 40),
+            String(repeating: "B", count: 40),
+            String(repeating: "C", count: 40)
+        ]
+        let provider = ChunkedProvider(chunks: chunks)
+        let agent = AgentDefinition<AppAgentContext, String>(
+            id: "streaming-output",
+            name: "Streaming Output",
+            instructions: .fixed("system"),
+            outputGuardrails: [AnyOutputGuardrail(streaming: AppAgentOutputGuardrail())]
+        )
+        let run = AgentRunner(provider: provider).run(
+            agent: agent,
+            input: AgentInput("run"),
+            context: AppAgentContext(conversationID: UUID()),
+            session: MemoryAgentSession(),
+            configuration: RunConfiguration(retryPolicy: .none)
+        )
+
+        var deltas: [String] = []
+        for try await event in run.events {
+            if case .textDelta(let delta) = event { deltas.append(delta) }
+        }
+        let result = try await run.result.value
+
+        #expect(result.finalOutput == chunks.joined())
+        #expect(deltas.joined() == chunks.joined())
+        #expect(deltas.count > 1)
+        #expect(deltas.first != chunks.joined())
+    }
+
+    @Test
+    func streamingOutputGuardrailBlocksCredentialSplitAcrossChunks() async {
+        let safePrefix = String(repeating: "safe ", count: 20)
+        let provider = ChunkedProvider(chunks: [safePrefix + "sk-", "12345678"])
+        let agent = AgentDefinition<AppAgentContext, String>(
+            id: "streaming-sensitive-output",
+            name: "Streaming Sensitive Output",
+            instructions: .fixed("system"),
+            outputGuardrails: [AnyOutputGuardrail(streaming: AppAgentOutputGuardrail())]
+        )
+        let run = AgentRunner(provider: provider).run(
+            agent: agent,
+            input: AgentInput("run"),
+            context: AppAgentContext(conversationID: UUID()),
+            session: MemoryAgentSession(),
+            configuration: RunConfiguration(retryPolicy: .none)
+        )
+
+        var visibleText = ""
+        do {
+            for try await event in run.events {
+                if case .textDelta(let delta) = event { visibleText += delta }
+            }
+        } catch {
+            // The event stream terminates with the same guardrail failure as the result.
+        }
+        do {
+            _ = try await run.result.value
+            Issue.record("增量输出 Guardrail 应阻止跨分片凭据")
+        } catch let error as AgentError {
+            guard case .guardrailTriggered(let result) = error else {
+                Issue.record("错误类型不正确：\(error)")
+                return
+            }
+            #expect(result.stage == .output)
+        } catch {
+            Issue.record("错误类型不正确：\(error)")
+        }
+
+        #expect(!visibleText.contains("sk-"))
+        #expect(!visibleText.contains("12345678"))
     }
 
     @Test
