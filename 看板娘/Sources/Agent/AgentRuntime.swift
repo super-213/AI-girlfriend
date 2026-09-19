@@ -36,30 +36,42 @@ extension AgentModelClient {
 
 extension APIManager: AgentModelClient {}
 
-struct AgentPendingApproval {
-    let toolName: String
-    let summary: String
+enum AgentRuntimeEvent: Sendable {
+    case run(AgentRunEvent)
+    case sessionUpdated(AgentSessionSnapshot)
 }
 
-/// Compatibility facade for existing AppKit/SwiftUI consumers.
-/// All model/tool iteration and run state are owned by `AgentRunner`.
+extension ToolResultItem {
+    var displayExecutionResult: AgentToolExecutionResult {
+        guard let data = content.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ok = object["ok"] as? Bool,
+              let result = object["result"] as? String else {
+            return AgentToolExecutionResult(
+                content: content,
+                isError: isError,
+                imagePaths: imagePaths
+            )
+        }
+        return AgentToolExecutionResult(
+            content: result,
+            isError: isError || !ok,
+            imagePaths: imagePaths
+        )
+    }
+}
+
+typealias AgentSessionFactory = @MainActor @Sendable (AgentSessionSnapshot) -> any AgentSession
+
+/// Application facade backed by AgentRunner and one authoritative AgentSession.
 @MainActor
 final class AgentRuntime {
-    var onAssistantResponseStarted: (() -> Void)?
-    var onAssistantText: ((String) -> Void)?
-    var onToolStarted: ((String) -> Void)?
-    var onToolFinished: ((String, AgentToolExecutionResult) -> Void)?
-    var onApprovalRequested: ((AgentPendingApproval) -> Void)?
-    var onContextCompactionStarted: (() -> Void)?
-    var onContextCompacted: ((AgentContextCompactionEvent) -> Void)?
-    var onCompleted: (() -> Void)?
-    var onError: ((Error) -> Void)?
+    let events: AsyncStream<AgentRuntimeEvent>
     var additionalSystemContext: String?
     var projectID: UUID?
     var workspacePath: String?
     var characterID: String?
 
-    private(set) var messages: [AgentMessage] = []
     private(set) var isRunning = false
     private(set) var sessionSnapshot: AgentSessionSnapshot
 
@@ -70,6 +82,8 @@ final class AgentRuntime {
     private let fallbackContextCompactionPolicy: AgentContextCompactionPolicy
     private let runConfiguration: RunConfiguration
     private let runner: AgentRunner
+    private let sessionFactory: AgentSessionFactory
+    private let eventContinuation: AsyncStream<AgentRuntimeEvent>.Continuation
 
     private var session: any AgentSession
     private var activeRun: AgentRun<String>?
@@ -91,6 +105,13 @@ final class AgentRuntime {
         runConfiguration: RunConfiguration = RunConfiguration(),
         modelProvider: (any AgentModelProvider)? = nil,
         tracer: any AgentTracer = AppAgentTracer.shared,
+        sessionFactory: @escaping AgentSessionFactory = { snapshot in
+            MemoryAgentSession(
+                id: snapshot.sessionID,
+                items: snapshot.items,
+                runState: snapshot.pendingRunState
+            )
+        },
         enabledSkillNameResolver: @escaping @MainActor @Sendable (String) -> String? = {
             if let skill = SkillLibrary.enabledSkill(named: $0) {
                 return skill.name
@@ -107,13 +128,19 @@ final class AgentRuntime {
         self.registry = registry
         fallbackContextCompactionPolicy = contextCompactionPolicy
         self.runConfiguration = runConfiguration
+        self.sessionFactory = sessionFactory
         self.enabledSkillNameResolver = enabledSkillNameResolver
         self.systemPromptProvider = systemPromptProvider
+        var continuation: AsyncStream<AgentRuntimeEvent>.Continuation!
+        events = AsyncStream(bufferingPolicy: .bufferingNewest(512)) {
+            continuation = $0
+        }
+        eventContinuation = continuation
         let initialSnapshot = AgentSessionSnapshot(
             providerConfigurationID: apiManager.contextWindowConfigurationIdentifier
         )
         sessionSnapshot = initialSnapshot
-        session = MemoryAgentSession(id: initialSnapshot.sessionID)
+        session = sessionFactory(initialSnapshot)
 
         let baseProvider: any AgentModelProvider
         if let modelProvider {
@@ -147,13 +174,13 @@ final class AgentRuntime {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         guard !isRunning else {
-            onError?(AgentError.busy)
+            eventContinuation.yield(.run(.runFailed(.busy)))
             return
         }
         do {
             try runConfiguration.validate()
         } catch {
-            onError?(error)
+            eventContinuation.yield(.run(.runFailed(Self.agentError(from: error))))
             return
         }
 
@@ -173,13 +200,13 @@ final class AgentRuntime {
 
     func startNewConversation() {
         cancel()
-        messages.removeAll()
         let snapshot = AgentSessionSnapshot(
             providerConfigurationID: apiManager.contextWindowConfigurationIdentifier
         )
         sessionSnapshot = snapshot
-        session = MemoryAgentSession(id: snapshot.sessionID)
+        session = sessionFactory(snapshot)
         resetCompactionState()
+        eventContinuation.yield(.sessionUpdated(snapshot))
     }
 
     func restoreConversation(_ history: [AgentMessage]) {
@@ -192,18 +219,14 @@ final class AgentRuntime {
     func restoreSession(_ snapshot: AgentSessionSnapshot) {
         cancel()
         sessionSnapshot = snapshot
-        messages = snapshot.legacyMessages
-        session = MemoryAgentSession(
-            id: snapshot.sessionID,
-            items: snapshot.items,
-            runState: snapshot.pendingRunState
-        )
+        session = sessionFactory(snapshot)
         resetCompactionState()
+        eventContinuation.yield(.sessionUpdated(snapshot))
         guard let state = snapshot.pendingRunState else { return }
         guard snapshot.schemaVersion == AgentSessionSnapshot.currentSchemaVersion,
               state.schemaVersion == RunState.currentSchemaVersion,
               state.sessionID == snapshot.sessionID else {
-            onError?(AgentError.approvalStateInvalid)
+            eventContinuation.yield(.run(.runFailed(.approvalStateInvalid)))
             return
         }
         let agent = makeAgent()
@@ -212,10 +235,7 @@ final class AgentRuntime {
         pendingInterruption = state.interruptions.first
         isRunning = true
         if let interruption = state.interruptions.first {
-            onApprovalRequested?(AgentPendingApproval(
-                toolName: interruption.toolCall.name,
-                summary: interruption.summary
-            ))
+            eventContinuation.yield(.run(.approvalRequired(interruption)))
         }
     }
 
@@ -249,14 +269,13 @@ final class AgentRuntime {
         token: UUID
     ) async {
         guard runToken == token, isRunning else { return }
-        refreshSystemPrompt()
 
         var preflightToolCalls: [ToolCallItem] = []
         if let explicitInvocation, explicitInvocation.kind == .skill {
             do {
                 preflightToolCalls = [try forcedSkillCall(named: explicitInvocation.name)]
             } catch {
-                finishWithError(error, token: token)
+                await finishWithError(error, token: token)
                 return
             }
         } else if let explicitInvocation,
@@ -267,12 +286,6 @@ final class AgentRuntime {
 
         await resolveContextWindowIfNeeded(token: token)
         guard runToken == token, isRunning else { return }
-        do {
-            try await session.replaceItems(AgentItemLegacyCodec.items(from: messages))
-        } catch {
-            finishWithError(AgentError.sessionFailure(error.localizedDescription), token: token)
-            return
-        }
         let agent = makeAgent()
         activeAgent = agent
         bind(
@@ -314,7 +327,6 @@ final class AgentRuntime {
                 let result = try await run.result.value
                 _ = await events.result
                 guard let self, self.runToken == token else { return }
-                self.messages = AgentItemLegacyCodec.messages(from: result.history)
                 await self.updateSessionSnapshot()
                 self.pendingRunState = result.resumableState
                 self.pendingInterruption = result.interruptions.first
@@ -322,46 +334,25 @@ final class AgentRuntime {
                     self.isRunning = false
                     self.activeRun = nil
                     self.activeAgent = nil
-                    self.onCompleted?()
+                    self.eventContinuation.yield(.run(.runCompleted))
                 } else if let interruption = result.interruptions.first {
-                    self.onApprovalRequested?(AgentPendingApproval(
-                        toolName: interruption.toolCall.name,
-                        summary: interruption.summary
-                    ))
+                    self.eventContinuation.yield(.run(.approvalRequired(interruption)))
                 }
             } catch {
                 _ = await events.result
                 guard let self, self.runToken == token else { return }
-                self.finishWithError(error, token: token)
+                await self.finishWithError(error, token: token)
             }
         }
     }
 
     private func consume(_ event: AgentRunEvent) {
         switch event {
-        case .modelStarted:
-            onAssistantResponseStarted?()
-        case .textDelta(let text):
-            onAssistantText?(text)
-        case .toolCallStarted(let call):
-            onToolStarted?(call.name)
-        case .toolCallCompleted(let item):
-            let result = legacyResult(from: item)
-            onToolFinished?(item.toolName, result)
-        case .approvalRequired:
-            // UI delivery waits for `RunResult`, after the serializable state has been saved.
+        case .approvalRequired, .runCompleted, .runFailed:
+            // Terminal and approval events are emitted only after the Session snapshot is current.
             break
-        case .contextCompactionStarted:
-            onContextCompactionStarted?()
-        case .contextCompacted(let event):
-            onContextCompacted?(AgentContextCompactionEvent(
-                summarizedMessageCount: event.summarizedItemCount,
-                retainedMessageCount: event.retainedItemCount,
-                estimatedTokensBeforeCompaction: event.estimatedTokensBeforeCompaction
-            ))
-        case .runStarted, .agentStarted, .modelCompleted, .guardrailEvaluated, .usageUpdated,
-             .handoff, .runCompleted, .runFailed:
-            break
+        default:
+            eventContinuation.yield(.run(event))
         }
     }
 
@@ -393,7 +384,7 @@ final class AgentRuntime {
             id: "desktop-companion",
             name: "Desktop Companion Agent",
             instructions: .fixed(makeSystemPrompt()),
-            tools: LegacyAgentRuntimeAdapter.makeTools(registry: registry),
+            tools: registry.allTypedTools,
             inputGuardrails: [AnyInputGuardrail(NonEmptyInputGuardrail<AppAgentContext>())],
             outputGuardrails: [AnyOutputGuardrail(AppAgentOutputGuardrail())],
             toolGuardrails: [AnyToolGuardrail(AppAgentToolGuardrail())]
@@ -478,15 +469,6 @@ final class AgentRuntime {
         """
     }
 
-    private func refreshSystemPrompt() {
-        let prompt = makeSystemPrompt()
-        if messages.first?.role == .system {
-            messages[0].content = prompt
-        } else if !messages.isEmpty {
-            messages.insert(.system(prompt), at: 0)
-        }
-    }
-
     private func makeSystemPrompt() -> String {
         let environment = """
 
@@ -509,32 +491,15 @@ final class AgentRuntime {
         return systemPromptProvider() + environment + (additionalSystemContext ?? "")
     }
 
-    private func legacyResult(from item: ToolResultItem) -> AgentToolExecutionResult {
-        guard let data = item.content.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let ok = object["ok"] as? Bool,
-              let result = object["result"] as? String else {
-            return AgentToolExecutionResult(
-                content: item.content,
-                isError: item.isError,
-                imagePaths: item.imagePaths
-            )
-        }
-        return AgentToolExecutionResult(
-            content: result,
-            isError: item.isError || !ok,
-            imagePaths: item.imagePaths
-        )
-    }
-
-    private func finishWithError(_ error: Error, token: UUID) {
+    private func finishWithError(_ error: Error, token: UUID) async {
         guard runToken == token else { return }
+        await updateSessionSnapshot()
         isRunning = false
         activeRun = nil
         activeAgent = nil
         pendingRunState = nil
         pendingInterruption = nil
-        onError?(error)
+        eventContinuation.yield(.run(.runFailed(Self.agentError(from: error))))
     }
 
     private func resetCompactionState() {
@@ -550,10 +515,16 @@ final class AgentRuntime {
                 agentID: "desktop-companion",
                 providerConfigurationID: apiManager.contextWindowConfigurationIdentifier
             )
+            eventContinuation.yield(.sessionUpdated(sessionSnapshot))
         } catch {
             // Runner already retains the in-memory result. Keep the last export if
             // a custom session cannot be read back, and surface persistence errors
             // through the normal terminal path on its next operation.
         }
+    }
+
+    private static func agentError(from error: Error) -> AgentError {
+        if let error = error as? AgentError { return error }
+        return .modelRequestFailed(.transport(error.localizedDescription))
     }
 }

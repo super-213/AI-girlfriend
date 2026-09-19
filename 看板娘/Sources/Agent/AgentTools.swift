@@ -29,6 +29,189 @@ extension LegacyAgentTool {
     }
 }
 
+// Strongly typed argument contracts for the callback implementations that are
+// still reused internally. No standard tool reaches business logic as raw JSON.
+struct EmptyToolArguments: Codable, Sendable {}
+struct ReadSkillArguments: Codable, Sendable { let name: String }
+struct KnowledgeBaseMutationArguments: Codable, Sendable {
+    let knowledgeBase: String?
+    let text: String?
+    let documentPath: String?
+    let title: String?
+    let source: String?
+    enum CodingKeys: String, CodingKey {
+        case knowledgeBase = "knowledge_base"
+        case text
+        case documentPath = "document_path"
+        case title, source
+    }
+}
+struct KnowledgeBaseSearchArguments: Codable, Sendable {
+    let query: String
+    let knowledgeBase: String?
+    let limit: Int?
+    enum CodingKeys: String, CodingKey {
+        case query
+        case knowledgeBase = "knowledge_base"
+        case limit
+    }
+}
+struct PathToolArguments: Codable, Sendable { let path: String }
+struct ReadDocumentArguments: Codable, Sendable {
+    let path: String
+    let maxCharacters: Int?
+    enum CodingKeys: String, CodingKey { case path; case maxCharacters = "max_characters" }
+}
+struct OpenApplicationArguments: Codable, Sendable {
+    let name: String?
+    let bundleIdentifier: String?
+    enum CodingKeys: String, CodingKey { case name; case bundleIdentifier = "bundle_identifier" }
+}
+struct WriteTextFileArguments: Codable, Sendable {
+    let path: String
+    let content: String
+    let overwrite: Bool?
+}
+struct SourceDestinationArguments: Codable, Sendable {
+    let source: String
+    let destination: String
+}
+struct DocumentSlideArguments: Codable, Sendable {
+    let title: String?
+    let body: String?
+}
+struct WriteDocumentArguments: Codable, Sendable {
+    let path: String
+    let title: String?
+    let content: String?
+    let rows: [[String]]?
+    let slides: [DocumentSlideArguments]?
+    let overwrite: Bool?
+}
+struct RunShortcutArguments: Codable, Sendable {
+    let name: String
+    let inputPath: String?
+    enum CodingKeys: String, CodingKey { case name; case inputPath = "input_path" }
+}
+struct AppleScriptArguments: Codable, Sendable { let script: String }
+struct ControlApplicationArguments: Codable, Sendable {
+    let application: String
+    let action: String
+    let menu: String?
+    let menuItem: String?
+    let text: String?
+    enum CodingKeys: String, CodingKey {
+        case application, action, menu
+        case menuItem = "menu_item"
+        case text
+    }
+}
+struct ActionPlanArguments: Codable, Sendable {
+    let title: String
+    let steps: [String]
+    let affectedPaths: [String]?
+    enum CodingKeys: String, CodingKey { case title, steps; case affectedPaths = "affected_paths" }
+}
+struct ObserveDesktopArguments: Codable, Sendable {
+    let application: String?
+    let includeScreenshot: Bool?
+    let includeAccessibility: Bool?
+    let maxDepth: Int?
+    let maxNodes: Int?
+    enum CodingKeys: String, CodingKey {
+        case application
+        case includeScreenshot = "include_screenshot"
+        case includeAccessibility = "include_accessibility"
+        case maxDepth = "max_depth"
+        case maxNodes = "max_nodes"
+    }
+}
+struct PerformUIActionArguments: Codable, Sendable {
+    let application: String
+    let action: String
+    let elementHandle: String?
+    let label: String?
+    let role: String?
+    let scopeHandle: String?
+    let scopeLabel: String?
+    let windowHandle: String?
+    let rowLabel: String?
+    let occurrence: Int?
+    let selectedOnly: Bool?
+    let visualHandle: String?
+    let coordinateObservationID: String?
+    let text: String?
+    let path: String?
+    let paths: [String]?
+    let allowOverwrite: Bool?
+    let menuPath: [String]?
+    let x: Double?
+    let y: Double?
+    let toX: Double?
+    let toY: Double?
+    let deltaX: Int?
+    let deltaY: Int?
+    let button: String?
+    let steps: Int?
+    let durationMS: Int?
+    let holdMS: Int?
+    let inertia: Bool?
+    let key: String?
+    let keys: [String]?
+    let intervalMS: Int?
+    let modifiers: [String]?
+    let expectedText: String?
+    let expectedElement: String?
+    let expectedElementAbsent: String?
+    let expectedWindowTitle: String?
+    let expectedFocusedElement: String?
+    let expectedSelectedElement: String?
+    let recoveryPolicy: String?
+    let maxRecoveryAttempts: Int?
+    let verifyChange: Bool?
+    let verificationTimeoutMS: Int?
+    enum CodingKeys: String, CodingKey {
+        case application, action, label, role, occurrence, text, path, paths, x, y, button, steps, inertia, key, keys, modifiers
+        case elementHandle = "element_handle"
+        case scopeHandle = "scope_handle"
+        case scopeLabel = "scope_label"
+        case windowHandle = "window_handle"
+        case rowLabel = "row_label"
+        case selectedOnly = "selected_only"
+        case visualHandle = "visual_handle"
+        case coordinateObservationID = "coordinate_observation_id"
+        case allowOverwrite = "allow_overwrite"
+        case menuPath = "menu_path"
+        case toX = "to_x"
+        case toY = "to_y"
+        case deltaX = "delta_x"
+        case deltaY = "delta_y"
+        case durationMS = "duration_ms"
+        case holdMS = "hold_ms"
+        case intervalMS = "interval_ms"
+        case expectedText = "expected_text"
+        case expectedElement = "expected_element"
+        case expectedElementAbsent = "expected_element_absent"
+        case expectedWindowTitle = "expected_window_title"
+        case expectedFocusedElement = "expected_focused_element"
+        case expectedSelectedElement = "expected_selected_element"
+        case recoveryPolicy = "recovery_policy"
+        case maxRecoveryAttempts = "max_recovery_attempts"
+        case verifyChange = "verify_change"
+        case verificationTimeoutMS = "verification_timeout_ms"
+    }
+}
+struct RunCommandArguments: Codable, Sendable {
+    let command: String
+    let workingDirectory: String?
+    enum CodingKeys: String, CodingKey { case command; case workingDirectory = "working_directory" }
+}
+struct SwitchCharacterArguments: Codable, Sendable {
+    let name: String?
+    let index: Int?
+}
+struct RunAutomationArguments: Codable, Sendable { let id: String }
+
 @MainActor
 final class AgentToolRegistry {
     private var typedToolsByName: [String: AnyAgentTool<AppAgentContext>] = [:]
@@ -44,9 +227,27 @@ final class AgentToolRegistry {
         return typed.sorted { $0.name < $1.name }
     }
 
+    /// Compatibility registration for third-party and test tools. The built-in
+    /// standard catalog does not use this untyped boundary.
     func register(_ tool: any LegacyAgentTool) {
         let erased = LegacyToolAdapter<AppAgentContext>.erase(tool)
         typedToolsByName[erased.definition.name] = erased
+    }
+
+    func register(_ tool: AnyAgentTool<AppAgentContext>) {
+        typedToolsByName[tool.definition.name] = tool
+    }
+
+    private func registerLegacy<Arguments: Codable & Sendable>(
+        _ tool: any LegacyAgentTool,
+        arguments: Arguments.Type,
+        behavior: ToolBehavior? = nil
+    ) {
+        register(LegacyToolAdapter<AppAgentContext>.erase(
+            tool,
+            arguments: arguments,
+            behavior: behavior
+        ))
     }
 
     func register<T: AgentTool>(_ tool: T) where T.Context == AppAgentContext {
@@ -95,39 +296,60 @@ final class AgentToolRegistry {
     static func standard() -> AgentToolRegistry {
         let registry = AgentToolRegistry()
         registry.register(CurrentDateTimeAgentTool())
-        registry.register(CompactContextTool())
-        registry.register(ReadSkillTool())
-        registry.register(ListKnowledgeBasesTool())
-        registry.register(AddToKnowledgeBaseTool())
-        registry.register(SearchKnowledgeBaseTool())
+        registry.registerLegacy(CompactContextTool(), arguments: EmptyToolArguments.self)
+        registry.registerLegacy(ReadSkillTool(), arguments: ReadSkillArguments.self)
+        registry.registerLegacy(ListKnowledgeBasesTool(), arguments: EmptyToolArguments.self)
+        registry.registerLegacy(AddToKnowledgeBaseTool(), arguments: KnowledgeBaseMutationArguments.self)
+        registry.registerLegacy(SearchKnowledgeBaseTool(), arguments: KnowledgeBaseSearchArguments.self)
         registry.register(ListDirectoryAgentTool())
         registry.register(ReadFileAgentTool())
-        registry.register(ReadDocumentTool())
-        registry.register(GetFileInfoTool())
+        registry.registerLegacy(ReadDocumentTool(), arguments: ReadDocumentArguments.self)
+        registry.registerLegacy(GetFileInfoTool(), arguments: PathToolArguments.self)
         registry.register(SearchFilesAgentTool())
-        registry.register(OpenFileTool())
-        registry.register(RevealInFinderTool())
-        registry.register(OpenApplicationTool())
-        registry.register(WriteTextFileTool())
-        registry.register(CopyFileTool())
-        registry.register(MoveFileTool())
-        registry.register(WriteDocumentTool())
-        registry.register(ListShortcutsTool())
-        registry.register(RunShortcutTool())
-        registry.register(RunAppleScriptTool())
-        registry.register(ControlApplicationTool())
-        registry.register(ObserveDesktopTool())
-        registry.register(PerformUIActionTool())
-        registry.register(PresentActionPlanTool())
-        registry.register(UndoLastFileOperationTool())
-        registry.register(RunCommandTool())
-        registry.register(ListCharactersTool())
-        registry.register(SwitchCharacterTool())
-        registry.register(ListAutomationsTool())
-        registry.register(RunAutomationTool())
-        registry.register(GetCodexTaskStatusTool())
+        registry.registerLegacy(OpenFileTool(), arguments: PathToolArguments.self)
+        registry.registerLegacy(RevealInFinderTool(), arguments: PathToolArguments.self)
+        registry.registerLegacy(OpenApplicationTool(), arguments: OpenApplicationArguments.self)
+        registry.registerLegacy(WriteTextFileTool(), arguments: WriteTextFileArguments.self)
+        registry.registerLegacy(CopyFileTool(), arguments: SourceDestinationArguments.self)
+        registry.registerLegacy(MoveFileTool(), arguments: SourceDestinationArguments.self)
+        registry.registerLegacy(WriteDocumentTool(), arguments: WriteDocumentArguments.self)
+        registry.registerLegacy(ListShortcutsTool(), arguments: EmptyToolArguments.self)
+        registry.registerLegacy(RunShortcutTool(), arguments: RunShortcutArguments.self)
+        registry.registerLegacy(RunAppleScriptTool(), arguments: AppleScriptArguments.self)
+        registry.registerLegacy(ControlApplicationTool(), arguments: ControlApplicationArguments.self)
+        registry.registerLegacy(ObserveDesktopTool(), arguments: ObserveDesktopArguments.self)
+        registry.registerLegacy(
+            PerformUIActionTool(),
+            arguments: PerformUIActionArguments.self,
+            behavior: .dynamicExternalSideEffect
+        )
+        registry.registerLegacy(PresentActionPlanTool(), arguments: ActionPlanArguments.self)
+        registry.registerLegacy(UndoLastFileOperationTool(), arguments: EmptyToolArguments.self)
+        registry.registerLegacy(
+            RunCommandTool(),
+            arguments: RunCommandArguments.self,
+            behavior: .dynamicExternalSideEffect
+        )
+        registry.registerLegacy(ListCharactersTool(), arguments: EmptyToolArguments.self)
+        registry.registerLegacy(SwitchCharacterTool(), arguments: SwitchCharacterArguments.self)
+        registry.registerLegacy(ListAutomationsTool(), arguments: EmptyToolArguments.self)
+        registry.registerLegacy(RunAutomationTool(), arguments: RunAutomationArguments.self)
+        registry.registerLegacy(GetCodexTaskStatusTool(), arguments: EmptyToolArguments.self)
         return registry
     }
+}
+
+private extension ToolBehavior {
+    static let dynamicExternalSideEffect = ToolBehavior(
+        isReadOnly: false,
+        isIdempotent: false,
+        hasExternalSideEffects: true,
+        requiresApproval: false,
+        allowsParallelExecution: false,
+        defaultTimeout: nil,
+        allowsAutomaticRetry: false,
+        riskLevel: .high
+    )
 }
 
 @MainActor

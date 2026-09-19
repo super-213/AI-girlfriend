@@ -373,17 +373,21 @@ struct AgentPhase456Tests {
             registry: registry,
             systemPromptProvider: { "system" }
         )
-        var requestedApproval = false
-        restoredRuntime.onApprovalRequested = { _ in requestedApproval = true }
+        let approvalEvent = Task { @MainActor in
+            for await event in restoredRuntime.events {
+                if case .run(.approvalRequired) = event { return true }
+            }
+            return false
+        }
         restoredRuntime.restoreSession(saved)
-        #expect(requestedApproval)
+        #expect(await approvalEvent.value)
 
         restoredRuntime.approvePendingTool()
         while restoredRuntime.isRunning { await Task.yield() }
 
         #expect(await counter.count == 1)
         #expect(restoredRuntime.sessionSnapshot.pendingRunState == nil)
-        #expect(restoredRuntime.messages.contains(where: {
+        #expect(restoredRuntime.sessionSnapshot.legacyMessages.contains(where: {
             $0.role == .assistant && $0.content == "resumed"
         }))
     }
@@ -401,7 +405,7 @@ struct AgentPhase456Tests {
     }
 
     @Test @MainActor
-    func incompatiblePersistedRunStateFailsClosed() {
+    func incompatiblePersistedRunStateFailsClosed() async {
         let runID = UUID()
         let call = ToolCallItem(id: "unsafe", name: "risky", arguments: "{}")
         let state = RunState(
@@ -429,22 +433,30 @@ struct AgentPhase456Tests {
             registry: AgentToolRegistry(),
             systemPromptProvider: { "system" }
         )
-        var receivedError: AgentError?
-        runtime.onError = { receivedError = $0 as? AgentError }
+        let errorEvent = Task<AgentError?, Never> { @MainActor in
+            for await event in runtime.events {
+                if case .run(.runFailed(let error)) = event { return error }
+            }
+            return nil
+        }
 
         runtime.restoreSession(snapshot)
 
-        #expect(receivedError == .approvalStateInvalid)
+        #expect(await errorEvent.value == AgentError.approvalStateInvalid)
         #expect(runtime.isRunning == false)
     }
 
     @Test
     func legacyConversationDecodingMigratesToSessionSnapshot() throws {
-        let conversation = DialogConversation(agentHistory: [.user("legacy")])
+        let conversation = DialogConversation()
         var object = try #require(
             JSONSerialization.jsonObject(with: JSONEncoder().encode(conversation)) as? [String: Any]
         )
+        #expect(object["agentHistory"] == nil)
         object.removeValue(forKey: "agentSession")
+        object["agentHistory"] = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode([AgentMessage.user("legacy")])
+        )
         let legacyData = try JSONSerialization.data(withJSONObject: object)
         let migrated = try JSONDecoder().decode(DialogConversation.self, from: legacyData)
 

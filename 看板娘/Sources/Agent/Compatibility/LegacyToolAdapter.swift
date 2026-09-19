@@ -32,6 +32,88 @@ struct LegacyToolAdapter<Context: Sendable>: Sendable {
             try await box.invoke(rawArguments: rawArguments)
         }
     }
+
+    /// Keeps the existing business implementation while making Codable
+    /// arguments the mandatory boundary presented to AgentRunner.
+    @MainActor
+    static func erase<Arguments: Codable & Sendable>(
+        _ tool: any LegacyAgentTool,
+        arguments: Arguments.Type,
+        behavior: ToolBehavior? = nil
+    ) -> AnyAgentTool<Context> {
+        let definition = ToolDefinition(
+            name: tool.definition.name,
+            description: tool.definition.description,
+            parameters: (try? JSONValue(any: tool.definition.parameters)) ?? .object([:])
+        )
+        let box = LegacyToolBox(tool)
+        let resolvedBehavior = behavior ?? ToolBehavior(
+            isReadOnly: !tool.requiresConfirmation,
+            isIdempotent: !tool.requiresConfirmation,
+            hasExternalSideEffects: tool.requiresConfirmation,
+            requiresApproval: tool.requiresConfirmation,
+            allowsParallelExecution: false,
+            defaultTimeout: nil,
+            allowsAutomaticRetry: false,
+            riskLevel: tool.requiresConfirmation ? .high : .low
+        )
+        return AnyAgentTool(
+            definition: definition,
+            behavior: resolvedBehavior,
+            argumentBoundary: .codable,
+            requiresApproval: { rawArguments in
+                let canonical = try Self.canonicalArguments(
+                    rawArguments,
+                    as: Arguments.self,
+                    toolName: definition.name
+                )
+                return try await box.requiresApproval(rawArguments: canonical)
+            },
+            approvalSummary: { rawArguments in
+                guard let canonical = try? Self.canonicalArguments(
+                    rawArguments,
+                    as: Arguments.self,
+                    toolName: definition.name
+                ) else { return "执行工具 \(definition.name)" }
+                return await box.approvalSummary(rawArguments: canonical)
+            },
+            invoke: { _, rawArguments in
+                let canonical = try Self.canonicalArguments(
+                    rawArguments,
+                    as: Arguments.self,
+                    toolName: definition.name
+                )
+                return try await box.invoke(rawArguments: canonical)
+            }
+        )
+    }
+
+    private static func canonicalArguments<Arguments: Codable & Sendable>(
+        _ rawArguments: String,
+        as type: Arguments.Type,
+        toolName: String
+    ) throws -> String {
+        guard let data = rawArguments.data(using: .utf8) else {
+            throw AgentError.invalidToolArguments(toolName: toolName, detail: "参数不是 UTF-8 文本")
+        }
+        let value: Arguments
+        do {
+            value = try JSONDecoder().decode(type, from: data)
+        } catch {
+            throw AgentError.invalidToolArguments(toolName: toolName, detail: error.localizedDescription)
+        }
+        do {
+            let encoded = try JSONEncoder().encode(value)
+            guard let canonical = String(data: encoded, encoding: .utf8) else {
+                throw AgentError.invalidToolArguments(toolName: toolName, detail: "参数无法编码为 UTF-8")
+            }
+            return canonical
+        } catch let error as AgentError {
+            throw error
+        } catch {
+            throw AgentError.invalidToolArguments(toolName: toolName, detail: error.localizedDescription)
+        }
+    }
 }
 
 private final class LegacyToolBox: @unchecked Sendable {

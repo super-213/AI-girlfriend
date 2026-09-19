@@ -214,10 +214,17 @@ final class AgentRunner: AgentRunning, Sendable {
                 await traceCompaction(compaction, trace: trace)
             }
             let instructions = try await startingAgent.instructions.resolve(using: context)
-            if !allItems.contains(where: {
-                if case .message(let message) = $0 { return message.role == .system }
+            if let systemIndex = allItems.firstIndex(where: {
+                if case .message(let message) = $0 {
+                    return message.role == .system && message.contextKind == nil
+                }
                 return false
             }) {
+                allItems[systemIndex] = .message(AgentMessageItem(
+                    role: .system,
+                    content: instructions
+                ))
+            } else {
                 newItems.append(.message(AgentMessageItem(role: .system, content: instructions)))
             }
             newItems.append(.message(AgentMessageItem(

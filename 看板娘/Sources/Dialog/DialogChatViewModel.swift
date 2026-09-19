@@ -106,7 +106,6 @@ struct DialogConversation: Identifiable, Equatable, Codable {
     let id: UUID
     var title: String
     var messages: [DialogMessage]
-    var agentHistory: [AgentMessage]
     var agentSession: AgentSessionSnapshot
     let createdAt: Date
     var updatedAt: Date
@@ -117,7 +116,6 @@ struct DialogConversation: Identifiable, Equatable, Codable {
         id: UUID = UUID(),
         title: String = "新对话",
         messages: [DialogMessage] = [],
-        agentHistory: [AgentMessage] = [],
         agentSession: AgentSessionSnapshot? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now,
@@ -128,12 +126,10 @@ struct DialogConversation: Identifiable, Equatable, Codable {
         self.title = title
         self.messages = messages
         let resolvedSession = agentSession ?? AgentSessionSnapshot(
-            legacyMessages: agentHistory,
             sessionID: id.uuidString,
             createdAt: createdAt,
             updatedAt: updatedAt
         )
-        self.agentHistory = resolvedSession.legacyMessages
         self.agentSession = resolvedSession
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -150,21 +146,35 @@ struct DialogConversation: Identifiable, Equatable, Codable {
         id = try container.decode(UUID.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
         messages = try container.decode([DialogMessage].self, forKey: .messages)
-        agentHistory = try container.decodeIfPresent([AgentMessage].self, forKey: .agentHistory) ?? []
+        let legacyHistory = try container.decodeIfPresent(
+            [AgentMessage].self,
+            forKey: .agentHistory
+        ) ?? []
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         agentSession = try container.decodeIfPresent(
             AgentSessionSnapshot.self,
             forKey: .agentSession
         ) ?? AgentSessionSnapshot(
-            legacyMessages: agentHistory,
+            legacyMessages: legacyHistory,
             sessionID: id.uuidString,
             createdAt: createdAt,
             updatedAt: updatedAt
         )
-        agentHistory = agentSession.legacyMessages
         kind = try container.decodeIfPresent(DialogConversationKind.self, forKey: .kind) ?? .standard
         projectID = try container.decodeIfPresent(UUID.self, forKey: .projectID)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(messages, forKey: .messages)
+        try container.encode(agentSession, forKey: .agentSession)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(kind, forKey: .kind)
+        try container.encodeIfPresent(projectID, forKey: .projectID)
     }
 }
 
@@ -327,6 +337,7 @@ final class DialogChatViewModel: ObservableObject {
     private let conversationStore: DialogConversationStore
     private let conversationStoreSourceID = UUID()
     private var conversationStoreCancellable: AnyCancellable?
+    private var agentRuntimeEventTask: Task<Void, Never>?
     private lazy var streamTextCoalescer = StreamingTextCoalescer { [weak self] text in
         guard let self, let id = self.activeAssistantID else { return }
         self.appendAssistantChunk(text, to: id)
@@ -396,6 +407,10 @@ final class DialogChatViewModel: ObservableObject {
                     projects: change.projects
                 )
             }
+    }
+
+    deinit {
+        agentRuntimeEventTask?.cancel()
     }
 
     func sendCurrentInput() {
@@ -522,7 +537,7 @@ final class DialogChatViewModel: ObservableObject {
            conversations[index].kind == .standard,
            conversations[index].projectID == nil,
            conversations[index].messages.isEmpty,
-           conversations[index].agentHistory.isEmpty {
+           conversations[index].agentSession.items.isEmpty {
             conversations.remove(at: index)
         }
         let project = DialogProject(name: trimmedName, sourceDirectory: directory.path)
@@ -675,79 +690,84 @@ final class DialogChatViewModel: ObservableObject {
     }
 
     private func configureAgentRuntime() {
-        agentRuntime.onContextCompactionStarted = { [weak self] in
-            guard let self else { return }
-            self.streamTextCoalescer.flush()
-            self.isRequesting = true
-            self.isExecutingTool = false
-            self.isCompactingContext = true
-        }
-        agentRuntime.onAssistantResponseStarted = { [weak self] in
-            guard let self else { return }
-            self.streamTextCoalescer.flush()
-            let id = UUID()
-            self.activeAssistantID = id
-            self.isRequesting = true
-            self.isExecutingTool = false
-            self.isCompactingContext = false
-            self.messages.append(DialogMessage(id: id, role: .assistant, content: ""))
-        }
-        agentRuntime.onAssistantText = { [weak self] chunk in
-            self?.streamTextCoalescer.append(chunk)
-        }
-        agentRuntime.onToolStarted = { [weak self] name in
-            guard let self else { return }
-            self.streamTextCoalescer.flush()
-            self.isExecutingTool = true
-            self.fillEmptyAssistantMessage("正在调用工具：\(name)…")
-        }
-        agentRuntime.onToolFinished = { [weak self] name, result in
-            guard let self else { return }
-            self.isExecutingTool = false
-            if result.isError {
-                self.messages.append(DialogMessage(
-                    role: .tool,
-                    content: "工具 \(name) 执行失败：\(result.content)"
-                ))
-            } else if let artifact = Self.artifact(toolName: name, result: result.content) {
-                self.messages.append(DialogMessage(role: .tool, content: "", artifacts: [artifact]))
-            } else if self.defaults.bool(forKey: AgentWorkspaceSettings.showToolAuditInConversationKey) {
-                self.messages.append(DialogMessage(role: .tool, content: "工具 \(name) 已完成"))
+        agentRuntimeEventTask?.cancel()
+        agentRuntimeEventTask = Task { @MainActor [weak self, agentRuntime] in
+            for await event in agentRuntime.events {
+                guard let self else { return }
+                self.consumeAgentRuntimeEvent(event)
             }
         }
-        agentRuntime.onApprovalRequested = { [weak self] approval in
-            guard let self else { return }
-            self.streamTextCoalescer.flush()
-            self.isRequesting = true
-            self.isExecutingTool = false
-            self.pendingToolSummary = approval.summary
-            self.fillEmptyAssistantMessage("请求调用工具：\(approval.toolName)")
-            self.showToolConfirmation = true
-            self.synchronizeSelectedConversation(persist: true)
-        }
-        agentRuntime.onCompleted = { [weak self] in
-            guard let self else { return }
-            self.streamTextCoalescer.flush()
-            self.isRequesting = false
-            self.isExecutingTool = false
-            self.isCompactingContext = false
-            self.fillEmptyAssistantMessage("（模型没有返回文本）")
-            self.refreshCacheStatus()
-            self.synchronizeSelectedConversation(persist: true)
-            self.sendNextQueuedMessageIfPossible()
-        }
-        agentRuntime.onError = { [weak self] error in
-            guard let self else { return }
-            self.streamTextCoalescer.flush()
-            self.isRequesting = false
-            self.isExecutingTool = false
-            self.isCompactingContext = false
-            self.showToolConfirmation = false
-            self.pendingToolSummary = ""
-            self.fillEmptyAssistantMessage("请求失败：\(error.localizedDescription)")
-            self.refreshCacheStatus()
-            self.synchronizeSelectedConversation(persist: true)
-            self.sendNextQueuedMessageIfPossible()
+    }
+
+    private func consumeAgentRuntimeEvent(_ event: AgentRuntimeEvent) {
+        switch event {
+        case .sessionUpdated(let snapshot):
+            guard let index = conversations.firstIndex(where: { $0.id == selectedConversationID }) else {
+                return
+            }
+            conversations[index].agentSession = snapshot
+        case .run(.contextCompactionStarted):
+            streamTextCoalescer.flush()
+            isRequesting = true
+            isExecutingTool = false
+            isCompactingContext = true
+        case .run(.modelStarted):
+            streamTextCoalescer.flush()
+            let id = UUID()
+            activeAssistantID = id
+            isRequesting = true
+            isExecutingTool = false
+            isCompactingContext = false
+            messages.append(DialogMessage(id: id, role: .assistant, content: ""))
+        case .run(.textDelta(let chunk)):
+            streamTextCoalescer.append(chunk)
+        case .run(.toolCallStarted(let call)):
+            streamTextCoalescer.flush()
+            isExecutingTool = true
+            fillEmptyAssistantMessage("正在调用工具：\(call.name)…")
+        case .run(.toolCallCompleted(let item)):
+            isExecutingTool = false
+            let result = item.displayExecutionResult
+            if result.isError {
+                messages.append(DialogMessage(
+                    role: .tool,
+                    content: "工具 \(item.toolName) 执行失败：\(result.content)"
+                ))
+            } else if let artifact = Self.artifact(toolName: item.toolName, result: result.content) {
+                messages.append(DialogMessage(role: .tool, content: "", artifacts: [artifact]))
+            } else if defaults.bool(forKey: AgentWorkspaceSettings.showToolAuditInConversationKey) {
+                messages.append(DialogMessage(role: .tool, content: "工具 \(item.toolName) 已完成"))
+            }
+        case .run(.approvalRequired(let interruption)):
+            streamTextCoalescer.flush()
+            isRequesting = true
+            isExecutingTool = false
+            pendingToolSummary = interruption.summary
+            fillEmptyAssistantMessage("请求调用工具：\(interruption.toolCall.name)")
+            showToolConfirmation = true
+            synchronizeSelectedConversation(persist: true)
+        case .run(.runCompleted):
+            streamTextCoalescer.flush()
+            isRequesting = false
+            isExecutingTool = false
+            isCompactingContext = false
+            fillEmptyAssistantMessage("（模型没有返回文本）")
+            refreshCacheStatus()
+            synchronizeSelectedConversation(persist: true)
+            sendNextQueuedMessageIfPossible()
+        case .run(.runFailed(let error)):
+            streamTextCoalescer.flush()
+            isRequesting = false
+            isExecutingTool = false
+            isCompactingContext = false
+            showToolConfirmation = false
+            pendingToolSummary = ""
+            fillEmptyAssistantMessage("请求失败：\(error.localizedDescription)")
+            refreshCacheStatus()
+            synchronizeSelectedConversation(persist: true)
+            sendNextQueuedMessageIfPossible()
+        case .run:
+            break
         }
     }
 
@@ -773,7 +793,6 @@ final class DialogChatViewModel: ObservableObject {
         guard let index = conversations.firstIndex(where: { $0.id == selectedConversationID }) else { return }
 
         conversations[index].messages = messages
-        conversations[index].agentHistory = agentRuntime.messages
         conversations[index].agentSession = agentRuntime.sessionSnapshot
         conversations[index].title = conversations[index].kind == .pet
             ? "桌宠对话"

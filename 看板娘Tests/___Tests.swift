@@ -141,7 +141,9 @@ struct AgentFoundationTests {
     func standardRegistryExposesCoreAndAppTools() {
         let registry = AgentToolRegistry.standard()
         let names = Set(registry.definitions.map(\.name))
+        #expect(registry.allTypedTools.count == 32)
         #expect(registry.allTypedTools.count == registry.definitions.count)
+        #expect(registry.allTypedTools.allSatisfy { $0.argumentBoundary == .codable })
         #expect(Set(registry.allTypedTools.map(\.definition.name)) == names)
         #expect(names.contains("get_current_datetime"))
         #expect(names.contains("compact_context"))
@@ -255,7 +257,7 @@ struct AgentFoundationTests {
         #expect(client.requests[0][2].toolCalls?.first?.name == "read_skill")
         #expect(client.requests[0][3].name == "read_skill")
         #expect(client.requests[0][3].content?.contains("skill:weather") == true)
-        #expect(runtime.messages.last?.content == "上海天气结果")
+        #expect(runtime.sessionSnapshot.legacyMessages.last?.content == "上海天气结果")
         let trace = await tracer.records()
         #expect(trace.contains { $0.definition.kind == .tool && $0.definition.name == "read_skill" })
     }
@@ -697,21 +699,18 @@ struct AgentFoundationTests {
             registry: registry,
             systemPromptProvider: { "system" }
         )
-        var completed = false
-        runtime.onCompleted = { completed = true }
-
         await runToCompletion(runtime) {
             runtime.send("test")
         }
 
-        #expect(completed)
+        #expect(runtime.isRunning == false)
         #expect(client.requests.count == 2)
         #expect(client.requests[0].first?.content == client.requests[1].first?.content)
         #expect(client.requests[0].first?.content?.contains("当前本地时间") == false)
         #expect(client.requests[0].first?.content?.contains("get_current_datetime") == true)
         #expect(client.requests[1].last?.role == .tool)
         #expect(client.requests[1].last?.content?.contains("ok") == true)
-        #expect(runtime.messages.last?.content == "完成")
+        #expect(runtime.sessionSnapshot.legacyMessages.last?.content == "完成")
     }
 
     @Test @MainActor
@@ -736,19 +735,13 @@ struct AgentFoundationTests {
             registry: registry,
             systemPromptProvider: { "system" }
         )
-        var completed = false
-        var failed = false
-        runtime.onCompleted = { completed = true }
-        runtime.onError = { _ in failed = true }
-
         await runToCompletion(runtime) {
             runtime.send("test")
         }
 
-        #expect(completed)
-        #expect(!failed)
+        #expect(runtime.isRunning == false)
         #expect(client.requests.count == 18)
-        #expect(runtime.messages.last?.content == "完成")
+        #expect(runtime.sessionSnapshot.legacyMessages.last?.content == "完成")
     }
 
     @Test @MainActor
@@ -771,19 +764,16 @@ struct AgentFoundationTests {
             enabledSkillNameResolver: { $0.caseInsensitiveCompare("weather") == .orderedSame ? "weather" : nil },
             systemPromptProvider: { "system" }
         )
-        var exposedToolNames: [String] = []
-        runtime.onToolStarted = { exposedToolNames.append($0) }
-
         await runToCompletion(runtime) {
             runtime.send("上海今天天气怎么样")
         }
 
         #expect(client.requests.count == 2)
-        #expect(exposedToolNames == ["read_skill"])
-        #expect(runtime.messages[2].toolCalls?.first?.name == "read_skill")
-        #expect(runtime.messages[3].name == "read_skill")
-        #expect(runtime.messages[3].content?.contains("skill:weather") == true)
-        #expect(runtime.messages.last?.content == "上海天气结果")
+        let history = runtime.sessionSnapshot.legacyMessages
+        #expect(history[2].toolCalls?.first?.name == "read_skill")
+        #expect(history[3].name == "read_skill")
+        #expect(history[3].content?.contains("skill:weather") == true)
+        #expect(history.last?.content == "上海天气结果")
     }
 
     @Test @MainActor
@@ -809,9 +799,10 @@ struct AgentFoundationTests {
             runtime.send("test")
         }
 
-        #expect(runtime.messages[2].toolCalls?.first?.name == "weather")
-        #expect(runtime.messages[3].name == "weather")
-        #expect(runtime.messages[3].content?.contains("未注册的工具") == true)
+        let history = runtime.sessionSnapshot.legacyMessages
+        #expect(history[2].toolCalls?.first?.name == "weather")
+        #expect(history[3].name == "weather")
+        #expect(history[3].content?.contains("未注册的工具") == true)
     }
 
     @Test @MainActor
@@ -864,9 +855,6 @@ struct AgentFoundationTests {
             ),
             systemPromptProvider: { "system" }
         )
-        var events: [AgentContextCompactionEvent] = []
-        runtime.onContextCompacted = { events.append($0) }
-
         await runToCompletion(runtime) {
             runtime.send("第一个问题")
         }
@@ -875,12 +863,15 @@ struct AgentFoundationTests {
         }
 
         #expect(client.requestPurposes == [.conversation, .contextCompaction, .conversation])
-        #expect(events.count == 1)
+        #expect(runtime.sessionSnapshot.items.contains(where: {
+            if case .compaction = $0 { return true }
+            return false
+        }))
         #expect(client.requests[1].first?.content?.contains("Agent 会话压缩器") == true)
         #expect(client.requests[2].contains(where: { $0.contextKind == .compactionSummary }))
         #expect(client.requests[2].last == .user("第二个问题"))
         #expect(client.requests[2].contains(where: { $0.content?.contains("第一个问题") == true }) == false)
-        #expect(runtime.messages.last?.content == "新回复")
+        #expect(runtime.sessionSnapshot.legacyMessages.last?.content == "新回复")
     }
 
     @Test @MainActor
@@ -924,7 +915,7 @@ struct AgentFoundationTests {
         #expect(client.requests[2].contains(where: { $0.contextKind == .compactionSummary }))
         #expect(client.requests[2].contains(where: { $0.content?.contains("第一轮问题") == true }) == false)
         #expect(client.requests[2].contains(where: { $0.name == AgentRuntimeToolName.compactContext }))
-        #expect(runtime.messages.last?.content == "上下文已压缩")
+        #expect(runtime.sessionSnapshot.legacyMessages.last?.content == "上下文已压缩")
         let trace = await tracer.records()
         #expect(trace.contains { $0.definition.kind == .tool && $0.definition.name == AgentRuntimeToolName.compactContext })
         #expect(trace.contains { $0.definition.kind == .compaction && $0.definition.name == "context.compaction" })

@@ -78,7 +78,18 @@ final class PetViewBackend: ObservableObject {
     }
 
     private let apiManager: APIManager
-    private lazy var agentRuntime = AgentRuntime(apiManager: apiManager) { [weak self, apiManager] in
+    private lazy var agentRuntime = AgentRuntime(
+        apiManager: apiManager,
+        sessionFactory: { snapshot in
+            ExpiringAgentSession(
+                id: snapshot.sessionID,
+                items: snapshot.items,
+                runState: snapshot.pendingRunState,
+                timeout: PetConversationRetention.timeout(),
+                lastAccessAt: snapshot.items.isEmpty ? nil : snapshot.updatedAt
+            )
+        }
+    ) { [weak self, apiManager] in
         apiManager.systemPromptContent(basePrompt: self?.conversationStyle.systemPrompt)
     }
     private let automationStore: AutomationStore
@@ -93,7 +104,7 @@ final class PetViewBackend: ObservableObject {
     private var automationTimer: Timer?
     private var sleepTimer: Timer?
     private var conversationExpirationTimer: Timer?
-    private var petConversationSession = PetConversationSession()
+    private var agentRuntimeEventTask: Task<Void, Never>?
     private var petConversationID: UUID?
     private var petDialogMessages: [DialogMessage] = []
     private var activePetAssistantMessageID: UUID?
@@ -157,6 +168,7 @@ final class PetViewBackend: ObservableObject {
             automationTimer?.invalidate()
             sleepTimer?.invalidate()
             conversationExpirationTimer?.invalidate()
+            agentRuntimeEventTask?.cancel()
         }
     }
 
@@ -438,151 +450,147 @@ final class PetViewBackend: ObservableObject {
     }
 
     private func configureAgentRuntime() {
-        agentRuntime.onContextCompactionStarted = { [weak self] in
-            guard let self else { return }
-            self.isCompactingContext = true
-            self.streamedResponse = "正在压缩较早的会话上下文…"
-            self.revealOutputBox(autoHideAfter: 30)
+        agentRuntimeEventTask?.cancel()
+        agentRuntimeEventTask = Task { @MainActor [weak self, agentRuntime] in
+            for await event in agentRuntime.events {
+                guard let self else { return }
+                self.consumeAgentRuntimeEvent(event)
+            }
         }
-        agentRuntime.onAssistantResponseStarted = { [weak self] in
-            guard let self, let runID = self.activeRequestID else { return }
-            self.isCompactingContext = false
-            self.streamTextCoalescer.reset()
-            self.streamedResponse = ""
-            self.hasReceivedStreamContent = false
-            self.isExecutingCommand = false
-            switch self.activeRequestKind {
+    }
+
+    private func consumeAgentRuntimeEvent(_ event: AgentRuntimeEvent) {
+        switch event {
+        case .sessionUpdated:
+            break
+        case .run(.contextCompactionStarted):
+            isCompactingContext = true
+            streamedResponse = "正在压缩较早的会话上下文…"
+            revealOutputBox(autoHideAfter: 30)
+        case .run(.modelStarted):
+            guard let runID = activeRequestID else { return }
+            isCompactingContext = false
+            streamTextCoalescer.reset()
+            streamedResponse = ""
+            hasReceivedStreamContent = false
+            isExecutingCommand = false
+            switch activeRequestKind {
             case .conversation:
                 let messageID = UUID()
-                self.activePetAssistantMessageID = messageID
-                self.petDialogMessages.append(DialogMessage(
-                    id: messageID,
-                    role: .assistant,
-                    content: ""
-                ))
-                self.stateCoordinator.send(.conversationStarted(runID))
+                activePetAssistantMessageID = messageID
+                petDialogMessages.append(DialogMessage(id: messageID, role: .assistant, content: ""))
+                stateCoordinator.send(.conversationStarted(runID))
             case .automation:
-                self.stateCoordinator.send(.automationStarted(runID))
+                stateCoordinator.send(.automationStarted(runID))
             case nil:
                 return
             }
-        }
-        agentRuntime.onAssistantText = { [weak self] chunk in
-            guard let self, let runID = self.activeRequestID, !chunk.isEmpty else { return }
-            if !self.hasReceivedStreamContent {
-                self.hasReceivedStreamContent = true
-                switch self.activeRequestKind {
+        case .run(.textDelta(let chunk)):
+            guard let runID = activeRequestID, !chunk.isEmpty else { return }
+            if !hasReceivedStreamContent {
+                hasReceivedStreamContent = true
+                switch activeRequestKind {
                 case .conversation:
-                    self.stateCoordinator.send(.conversationStreamStarted(runID))
+                    stateCoordinator.send(.conversationStreamStarted(runID))
                 case .automation:
-                    self.stateCoordinator.send(.automationStreamStarted(runID))
+                    stateCoordinator.send(.automationStreamStarted(runID))
                 case nil:
                     return
                 }
             }
-            self.streamTextCoalescer.append(chunk)
-        }
-        agentRuntime.onToolStarted = { [weak self] name in
-            guard let self, let runID = self.activeRequestID else { return }
-            self.streamTextCoalescer.flush()
-            self.isExecutingCommand = true
-            self.streamedResponse = "正在调用工具：\(name)…"
-            if self.activeRequestKind == .conversation {
-                self.fillEmptyPetAssistantMessage("正在调用工具：\(name)…")
+            streamTextCoalescer.append(chunk)
+        case .run(.toolCallStarted(let call)):
+            guard let runID = activeRequestID else { return }
+            streamTextCoalescer.flush()
+            isExecutingCommand = true
+            streamedResponse = "正在调用工具：\(call.name)…"
+            if activeRequestKind == .conversation {
+                fillEmptyPetAssistantMessage("正在调用工具：\(call.name)…")
             }
-            self.revealOutputBox(autoHideAfter: 30)
-            self.stateCoordinator.send(.commandStarted(runID))
-        }
-        agentRuntime.onToolFinished = { [weak self] name, result in
-            guard let self else { return }
-            self.isExecutingCommand = false
-            self.isCompactingContext = false
+            revealOutputBox(autoHideAfter: 30)
+            stateCoordinator.send(.commandStarted(runID))
+        case .run(.toolCallCompleted(let item)):
+            isExecutingCommand = false
+            isCompactingContext = false
+            let result = item.displayExecutionResult
             if result.isError {
-                self.streamedResponse = "工具 \(name) 执行失败：\(result.content)"
-                self.revealOutputBox(autoHideAfter: 15)
+                streamedResponse = "工具 \(item.toolName) 执行失败：\(result.content)"
+                revealOutputBox(autoHideAfter: 15)
             }
+        case .run(.approvalRequired(let interruption)):
+            guard let runID = activeRequestID else { return }
+            streamTextCoalescer.flush()
+            isExecutingCommand = false
+            pendingCommand = interruption.summary
+            showCommandConfirm = true
+            streamedResponse = "Agent 请求调用工具：\(interruption.toolCall.name)"
+            revealOutputBox(autoHideAfter: 30)
+            stateCoordinator.send(.commandConfirmationRequested(runID))
+            if activeRequestKind == .conversation {
+                persistPetConversation(at: .now)
+            }
+        case .run(.runCompleted):
+            completeAgentRequest()
+        case .run(.runFailed(let error)):
+            failAgentRequest(error)
+        case .run:
+            break
         }
-        agentRuntime.onApprovalRequested = { [weak self] approval in
-            guard let self, let runID = self.activeRequestID else { return }
-            self.streamTextCoalescer.flush()
-            self.isExecutingCommand = false
-            self.pendingCommand = approval.summary
-            self.showCommandConfirm = true
-            self.streamedResponse = "Agent 请求调用工具：\(approval.toolName)"
-            self.revealOutputBox(autoHideAfter: 30)
-            self.stateCoordinator.send(.commandConfirmationRequested(runID))
-            if self.activeRequestKind == .conversation {
-                self.persistPetConversation(at: .now)
-            }
-        }
-        agentRuntime.onCompleted = { [weak self] in
-            guard let self, let runID = self.activeRequestID else { return }
-            self.streamTextCoalescer.flush()
-            self.isExecutingCommand = false
-            self.isCompactingContext = false
-            let kind = self.activeRequestKind
-            if self.streamedResponse.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                self.streamedResponse = "模型没有返回内容，需要你补充说明或重试。"
-                switch kind {
-                case .conversation:
-                    self.stateCoordinator.send(.conversationNeedsInput(runID))
-                case .automation:
-                    self.stateCoordinator.send(.automationFailed(runID, "模型没有返回内容"))
-                case nil:
-                    return
-                }
-            } else {
-                switch kind {
-                case .conversation:
-                    self.stateCoordinator.send(.conversationCompleted(runID))
-                case .automation:
-                    self.stateCoordinator.send(.automationCompleted(runID))
-                case nil:
-                    return
-                }
-            }
-            self.revealOutputBox(autoHideAfter: self.configuredBubbleDuration)
-            if kind == .conversation {
-                self.fillEmptyPetAssistantMessage("（模型没有返回文本）")
-                self.recordPetConversationAndScheduleExpiration()
-            }
-            self.activeRequestID = nil
-            self.activeRequestKind = nil
-            if kind == .conversation {
-                self.schedulePetConversationExpiration()
-            }
-        }
-        agentRuntime.onError = { [weak self] error in
-            guard let self, let runID = self.activeRequestID else { return }
-            self.streamTextCoalescer.reset()
-            let message = error.localizedDescription
-            self.isExecutingCommand = false
-            self.isCompactingContext = false
-            self.showCommandConfirm = false
-            self.pendingCommand = ""
-            self.streamedResponse = "请求失败：\(message)"
-            if self.activeRequestKind == .conversation {
-                self.fillEmptyPetAssistantMessage("请求失败：\(message)")
-            }
-            self.revealOutputBox(autoHideAfter: 15)
-            let kind = self.activeRequestKind
+    }
+
+    private func completeAgentRequest() {
+        guard let runID = activeRequestID else { return }
+        streamTextCoalescer.flush()
+        isExecutingCommand = false
+        isCompactingContext = false
+        let kind = activeRequestKind
+        if streamedResponse.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            streamedResponse = "模型没有返回内容，需要你补充说明或重试。"
             switch kind {
-            case .conversation:
-                self.stateCoordinator.send(.conversationFailed(runID, message))
-            case .automation:
-                self.stateCoordinator.send(.automationFailed(runID, message))
-            case nil:
-                return
+            case .conversation: stateCoordinator.send(.conversationNeedsInput(runID))
+            case .automation: stateCoordinator.send(.automationFailed(runID, "模型没有返回内容"))
+            case nil: return
             }
-            if kind == .conversation {
-                self.recordPetConversationAndScheduleExpiration()
-            }
-            self.activeRequestID = nil
-            self.activeRequestKind = nil
-            if kind == .conversation {
-                self.schedulePetConversationExpiration()
+        } else {
+            switch kind {
+            case .conversation: stateCoordinator.send(.conversationCompleted(runID))
+            case .automation: stateCoordinator.send(.automationCompleted(runID))
+            case nil: return
             }
         }
+        revealOutputBox(autoHideAfter: configuredBubbleDuration)
+        if kind == .conversation {
+            fillEmptyPetAssistantMessage("（模型没有返回文本）")
+            recordPetConversationAndScheduleExpiration()
+        }
+        activeRequestID = nil
+        activeRequestKind = nil
+        if kind == .conversation { schedulePetConversationExpiration() }
+    }
+
+    private func failAgentRequest(_ error: AgentError) {
+        guard let runID = activeRequestID else { return }
+        streamTextCoalescer.reset()
+        let message = error.localizedDescription
+        isExecutingCommand = false
+        isCompactingContext = false
+        showCommandConfirm = false
+        pendingCommand = ""
+        streamedResponse = "请求失败：\(message)"
+        if activeRequestKind == .conversation {
+            fillEmptyPetAssistantMessage("请求失败：\(message)")
+        }
+        revealOutputBox(autoHideAfter: 15)
+        let kind = activeRequestKind
+        switch kind {
+        case .conversation: stateCoordinator.send(.conversationFailed(runID, message))
+        case .automation: stateCoordinator.send(.automationFailed(runID, message))
+        case nil: return
+        }
+        if kind == .conversation { recordPetConversationAndScheduleExpiration() }
+        activeRequestID = nil
+        activeRequestKind = nil
+        if kind == .conversation { schedulePetConversationExpiration() }
     }
 
     private func appendStreamedResponse(_ text: String) {
@@ -831,12 +839,8 @@ final class PetViewBackend: ObservableObject {
             clearPetConversationState()
             return
         }
-        loadPetConversation(storedConversation)
-        let snapshot = petConversationSession.snapshotForNextInput(
-            at: date,
-            timeout: PetConversationRetention.timeout()
-        )
-        guard let snapshot, !snapshot.items.isEmpty else {
+        guard !isPetConversationExpired(storedConversation, at: date),
+              !storedConversation.agentSession.items.isEmpty else {
             conversationStore.deleteConversation(
                 storedConversation.id,
                 sourceID: conversationStoreSourceID
@@ -844,7 +848,8 @@ final class PetViewBackend: ObservableObject {
             clearPetConversationState()
             return
         }
-        restorePetRuntime(snapshot)
+        loadPetConversation(storedConversation)
+        restorePetRuntime(storedConversation.agentSession)
     }
 
     private func recordPetConversationAndScheduleExpiration(at date: Date = .now) {
@@ -862,27 +867,21 @@ final class PetViewBackend: ObservableObject {
             id: petConversationID,
             title: "桌宠对话",
             messages: petDialogMessages,
-            agentHistory: agentRuntime.messages,
             agentSession: agentRuntime.sessionSnapshot,
             createdAt: createdAt,
             updatedAt: date,
             kind: .pet
         )
-        petConversationSession.record(snapshot: conversation.agentSession, at: date)
         conversationStore.upsertPetConversation(conversation, sourceID: conversationStoreSourceID)
     }
 
     private func restorePersistedPetConversation(at date: Date = .now) {
         guard let conversation = conversationStore.petConversation else { return }
-        loadPetConversation(conversation)
-        petConversationSession.expireIfNeeded(
-            at: date,
-            timeout: PetConversationRetention.timeout()
-        )
-        if petConversationSession.isEmpty {
+        if isPetConversationExpired(conversation, at: date) || conversation.agentSession.items.isEmpty {
             conversationStore.deleteConversation(conversation.id, sourceID: conversationStoreSourceID)
             clearPetConversationState()
         } else {
+            loadPetConversation(conversation)
             restorePetRuntime(conversation.agentSession)
             schedulePetConversationExpiration(at: date)
         }
@@ -892,8 +891,6 @@ final class PetViewBackend: ObservableObject {
         petConversationID = conversation.id
         petDialogMessages = conversation.messages
         activePetAssistantMessageID = nil
-        petConversationSession.destroy()
-        petConversationSession.record(snapshot: conversation.agentSession, at: conversation.updatedAt)
     }
 
     private func restorePetRuntime(_ snapshot: AgentSessionSnapshot) {
@@ -913,12 +910,13 @@ final class PetViewBackend: ObservableObject {
         // A running foreground conversation owns the Runtime and resets the
         // inactivity clock when it finishes.
         guard activeRequestKind != .conversation else { return }
-        let timeout = PetConversationRetention.timeout()
-        petConversationSession.expireIfNeeded(at: date, timeout: timeout)
-        guard let remaining = petConversationSession.remainingLifetime(at: date, timeout: timeout) else {
+        guard let conversation = conversationStore.petConversation,
+              !conversation.agentSession.items.isEmpty else {
             clearRuntimeIfPetConversationExpired()
             return
         }
+        guard let timeout = PetConversationRetention.timeout() else { return }
+        let remaining = max(timeout - date.timeIntervalSince(conversation.updatedAt), 0)
         guard remaining > 0 else {
             destroyPersistedPetConversation()
             return
@@ -935,11 +933,11 @@ final class PetViewBackend: ObservableObject {
     private func expirePetConversationIfNeeded(at date: Date = .now) {
         conversationExpirationTimer?.invalidate()
         conversationExpirationTimer = nil
-        petConversationSession.expireIfNeeded(
-            at: date,
-            timeout: PetConversationRetention.timeout()
-        )
-        if petConversationSession.isEmpty {
+        guard let conversation = conversationStore.petConversation else {
+            clearRuntimeIfPetConversationExpired()
+            return
+        }
+        if isPetConversationExpired(conversation, at: date) {
             destroyPersistedPetConversation()
         } else {
             schedulePetConversationExpiration(at: date)
@@ -959,7 +957,6 @@ final class PetViewBackend: ObservableObject {
     private func clearPetConversationState() {
         conversationExpirationTimer?.invalidate()
         conversationExpirationTimer = nil
-        petConversationSession.destroy()
         petConversationID = nil
         petDialogMessages = []
         activePetAssistantMessageID = nil
@@ -967,8 +964,16 @@ final class PetViewBackend: ObservableObject {
     }
 
     private func clearRuntimeIfPetConversationExpired() {
-        guard petConversationSession.isEmpty, activeRequestID == nil else { return }
+        guard conversationStore.petConversation == nil, activeRequestID == nil else { return }
         agentRuntime.startNewConversation()
+    }
+
+    private func isPetConversationExpired(
+        _ conversation: DialogConversation,
+        at date: Date
+    ) -> Bool {
+        guard let timeout = PetConversationRetention.timeout() else { return false }
+        return date.timeIntervalSince(conversation.updatedAt) >= timeout
     }
 
     private var interactionDuration: TimeInterval? {

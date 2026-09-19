@@ -1,8 +1,14 @@
 import Foundation
 
+enum ToolArgumentBoundary: Equatable, Sendable {
+    case codable
+    case rawJSON
+}
+
 struct AnyAgentTool<Context: Sendable>: Sendable {
     let definition: ToolDefinition
     let behavior: ToolBehavior
+    let argumentBoundary: ToolArgumentBoundary
     private let invokeValue: @Sendable (ToolContext<Context>, String) async throws -> ToolInvocationOutput
     private let requiresApprovalValue: @Sendable (String) async throws -> Bool
     private let approvalSummaryValue: @Sendable (String) async -> String
@@ -10,6 +16,7 @@ struct AnyAgentTool<Context: Sendable>: Sendable {
     init<T: AgentTool>(_ tool: T) where T.Context == Context {
         definition = T.definition
         behavior = T.behavior
+        argumentBoundary = .codable
         requiresApprovalValue = { _ in T.behavior.requiresApproval }
         approvalSummaryValue = { _ in "执行工具 \(T.definition.name)" }
         invokeValue = { context, rawArguments in
@@ -38,12 +45,14 @@ struct AnyAgentTool<Context: Sendable>: Sendable {
     init(
         definition: ToolDefinition,
         behavior: ToolBehavior = .readOnly,
+        argumentBoundary: ToolArgumentBoundary = .rawJSON,
         requiresApproval: @escaping @Sendable (String) async throws -> Bool = { _ in false },
         approvalSummary: @escaping @Sendable (String) async -> String = { _ in "" },
         invoke: @escaping @Sendable (ToolContext<Context>, String) async throws -> ToolInvocationOutput
     ) {
         self.definition = definition
         self.behavior = behavior
+        self.argumentBoundary = argumentBoundary
         requiresApprovalValue = requiresApproval
         approvalSummaryValue = approvalSummary
         invokeValue = invoke

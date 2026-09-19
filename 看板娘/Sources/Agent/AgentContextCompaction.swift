@@ -42,12 +42,6 @@ struct AgentContextCompactionPlan: Equatable {
     let estimatedTokensBeforeCompaction: Int
 }
 
-struct AgentContextCompactionEvent: Equatable {
-    let summarizedMessageCount: Int
-    let retainedMessageCount: Int
-    let estimatedTokensBeforeCompaction: Int
-}
-
 struct AgentContextManager {
     let policy: AgentContextCompactionPolicy
 

@@ -2,7 +2,16 @@ import Foundation
 import Testing
 @testable import 看板娘
 
-struct PetConversationSessionTests {
+struct ExpiringAgentSessionTests {
+    private final class Clock: @unchecked Sendable {
+        private let lock = NSLock()
+        private var date: Date
+
+        init(_ date: Date) { self.date = date }
+        func now() -> Date { lock.withLock { date } }
+        func advance(_ interval: TimeInterval) { lock.withLock { date.addTimeInterval(interval) } }
+    }
+
     @Test
     func retentionDefaultsToThirtyMinutesAndSupportsNeverExpiring() {
         #expect(PetConversationRetention.minutes(storedValue: nil) == 30)
@@ -18,47 +27,50 @@ struct PetConversationSessionTests {
     }
 
     @Test
-    func sessionKeepsHistoryUntilTheConfiguredTimeout() {
+    func sessionKeepsHistoryUntilTheConfiguredTimeout() async throws {
         let start = Date(timeIntervalSince1970: 1_000)
         let history: [AgentMessage] = [.system("system"), .user("first")]
-        var session = PetConversationSession()
-        session.record(history: history, at: start)
-
-        let retained = session.historyForNextInput(
-            at: start.addingTimeInterval(29 * 60 + 59),
-            timeout: 30 * 60
+        let clock = Clock(start)
+        let session = ExpiringAgentSession(
+            items: AgentItemLegacyCodec.items(from: history),
+            timeout: 30 * 60,
+            lastAccessAt: start,
+            now: clock.now
         )
+        clock.advance(29 * 60 + 59)
 
-        #expect(retained == history)
+        #expect(AgentItemLegacyCodec.messages(from: await session.loadItems()) == history)
     }
 
     @Test
-    func sessionDestroysHistoryAtTheConfiguredTimeout() {
+    func sessionDestroysHistoryAtTheConfiguredTimeout() async throws {
         let start = Date(timeIntervalSince1970: 1_000)
-        var session = PetConversationSession()
-        session.record(history: [.system("system"), .user("first")], at: start)
-
-        let expired = session.historyForNextInput(
-            at: start.addingTimeInterval(30 * 60),
-            timeout: 30 * 60
+        let clock = Clock(start)
+        let session = ExpiringAgentSession(
+            items: AgentItemLegacyCodec.items(from: [.system("system"), .user("first")]),
+            timeout: 30 * 60,
+            lastAccessAt: start,
+            now: clock.now
         )
+        clock.advance(30 * 60)
 
-        #expect(expired.isEmpty)
-        #expect(session.lastConversationAt == nil)
+        #expect(await session.loadItems().isEmpty)
+        #expect(await session.remainingLifetime() == nil)
     }
 
     @Test
-    func sessionNeverExpiresWhenTimeoutIsDisabled() {
+    func sessionNeverExpiresWhenTimeoutIsDisabled() async throws {
         let start = Date(timeIntervalSince1970: 1_000)
         let history: [AgentMessage] = [.system("system"), .user("first")]
-        var session = PetConversationSession()
-        session.record(history: history, at: start)
-
-        let retained = session.historyForNextInput(
-            at: start.addingTimeInterval(7 * 24 * 60 * 60),
-            timeout: nil
+        let clock = Clock(start)
+        let session = ExpiringAgentSession(
+            items: AgentItemLegacyCodec.items(from: history),
+            timeout: nil,
+            lastAccessAt: start,
+            now: clock.now
         )
+        clock.advance(7 * 24 * 60 * 60)
 
-        #expect(retained == history)
+        #expect(AgentItemLegacyCodec.messages(from: await session.loadItems()) == history)
     }
 }

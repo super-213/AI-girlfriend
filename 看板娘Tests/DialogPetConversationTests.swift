@@ -69,11 +69,10 @@ struct DialogPetConversationTests {
                     DialogMessage(role: .user, content: "桌宠里的问题"),
                     DialogMessage(role: .assistant, content: "桌宠里的回复")
                 ],
-                agentHistory: [
-                    .system("system"),
-                    .user("桌宠里的问题"),
+                agentSession: AgentSessionSnapshot(legacyMessages: [
+                    .system("system"), .user("桌宠里的问题"),
                     .assistant(content: "桌宠里的回复")
-                ],
+                ]),
                 kind: .pet
             )
             store.upsertPetConversation(petConversation, sourceID: UUID())
@@ -99,8 +98,10 @@ struct DialogPetConversationTests {
             #expect(client.requests.first?.last == .user("在完整模式中继续"))
 
             client.complete(with: "已接力")
-            await waitUntil { store.petConversation?.agentHistory.last == .assistant(content: "已接力") }
-            #expect(store.petConversation?.agentHistory.last == .assistant(content: "已接力"))
+            await waitUntil {
+                store.petConversation?.agentSession.legacyMessages.last == .assistant(content: "已接力")
+            }
+            #expect(store.petConversation?.agentSession.legacyMessages.last == .assistant(content: "已接力"))
 
             viewModel.deleteConversation(petConversation.id)
             #expect(store.petConversation == nil)
