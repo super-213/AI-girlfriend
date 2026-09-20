@@ -36,9 +36,22 @@
 		62A3BF1C2D1989A0003DB0DF /* 看板娘UITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "看板娘UITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		62A3BF352D3D0000003DB0DF /* Exceptions for "看板娘" folder in "看板娘" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 62A3BF002D19899F003DB0DF /* 看板娘 */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		62A3BF032D19899F003DB0DF /* 看板娘 */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				62A3BF352D3D0000003DB0DF /* Exceptions for "看板娘" folder in "看板娘" target */,
+			);
 			path = "看板娘";
 			sourceTree = "<group>";
 		};
@@ -430,6 +443,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "看板娘/Info.plist";
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "看板娘会在你确认后操作其他应用以完成任务。";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -461,6 +475,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "看板娘/Info.plist";
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "看板娘会在你确认后操作其他应用以完成任务。";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (

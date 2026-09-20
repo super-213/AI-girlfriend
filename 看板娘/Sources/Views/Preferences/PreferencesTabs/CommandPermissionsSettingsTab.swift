@@ -16,6 +16,7 @@ struct CommandPermissionsSettingsTab: View {
     @AppStorage("commandConfirmationStyle") private var commandConfirmationStyle = "nearPet"
     @StateObject private var fileAccess = AgentFileAccessStore.shared
     @StateObject private var auditStore = AgentToolAuditStore.shared
+    @StateObject private var systemPermissions = SystemPermissionCenter()
     @State private var showAllowAllConfirmation = false
 
     private var selectedMode: CommandPermissionMode {
@@ -29,6 +30,7 @@ struct CommandPermissionsSettingsTab: View {
                     .font(.system(size: 22, weight: .semibold))
 
                 permissionNotice
+                systemPermissionsCard
                 modeCard
                 if selectedMode == .blacklist {
                     blacklistCard
@@ -45,6 +47,12 @@ struct CommandPermissionsSettingsTab: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("安全与隐私设置")
+        .onAppear {
+            systemPermissions.refresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            systemPermissions.refresh()
+        }
         .alert("允许所有命令？", isPresented: $showAllowAllConfirmation) {
             Button("取消", role: .cancel) { }
             Button("允许", role: .destructive) {
@@ -52,6 +60,93 @@ struct CommandPermissionsSettingsTab: View {
             }
         } message: {
             Text("Agent 将不再请求确认，并能以你的用户权限修改或删除本机文件、安装软件和启动其他进程。")
+        }
+    }
+
+    private var systemPermissionsCard: some View {
+        CommandPermissionCard(title: "系统权限", systemImage: "lock.shield") {
+            Text("这些权限只会在你点击请求时由 macOS 授予；Agent 运行工具时不会反复弹出系统提示。")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(spacing: 0) {
+                ForEach(Array(SystemPermissionKind.allCases.enumerated()), id: \.element.id) { index, kind in
+                    systemPermissionRow(kind)
+                    if index < SystemPermissionKind.allCases.count - 1 {
+                        Divider().padding(.vertical, DesignSpacing.md)
+                    }
+                }
+            }
+
+            if systemPermissions.accessibilityStatus != .granted
+                || systemPermissions.screenRecordingStatus != .granted {
+                Label("更改设备控制或录屏权限后，请完全退出并重新打开看板娘。", systemImage: "arrow.clockwise.circle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DesignColors.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func systemPermissionRow(_ kind: SystemPermissionKind) -> some View {
+        let status = systemPermissions.status(for: kind)
+        return HStack(alignment: .top, spacing: DesignSpacing.md) {
+            Image(systemName: kind.systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(DesignColors.primary)
+                .frame(width: 28, height: 28)
+                .background(DesignColors.primary.opacity(0.09), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+            VStack(alignment: .leading, spacing: DesignSpacing.xs) {
+                Text(kind.title)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(kind.detail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: DesignSpacing.md)
+
+            VStack(alignment: .trailing, spacing: DesignSpacing.sm) {
+                Label(status.title, systemImage: status.systemImage)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(systemPermissionStatusColor(status))
+
+                if kind == .automation {
+                    Button("管理权限") {
+                        systemPermissions.openSettings(for: kind)
+                    }
+                    .controlSize(.small)
+                } else if status == .granted {
+                    Button("打开系统设置") {
+                        systemPermissions.openSettings(for: kind)
+                    }
+                    .controlSize(.small)
+                } else {
+                    HStack(spacing: DesignSpacing.sm) {
+                        Button("打开设置") {
+                            systemPermissions.openSettings(for: kind)
+                        }
+                        Button("请求授权") {
+                            systemPermissions.request(kind)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .controlSize(.small)
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(kind.title)，\(status.title)")
+    }
+
+    private func systemPermissionStatusColor(_ status: SystemPermissionCenter.Status) -> Color {
+        switch status {
+        case .granted: return DesignColors.success
+        case .notGranted: return DesignColors.warning
+        case .perApplication: return DesignColors.info
         }
     }
 

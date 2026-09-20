@@ -449,9 +449,9 @@ private enum ComputerUseError: LocalizedError {
         case .applicationNotFound(let name):
             return "未找到正在运行的应用“\(name)”"
         case .accessibilityPermissionMissing:
-            return "尚未授予辅助功能权限。请在系统设置 → 隐私与安全性 → 辅助功能中允许看板娘。"
+            return "当前进程尚未获得设备控制权限。请在看板娘 → 偏好设置 → 安全与隐私中授权，然后完全退出并重新打开看板娘。"
         case .screenCapturePermissionMissing:
-            return "尚未授予屏幕录制权限。请在系统设置 → 隐私与安全性 → 屏幕与系统音频录制中允许看板娘。"
+            return "当前进程尚未获得录屏权限。请在看板娘 → 偏好设置 → 安全与隐私中授权，然后完全退出并重新打开看板娘。"
         case .elementNotFound(let label):
             return "未找到可操作的界面元素“\(label)”，请先重新观察界面"
         case .ambiguousElement(let message):
@@ -813,8 +813,6 @@ private final class AccessibilityComputerUseService {
 
     private func ensurePermission() throws {
         guard AXIsProcessTrusted() else {
-            let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-            _ = AXIsProcessTrustedWithOptions(options)
             throw ComputerUseError.accessibilityPermissionMissing
         }
     }
@@ -1164,7 +1162,6 @@ private final class AccessibilityComputerUseService {
 @MainActor
 private final class ScreenCaptureComputerUseService {
     static let shared = ScreenCaptureComputerUseService()
-    private var didRequestPermission = false
 
     private struct VisualObservationContext {
         let processIdentifier: pid_t?
@@ -1185,14 +1182,7 @@ private final class ScreenCaptureComputerUseService {
         performOCR: Bool = false
     ) async throws -> ScreenCaptureObservation {
         if !CGPreflightScreenCaptureAccess() {
-            if !didRequestPermission {
-                didRequestPermission = true
-                guard CGRequestScreenCaptureAccess() else {
-                    throw ComputerUseError.screenCapturePermissionMissing
-                }
-            } else {
-                throw ComputerUseError.screenCapturePermissionMissing
-            }
+            throw ComputerUseError.screenCapturePermissionMissing
         }
 
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)

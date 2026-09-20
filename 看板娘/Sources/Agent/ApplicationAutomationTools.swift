@@ -124,9 +124,7 @@ final class ControlApplicationTool: LegacyAgentTool {
     }
     func execute(arguments: [String: Any], completion: @escaping @MainActor (AgentToolExecutionResult) -> Void) {
         guard AXIsProcessTrusted() else {
-            let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-            _ = AXIsProcessTrustedWithOptions(options)
-            completion(.failure("尚未授予辅助功能权限。请在系统设置 → 隐私与安全性 → 辅助功能中允许看板娘。"))
+            completion(.failure("当前进程尚未获得设备控制权限。请在看板娘 → 偏好设置 → 安全与隐私中授权，然后完全退出并重新打开看板娘。"))
             return
         }
         guard let app = arguments["application"] as? String,
