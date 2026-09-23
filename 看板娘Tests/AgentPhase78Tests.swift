@@ -5,19 +5,25 @@ import Testing
 struct AgentPhase78Tests {
     private final class RecordingTransport: AgentHTTPTransport, @unchecked Sendable {
         private let lock = NSLock()
-        private let lines: [String]
+        private var batches: [[String]]
         private var recordedRequests: [URLRequest] = []
 
         init(lines: [String]) {
-            self.lines = lines
+            batches = [lines]
+        }
+
+        init(batches: [[String]]) {
+            self.batches = batches
         }
 
         func streamLines(
             request: URLRequest,
             runID: UUID
         ) -> AsyncThrowingStream<String, Error> {
-            lock.withLock { recordedRequests.append(request) }
-            let lines = lines
+            let lines = lock.withLock {
+                recordedRequests.append(request)
+                return batches.isEmpty ? [] : batches.removeFirst()
+            }
             return AsyncThrowingStream { continuation in
                 for line in lines { continuation.yield(line) }
                 continuation.finish()
@@ -28,6 +34,10 @@ struct AgentPhase78Tests {
 
         func lastRequest() -> URLRequest? {
             lock.withLock { recordedRequests.last }
+        }
+
+        func requests() -> [URLRequest] {
+            lock.withLock { recordedRequests }
         }
     }
 
@@ -294,6 +304,82 @@ struct AgentPhase78Tests {
         #expect(response.content == "hello")
         #expect(response.toolCalls == [ToolCallItem(id: "call-1", name: "lookup", arguments: #"{"q":"x"}"#)])
         #expect(response.usage?.totalTokens == 10)
+    }
+
+    @Test
+    func responsesToolStrictnessMatchesSchemaConstraints() {
+        let valid = ToolDefinition(
+            name: "valid",
+            description: "valid",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object(["value": .object(["type": .string("string")])]),
+                "required": .array([.string("value")]),
+                "additionalProperties": .bool(false)
+            ])
+        )
+        #expect(AgentProviderWireSupport.strictToolJSON(valid)["strict"] as? Bool == true)
+        #expect(AgentProviderWireSupport.strictToolJSON(ListDirectoryAgentTool.definition)["strict"] as? Bool == false)
+
+        let target = AgentDefinition<Void, String>(
+            id: "target",
+            name: "Target",
+            instructions: .fixed("target")
+        )
+        let handoff = AgentHandoff(target: target, description: "handoff")
+        #expect(AgentProviderWireSupport.strictToolJSON(handoff.toolDefinition)["strict"] as? Bool == false)
+    }
+
+    @Test
+    func statelessResponsesReplaysReasoningAndFunctionCallInOrder() async throws {
+        let transport = RecordingTransport(batches: [
+            [#"data: {"type":"response.completed","response":{"id":"resp-1","output":[{"type":"reasoning","id":"rs_1","encrypted_content":"opaque","summary":[]},{"type":"function_call","id":"fc_1","call_id":"call-1","name":"read_value","arguments":"{\"value\":\"ok\"}"}]}}"#],
+            [#"data: {"type":"response.completed","response":{"id":"resp-2","output":[{"type":"message","id":"msg_2","role":"assistant","content":[{"type":"output_text","text":"done"}]}]}}"#]
+        ])
+        let provider = OpenAIResponsesProvider(
+            configuration: AgentProviderConfiguration(
+                id: "openai",
+                endpoint: URL(string: "https://api.openai.com/v1/responses")!,
+                model: "test-model"
+            ),
+            transport: transport
+        )
+        let counter = InvocationCounter()
+        let agent = AgentDefinition<Void, String>(
+            id: "reasoning-agent",
+            name: "Reasoning Agent",
+            instructions: .fixed("system"),
+            tools: [AnyAgentTool(ReadTool(counter: counter))]
+        )
+        let normalizedProvider = await MainActor.run {
+            ToolCallNormalizingModelProvider(base: provider) { $0 }
+        }
+        let result = try await AgentRunner(provider: normalizedProvider).run(
+            agent: agent,
+            input: AgentInput("read"),
+            context: (),
+            session: MemoryAgentSession(),
+            configuration: RunConfiguration(retryPolicy: .none)
+        ).result.value
+
+        #expect(result.finalOutput == "done")
+        #expect(await counter.value == 1)
+        let requests = transport.requests()
+        #expect(requests.count == 2)
+        let payload = try Self.body(requests[1])
+        let input = try #require(payload["input"] as? [[String: Any]])
+        let types = input.compactMap { $0["type"] as? String }
+        #expect(types == ["message", "reasoning", "function_call", "function_call_output"])
+        #expect(input[1]["encrypted_content"] as? String == "opaque")
+        #expect(input[2]["call_id"] as? String == "call-1")
+        #expect(input[3]["call_id"] as? String == "call-1")
+        #expect(payload["store"] as? Bool == false)
+        #expect(result.history.contains(where: {
+            guard case .responseOutput(let items) = $0 else { return false }
+            return items.count == 2
+        }))
+        let encodedHistory = try JSONEncoder().encode(result.history)
+        #expect(try JSONDecoder().decode([AgentItem].self, from: encodedHistory) == result.history)
     }
 
     @Test
@@ -565,15 +651,22 @@ struct AgentPhase78Tests {
             tools: [AnyAgentTool(ReadTool(counter: counter))],
             toolGuardrails: [AnyToolGuardrail(BlockingToolOutputGuardrail())]
         )
-        await expectGuardrailFailure(
-            AgentRunner(provider: toolProvider).run(
-                agent: toolAgent,
-                input: AgentInput("run"),
-                context: (),
-                session: MemoryAgentSession()
-            ),
-            stage: .toolOutput
+        let toolRun = AgentRunner(provider: toolProvider).run(
+            agent: toolAgent,
+            input: AgentInput("run"),
+            context: (),
+            session: MemoryAgentSession()
         )
+        await expectGuardrailFailure(toolRun, stage: .toolOutput)
+        var leakedToolResult = false
+        do {
+            for try await event in toolRun.events {
+                if case .toolCallCompleted = event { leakedToolResult = true }
+            }
+        } catch {
+            // The event stream terminates with the same guardrail failure.
+        }
+        #expect(!leakedToolResult)
 
         let outputProvider = FakeProvider([ModelResponse(content: "unsafe")])
         let outputAgent = AgentDefinition<Void, String>(

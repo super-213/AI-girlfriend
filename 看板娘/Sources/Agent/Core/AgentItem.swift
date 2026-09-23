@@ -99,6 +99,8 @@ struct CompactionItem: Codable, Equatable, Sendable {
 
 enum AgentItem: Codable, Equatable, Sendable {
     case message(AgentMessageItem)
+    /// Replayable Responses output, kept in its original order for stateless continuation.
+    case responseOutput([JSONValue])
     case toolCall(ToolCallItem)
     case toolResult(ToolResultItem)
     case handoff(HandoffItem)

@@ -290,6 +290,75 @@ struct AgentPhase456Tests {
     }
 
     @Test
+    func rejectedDynamicApprovalIsNeverExecutedInParallelBatch() async throws {
+        let calls = (0..<3).map {
+            ToolCallItem(id: "read-\($0)", name: "reviewed_read", arguments: #"{"value":"ok"}"#)
+        }
+        let provider = FakeProvider([
+            ModelResponse(content: "", toolCalls: calls),
+            ModelResponse(content: "done")
+        ], supportsParallelTools: true)
+        let counter = InvocationCounter()
+        let tool = AnyAgentTool<Void>(
+            definition: ToolDefinition(
+                name: "reviewed_read",
+                description: "Read after review",
+                parameters: .object([
+                    "type": .string("object"),
+                    "properties": .object(["value": .object(["type": .string("string")])]),
+                    "required": .array([.string("value")]),
+                    "additionalProperties": .bool(false)
+                ])
+            ),
+            behavior: .readOnly,
+            requiresApproval: { _ in true },
+            invoke: { _, _ in
+                await counter.increment()
+                return ToolInvocationOutput(content: "ok")
+            }
+        )
+        let agent = AgentDefinition<Void, String>(
+            id: "reviewed-read-agent",
+            name: "Reviewed Read Agent",
+            instructions: .fixed("system"),
+            tools: [tool]
+        )
+        let runner = AgentRunner(provider: provider)
+        let session = MemoryAgentSession(id: "rejected-parallel-approval")
+        let paused = try await runner.run(
+            agent: agent,
+            input: AgentInput("read"),
+            context: (),
+            session: session,
+            configuration: RunConfiguration(maximumConcurrentTools: 2)
+        ).result.value
+        #expect(paused.interruptions.count == 3)
+        let state = try #require(paused.resumableState)
+        let decisions = Dictionary(uniqueKeysWithValues: paused.interruptions.map {
+            ($0.id, $0.toolCall.id == "read-1"
+                ? ApprovalDecision.rejected(reason: "declined")
+                : ApprovalDecision.approved)
+        })
+        let completed = try await runner.resume(
+            agent: agent,
+            from: state,
+            decisions: decisions,
+            context: (),
+            session: session,
+            configuration: RunConfiguration(maximumConcurrentTools: 2)
+        ).result.value
+
+        #expect(completed.finalOutput == "done")
+        #expect(await counter.count == 2)
+        let results = completed.newItems.compactMap { item -> ToolResultItem? in
+            guard case .toolResult(let result) = item else { return nil }
+            return result
+        }
+        #expect(results.map(\.toolCallID) == calls.map(\.id))
+        #expect(results[1].isError && results[1].content == "declined")
+    }
+
+    @Test
     func persistentAndExpiringSessionsPreserveAndExpireStructuredState() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("agent-session-\(UUID().uuidString)", isDirectory: true)

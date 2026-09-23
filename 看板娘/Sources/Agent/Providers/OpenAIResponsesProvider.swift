@@ -31,7 +31,7 @@ struct OpenAIResponsesStreamParser: AgentStreamParser {
               let response = json["response"] as? [String: Any] else { return [] }
         completed = true
         responseID = response["id"] as? String
-        let parsed = Self.response(response, fallbackText: text)
+        let parsed = try Self.response(response, fallbackText: text)
         text = parsed.content
         return [.completed(parsed)]
     }
@@ -43,10 +43,12 @@ struct OpenAIResponsesStreamParser: AgentStreamParser {
         return []
     }
 
-    static func response(_ response: [String: Any], fallbackText: String = "") -> ModelResponse {
+    static func response(_ response: [String: Any], fallbackText: String = "") throws -> ModelResponse {
         var outputText = ""
         var calls: [ToolCallItem] = []
-        for item in response["output"] as? [[String: Any]] ?? [] {
+        let output = response["output"] as? [[String: Any]] ?? []
+        let replayableOutput = try output.map(JSONValue.init(any:))
+        for item in output {
             switch item["type"] as? String {
             case "message":
                 for content in item["content"] as? [[String: Any]] ?? []
@@ -70,7 +72,8 @@ struct OpenAIResponsesStreamParser: AgentStreamParser {
             id: response["id"] as? String,
             content: outputText.isEmpty ? fallbackText : outputText,
             toolCalls: calls,
-            usage: AgentProviderWireSupport.usage(response["usage"] as? [String: Any])
+            usage: AgentProviderWireSupport.usage(response["usage"] as? [String: Any]),
+            responseOutput: replayableOutput
         )
     }
 }
@@ -93,6 +96,7 @@ struct OpenAIResponsesProviderCodec: AgentProviderCodec {
     ) throws -> URLRequest {
         var instructions: [String] = []
         var input: [[String: Any]] = []
+        var replayingModelOutput = false
         for item in request.items {
             switch item {
             case .message(let message):
@@ -100,6 +104,8 @@ struct OpenAIResponsesProviderCodec: AgentProviderCodec {
                     if let content = message.content { instructions.append(content) }
                     continue
                 }
+                if message.role == .assistant && replayingModelOutput { continue }
+                if message.role == .user { replayingModelOutput = false }
                 var content: [[String: Any]] = []
                 if let text = message.content, !text.isEmpty {
                     content.append([
@@ -117,7 +123,16 @@ struct OpenAIResponsesProviderCodec: AgentProviderCodec {
                     "role": message.role.rawValue,
                     "content": content
                 ])
+            case .responseOutput(let output):
+                input.append(contentsOf: try output.map { item in
+                    guard let object = item.foundationValue as? [String: Any] else {
+                        throw ModelProviderError.invalidResponse("Responses 历史输出项不是 JSON 对象")
+                    }
+                    return object
+                })
+                replayingModelOutput = true
             case .toolCall(let call):
+                if replayingModelOutput { continue }
                 input.append([
                     "type": "function_call",
                     "call_id": call.id,
@@ -130,6 +145,7 @@ struct OpenAIResponsesProviderCodec: AgentProviderCodec {
                     "call_id": result.toolCallID,
                     "output": result.content
                 ])
+                replayingModelOutput = false
             case .compaction(let compaction):
                 input.append([
                     "type": "message",

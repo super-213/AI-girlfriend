@@ -89,7 +89,7 @@ enum AgentItemLegacyCodec {
                 ))
             case .compaction(let item):
                 messages.append(.contextSummary(item.summary))
-            case .handoff, .guardrail, .approval:
+            case .responseOutput, .handoff, .guardrail, .approval:
                 continue
             }
         }

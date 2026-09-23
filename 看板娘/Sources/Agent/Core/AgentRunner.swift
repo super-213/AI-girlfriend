@@ -497,6 +497,12 @@ final class AgentRunner: AgentRunning, Sendable {
             events.yield(.modelCompleted(ModelResponseSnapshot(turn: turnCount, response: response)))
             if response.usage != nil { events.yield(.usageUpdated(usage)) }
 
+            if !response.responseOutput.isEmpty {
+                let output = AgentItem.responseOutput(response.responseOutput)
+                allItems.append(output)
+                newItems.append(output)
+            }
+
             let assistant = AgentItem.message(AgentMessageItem(
                 role: .assistant,
                 content: response.content.isEmpty ? nil : response.content
@@ -706,15 +712,29 @@ final class AgentRunner: AgentRunning, Sendable {
             return PendingInterruption(interruptions: unresolved, state: state)
         }
 
+        var rejectionReasons: [String: String] = [:]
+        for call in calls {
+            guard let resolution = approvalResolutionsByToolCallID[call.id] else { continue }
+            let approval = AgentItem.approval(ApprovalItem(
+                interruptionID: resolution.interruptionID,
+                decision: resolution.decision
+            ))
+            allItems.append(approval)
+            newItems.append(approval)
+            if case .rejected(let reason) = resolution.decision {
+                rejectionReasons[call.id] = reason ?? "用户拒绝执行该工具"
+            }
+        }
+        let executableCalls = calls.filter { rejectionReasons[$0.id] == nil }
         var observationImages: [String] = []
-        if canRunInParallel(calls, tools: agent.tools, configuration: configuration) {
-            for call in calls { events.yield(.toolCallStarted(call)) }
+        if canRunInParallel(executableCalls, tools: agent.tools, configuration: configuration) {
+            for call in executableCalls { events.yield(.toolCallStarted(call)) }
             var indexedResults: [(Int, ToolResultItem)] = []
-            let batchSize = min(configuration.maximumConcurrentTools, calls.count)
+            let batchSize = min(configuration.maximumConcurrentTools, executableCalls.count)
             var start = 0
-            while start < calls.count {
-                let end = min(start + batchSize, calls.count)
-                let batch = Array(calls[start..<end].enumerated()).map { (start + $0.offset, $0.element) }
+            while start < executableCalls.count {
+                let end = min(start + batchSize, executableCalls.count)
+                let batch = Array(executableCalls[start..<end].enumerated()).map { (start + $0.offset, $0.element) }
                 let results = await withTaskGroup(of: (Int, ToolResultItem).self) { group in
                     for (index, call) in batch {
                         let tool = agent.tools.first { $0.definition.name == call.name }!
@@ -737,25 +757,55 @@ final class AgentRunner: AgentRunning, Sendable {
                 indexedResults.append(contentsOf: results)
                 start = end
             }
-            for (_, result) in indexedResults.sorted(by: { $0.0 < $1.0 }) {
-                observationImages.append(contentsOf: result.imagePaths)
-                appendToolResult(result, allItems: &allItems, newItems: &newItems, events: events)
-                if let call = calls.first(where: { $0.id == result.toolCallID }) {
-                    try await applyToolOutputGuardrails(
-                        agent.toolGuardrails,
-                        context: guardrailContext,
-                        call: call,
-                        result: result,
-                        guardrailResults: &guardrailResults,
+            let orderedResults = indexedResults.sorted(by: { $0.0 < $1.0 }).map(\.1)
+            var resultIndex = 0
+            for call in calls {
+                if let reason = rejectionReasons[call.id] {
+                    appendToolResult(
+                        ToolResultItem(
+                            toolCallID: call.id,
+                            toolName: call.name,
+                            content: reason,
+                            isError: true
+                        ),
                         allItems: &allItems,
                         newItems: &newItems,
-                        trace: trace,
                         events: events
                     )
+                    continue
                 }
+                let result = orderedResults[resultIndex]
+                resultIndex += 1
+                try await applyToolOutputGuardrails(
+                    agent.toolGuardrails,
+                    context: guardrailContext,
+                    call: call,
+                    result: result,
+                    guardrailResults: &guardrailResults,
+                    allItems: &allItems,
+                    newItems: &newItems,
+                    trace: trace,
+                    events: events
+                )
+                observationImages.append(contentsOf: result.imagePaths)
+                appendToolResult(result, allItems: &allItems, newItems: &newItems, events: events)
             }
         } else {
             for call in calls {
+                if let reason = rejectionReasons[call.id] {
+                    appendToolResult(
+                        ToolResultItem(
+                            toolCallID: call.id,
+                            toolName: call.name,
+                            content: reason,
+                            isError: true
+                        ),
+                        allItems: &allItems,
+                        newItems: &newItems,
+                        events: events
+                    )
+                    continue
+                }
                 guard let tool = agent.tools.first(where: { $0.definition.name == call.name }) else {
                     appendToolResult(
                         ToolResultItem(
@@ -771,29 +821,6 @@ final class AgentRunner: AgentRunning, Sendable {
                     continue
                 }
 
-                if let resolvedDecision = approvalResolutionsByToolCallID[call.id] {
-                    let approval = AgentItem.approval(ApprovalItem(
-                        interruptionID: resolvedDecision.interruptionID,
-                        decision: resolvedDecision.decision
-                    ))
-                    allItems.append(approval)
-                    newItems.append(approval)
-                    if case .rejected(let reason) = resolvedDecision.decision {
-                        appendToolResult(
-                            ToolResultItem(
-                                toolCallID: call.id,
-                                toolName: call.name,
-                                content: reason ?? "用户拒绝执行该工具",
-                                isError: true
-                            ),
-                            allItems: &allItems,
-                            newItems: &newItems,
-                            events: events
-                        )
-                        continue
-                    }
-                }
-
                 events.yield(.toolCallStarted(call))
                 let result = await executeTool(
                     call,
@@ -805,8 +832,6 @@ final class AgentRunner: AgentRunning, Sendable {
                     configuration: configuration,
                     trace: trace
                 )
-                observationImages.append(contentsOf: result.imagePaths)
-                appendToolResult(result, allItems: &allItems, newItems: &newItems, events: events)
                 try await applyToolOutputGuardrails(
                     agent.toolGuardrails,
                     context: guardrailContext,
@@ -818,6 +843,8 @@ final class AgentRunner: AgentRunning, Sendable {
                     trace: trace,
                     events: events
                 )
+                observationImages.append(contentsOf: result.imagePaths)
+                appendToolResult(result, allItems: &allItems, newItems: &newItems, events: events)
             }
         }
 
@@ -935,7 +962,7 @@ final class AgentRunner: AgentRunning, Sendable {
                 switch item {
                 case .handoff, .guardrail, .approval:
                     return true
-                case .message, .toolCall, .toolResult, .compaction:
+                case .message, .responseOutput, .toolCall, .toolResult, .compaction:
                     return false
                 }
             }

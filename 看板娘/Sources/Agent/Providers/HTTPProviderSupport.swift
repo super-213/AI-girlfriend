@@ -287,7 +287,8 @@ final class ToolCallNormalizingModelProvider: AgentModelProvider, @unchecked Sen
                                 id: response.id,
                                 content: response.content,
                                 toolCalls: calls,
-                                usage: response.usage
+                                usage: response.usage,
+                                responseOutput: response.responseOutput
                             )))
                         }
                     }
@@ -349,8 +350,57 @@ enum AgentProviderWireSupport {
             "name": tool.name,
             "description": tool.description,
             "parameters": tool.parameters.foundationValue,
-            "strict": true
+            "strict": supportsStrictFunctionSchema(tool.parameters)
         ]
+    }
+
+    private static func supportsStrictFunctionSchema(_ schema: JSONValue) -> Bool {
+        guard case .object(let root) = schema,
+              root["type"] == .string("object") else { return false }
+        return strictObjectConstraintsHold(schema)
+    }
+
+    private static func strictObjectConstraintsHold(_ schema: JSONValue) -> Bool {
+        switch schema {
+        case .array(let values):
+            return values.allSatisfy(strictObjectConstraintsHold)
+        case .object(let object):
+            let isObject: Bool
+            switch object["type"] {
+            case .string("object"):
+                isObject = true
+            case .array(let types):
+                isObject = types.contains(.string("object"))
+            default:
+                isObject = object["properties"] != nil
+            }
+            if isObject {
+                guard object["additionalProperties"] == .bool(false) else { return false }
+                let properties: [String: JSONValue]
+                if case .object(let value)? = object["properties"] {
+                    properties = value
+                } else if object["properties"] == nil {
+                    properties = [:]
+                } else {
+                    return false
+                }
+                let required: Set<String>
+                if case .array(let values)? = object["required"] {
+                    let names = values.compactMap { value -> String? in
+                        guard case .string(let name) = value else { return nil }
+                        return name
+                    }
+                    guard names.count == values.count else { return false }
+                    required = Set(names)
+                } else {
+                    required = []
+                }
+                guard required == Set(properties.keys) else { return false }
+            }
+            return object.values.allSatisfy(strictObjectConstraintsHold)
+        case .string, .number, .bool, .null:
+            return true
+        }
     }
 
     static func chatMessages(_ items: [AgentItem], ollama: Bool = false) -> [[String: Any]] {

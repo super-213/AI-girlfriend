@@ -33,17 +33,33 @@ struct ModelResponse: Codable, Equatable, Sendable {
     let content: String
     let toolCalls: [ToolCallItem]
     let usage: AgentUsage?
+    let responseOutput: [JSONValue]
 
     init(
         id: String? = nil,
         content: String,
         toolCalls: [ToolCallItem] = [],
-        usage: AgentUsage? = nil
+        usage: AgentUsage? = nil,
+        responseOutput: [JSONValue] = []
     ) {
         self.id = id
         self.content = content
         self.toolCalls = toolCalls
         self.usage = usage
+        self.responseOutput = responseOutput
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, content, toolCalls, usage, responseOutput
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(String.self, forKey: .id)
+        content = try container.decode(String.self, forKey: .content)
+        toolCalls = try container.decode([ToolCallItem].self, forKey: .toolCalls)
+        usage = try container.decodeIfPresent(AgentUsage.self, forKey: .usage)
+        responseOutput = try container.decodeIfPresent([JSONValue].self, forKey: .responseOutput) ?? []
     }
 }
 
