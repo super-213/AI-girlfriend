@@ -114,6 +114,7 @@ private struct MarkdownWebViewRepresentable: NSViewRepresentable {
         webView.underPageBackgroundColor = .clear
         context.coordinator.source = source
         context.coordinator.webView = webView
+        context.coordinator.installWheelRouter()
 
         if let url = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "Markdown")
             ?? Bundle.main.url(forResource: "index", withExtension: "html") {
@@ -129,6 +130,7 @@ private struct MarkdownWebViewRepresentable: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.removeWheelRouter()
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "markdownHeight")
         webView.navigationDelegate = nil
     }
@@ -139,9 +141,33 @@ private struct MarkdownWebViewRepresentable: NSViewRepresentable {
         var renderedSource: String?
         var isReady = false
         weak var webView: WKWebView?
+        private var wheelMonitor: Any?
 
         init(contentHeight: Binding<CGFloat>) {
             self.contentHeight = contentHeight
+        }
+
+        func installWheelRouter() {
+            guard wheelMonitor == nil else { return }
+            // WKWebView consumes vertical wheel events even when its document cannot scroll.
+            // Route those events to the enclosing conversation scroll view; keep horizontal
+            // events inside WebKit for wide tables and code blocks.
+            wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                guard let self, let webView = self.webView,
+                      let window = webView.window, event.window === window,
+                      webView.bounds.contains(webView.convert(event.locationInWindow, from: nil)),
+                      !event.modifierFlags.contains(.shift),
+                      abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX),
+                      let outerScrollView = webView.enclosingScrollView else { return event }
+
+                outerScrollView.scrollWheel(with: event)
+                return nil
+            }
+        }
+
+        func removeWheelRouter() {
+            if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) }
+            wheelMonitor = nil
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
