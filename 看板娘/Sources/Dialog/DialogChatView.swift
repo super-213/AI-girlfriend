@@ -1241,9 +1241,6 @@ private struct DialogTextEditor: NSViewRepresentable {
 
         DispatchQueue.main.async {
             context.coordinator.updateHeight(for: textView, in: scrollView)
-            if isFocused {
-                scrollView.window?.makeFirstResponder(textView)
-            }
         }
         return scrollView
     }
@@ -1263,9 +1260,15 @@ private struct DialogTextEditor: NSViewRepresentable {
         textView.isSelectable = true
         textView.textColor = isEditable ? .labelColor : .secondaryLabelColor
 
+        // A selected message or WebKit reply must keep the first responder for
+        // the system Copy command. Only focus the composer on a new request.
+        let shouldRequestFocus = isFocused && !context.coordinator.hasRequestedFocus
+        context.coordinator.hasRequestedFocus = isFocused
         DispatchQueue.main.async {
             context.coordinator.updateHeight(for: textView, in: scrollView)
-            if isFocused, scrollView.window?.firstResponder !== textView {
+            if shouldRequestFocus,
+               context.coordinator.parent.isFocused,
+               scrollView.window?.firstResponder !== textView {
                 scrollView.window?.makeFirstResponder(textView)
             }
         }
@@ -1274,6 +1277,7 @@ private struct DialogTextEditor: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: DialogTextEditor
+        var hasRequestedFocus = false
 
         init(parent: DialogTextEditor) {
             self.parent = parent
