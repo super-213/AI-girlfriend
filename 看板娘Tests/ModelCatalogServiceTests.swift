@@ -68,6 +68,17 @@ struct ModelCatalogServiceTests {
     }
 
     @Test
+    func workspaceDomainFallsBackToNativeCatalog() async throws {
+        let config = configuration(
+            .openAICompatible,
+            url: "https://llm-example.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions",
+            key: "test-key"
+        )
+        #expect(ModelCatalogService.catalogURLs(for: config).last?.path == "/api/v1/models")
+        #expect(try await service().models(for: config) == ["qwen-max", "qwen-plus"])
+    }
+
+    @Test
     func ollamaFallsBackToTags() async throws {
         let config = configuration(.ollama, url: "http://localhost:11434/api/chat")
         #expect(ModelCatalogService.catalogURLs(for: config).first?.path == "/v1/models")

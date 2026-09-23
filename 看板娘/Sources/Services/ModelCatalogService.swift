@@ -44,7 +44,8 @@ struct ModelCatalogService {
         switch configuration.providerKind {
         case .openAICompatible:
             // DashScope's native catalog has a different response shape.
-            if components.host?.lowercased() == "dashscope.aliyuncs.com" {
+            let host = components.host?.lowercased() ?? ""
+            if host == "dashscope.aliyuncs.com" || host.hasSuffix(".maas.aliyuncs.com") {
                 components.path = "/api/v1/models"
                 components.queryItems = [
                     URLQueryItem(name: "page_no", value: "1"),
