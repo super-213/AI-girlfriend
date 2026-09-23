@@ -85,7 +85,7 @@ struct ModelSettingsTab: View {
 
                 Spacer(minLength: DesignSpacing.sm)
 
-                addConfigurationMenu(labelStyle: .iconOnly)
+                addConfigurationMenu
             }
             .padding(.horizontal, DesignSpacing.lg)
             .padding(.top, DesignSpacing.lg)
@@ -99,10 +99,6 @@ struct ModelSettingsTab: View {
                 .padding(.horizontal, DesignSpacing.sm)
                 .padding(.bottom, DesignSpacing.sm)
             }
-
-            addConfigurationMenu(labelStyle: .titleAndIcon)
-                .padding(.horizontal, DesignSpacing.md)
-                .padding(.bottom, DesignSpacing.md)
         }
         .background {
             if reduceTransparency {
@@ -113,13 +109,7 @@ struct ModelSettingsTab: View {
         }
     }
 
-    private enum AddLabelStyle {
-        case iconOnly
-        case titleAndIcon
-    }
-
-    @ViewBuilder
-    private func addConfigurationMenu(labelStyle: AddLabelStyle) -> some View {
+    private var addConfigurationMenu: some View {
         Menu {
             ForEach(ModelProvider.allCases) { provider in
                 Button {
@@ -129,14 +119,8 @@ struct ModelSettingsTab: View {
                 }
             }
         } label: {
-            switch labelStyle {
-            case .iconOnly:
-                Image(systemName: "plus")
-                    .frame(width: 24, height: 24)
-            case .titleAndIcon:
-                Label("添加配置", systemImage: "plus")
-                    .frame(maxWidth: .infinity)
-            }
+            Image(systemName: "plus")
+                .frame(width: 24, height: 24)
         }
         .menuStyle(.borderlessButton)
         .help("添加一个独立的模型服务配置")
