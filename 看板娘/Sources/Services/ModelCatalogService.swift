@@ -4,12 +4,14 @@ import Foundation
 struct ModelCatalogService {
     enum CatalogError: LocalizedError {
         case invalidURL
+        case unauthorized
         case unavailable
 
         var errorDescription: String? {
             switch self {
-            case .invalidURL: return "请先填写有效的 API 地址"
-            case .unavailable: return "服务未提供模型列表，请手动填写模型 ID"
+            case .invalidURL: return "请先填写有效的 HTTP(S) Base URL"
+            case .unauthorized: return "模型列表认证失败，请检查 API Key"
+            case .unavailable: return "无法获取模型列表，请检查 Base URL，或手动填写模型 ID"
             }
         }
     }
@@ -32,6 +34,8 @@ struct ModelCatalogService {
         var path = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         if path.lowercased().hasSuffix("chat/completions") {
             path = String(path.dropLast("chat/completions".count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        } else if configuration.providerKind == .openAICompatible && path.lowercased().hasSuffix("responses") {
+            path = String(path.dropLast("responses".count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         } else if configuration.providerKind == .ollama && path.lowercased().hasSuffix("api/chat") {
             path = String(path.dropLast("api/chat".count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
             path = path.isEmpty ? "v1" : path + "/v1"
@@ -65,6 +69,7 @@ struct ModelCatalogService {
     func models(for configuration: ModelConfiguration) async throws -> [String] {
         let urls = Self.catalogURLs(for: configuration)
         guard !urls.isEmpty else { throw CatalogError.invalidURL }
+        var authenticationFailed = false
 
         for (index, url) in urls.enumerated() {
             var request = URLRequest(url: url)
@@ -78,8 +83,11 @@ struct ModelCatalogService {
 
             do {
                 let (data, response) = try await session.data(for: request)
-                guard let httpResponse = response as? HTTPURLResponse,
-                      (200..<300).contains(httpResponse.statusCode) else { continue }
+                guard let httpResponse = response as? HTTPURLResponse else { continue }
+                if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+                    authenticationFailed = true
+                }
+                guard (200..<300).contains(httpResponse.statusCode) else { continue }
                 let models = Self.parseModels(data, fallback: index > 0 ? configuration.providerKind : nil)
                 if !models.isEmpty { return models }
             } catch is CancellationError {
@@ -89,6 +97,7 @@ struct ModelCatalogService {
                 continue
             }
         }
+        if authenticationFailed { throw CatalogError.unauthorized }
         throw CatalogError.unavailable
     }
 

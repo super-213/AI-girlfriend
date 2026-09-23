@@ -53,11 +53,25 @@ struct ModelCatalogServiceTests {
     }
 
     @Test
+    func compatibleURLAcceptsBaseAndCompleteChatEndpoint() {
+        let base = "https://example.com/proxy/v1"
+        let complete = base + "/chat/completions"
+        #expect(OpenAICompatibleURL.chatEndpoint(from: base)?.absoluteString == complete)
+        #expect(OpenAICompatibleURL.chatEndpoint(from: base + "/")?.absoluteString == complete)
+        #expect(OpenAICompatibleURL.chatEndpoint(from: complete)?.absoluteString == complete)
+        #expect(OpenAICompatibleURL.baseURLString(from: complete) == base)
+        #expect(OpenAICompatibleURL.baseURLString(from: complete + "/") == base)
+        #expect(OpenAICompatibleURL.chatEndpoint(from: base + "/responses")?.absoluteString == base + "/responses")
+        #expect(OpenAICompatibleURL.chatEndpoint(from: "invalid") == nil)
+    }
+
+    @Test
     func standardModelsURLKeepsVersionPrefix() async throws {
         let config = configuration(.openAICompatible, url: "http://localhost:1234/v1/chat/completions")
         #expect(ModelCatalogService.catalogURLs(for: config).first?.absoluteString == "http://localhost:1234/v1/models")
         let baseConfig = configuration(.openAICompatible, url: "http://localhost:1234/v1/")
         #expect(ModelCatalogService.catalogURLs(for: baseConfig).first?.absoluteString == "http://localhost:1234/v1/models")
+        #expect(try await service().models(for: baseConfig) == ["model-a", "model-b"])
         #expect(try await service().models(for: config) == ["model-a", "model-b"])
     }
 
@@ -65,6 +79,18 @@ struct ModelCatalogServiceTests {
     func dashScopeFallsBackToNativeCatalog() async throws {
         let config = configuration(.openAICompatible, url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", key: "test-key")
         #expect(try await service().models(for: config) == ["qwen-max", "qwen-plus"])
+    }
+
+    @Test
+    func invalidKeyReportsAuthenticationFailure() async {
+        let config = configuration(
+            .openAICompatible,
+            url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            key: "wrong-key"
+        )
+        await #expect(throws: ModelCatalogService.CatalogError.unauthorized) {
+            try await service().models(for: config)
+        }
     }
 
     @Test

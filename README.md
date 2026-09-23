@@ -453,7 +453,7 @@ aiModel: "glm-4v-flash"
 #### 2. OpenAI-Compatible（qwen）
 ```swift
 provider: "qwen"
-apiUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+apiUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1"
 aiModel: "qwen-plus"
 ```
 
@@ -461,7 +461,7 @@ aiModel: "qwen-plus"
 
 偏好设置中可为每个服务保存独立的模型配置（名称、服务类型、模型、API 地址和 API Key），例如同时保留“通义千问云端”和“LM Studio 本地”，再将任意一项设为当前配置。API Key 按配置 ID 保存到 macOS Keychain，配置 JSON 不包含密钥。升级后首次启动会迁移旧版明文，仅在 Keychain 写入成功后删除 UserDefaults 旧值。
 
-模型设置会根据 API 地址自动请求同服务的 `GET /models`，成功后可从下拉框选择模型并手动刷新。阿里云百炼（包括业务空间专属域名）和 Ollama 在标准接口不可用时分别尝试原生模型列表接口；不支持列举模型的服务仍可手动填写模型 ID。
+OpenAI-Compatible 配置只需填写 Base URL（例如 `https://example.com/v1`）；粘贴旧版完整的 `/chat/completions` 地址也会自动识别。发送对话时程序补全请求路径，模型设置则优先请求同服务的 `GET /models` 并提供下拉选择。阿里云百炼（包括业务空间专属域名）和 Ollama 在标准接口不可用时分别尝试原生模型列表接口；不支持列举模型的服务仍可手动填写模型 ID。
 
 #### 3. Ollama（本地）
 ```swift

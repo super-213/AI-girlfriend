@@ -128,7 +128,7 @@ struct ModelConfiguration: Codable, Identifiable, Equatable {
                 name: "OpenAI 兼容服务",
                 provider: provider.rawValue,
                 aiModel: "qwen-plus",
-                apiUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+                apiUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
                 apiKey: ""
             )
         case .ollama:

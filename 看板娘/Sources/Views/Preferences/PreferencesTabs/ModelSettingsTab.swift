@@ -313,7 +313,10 @@ struct ModelSettingsTab: View {
         if updated.aiModel.isEmpty || updated.aiModel == oldPreset.aiModel {
             updated.aiModel = newPreset.aiModel
         }
-        if updated.apiUrl.isEmpty || updated.apiUrl == oldPreset.apiUrl {
+        let matchesOldPresetURL = oldProvider == .openAICompatible
+            ? OpenAICompatibleURL.baseURLString(from: updated.apiUrl) == oldPreset.apiUrl
+            : updated.apiUrl == oldPreset.apiUrl
+        if updated.apiUrl.isEmpty || matchesOldPresetURL {
             updated.apiUrl = newPreset.apiUrl
         }
         if updated.apiKey.isEmpty || updated.apiKey == oldPreset.apiKey {
@@ -391,17 +394,12 @@ private struct ModelConfigurationEditor: View {
                         .focused(focusedField, equals: .provider)
                     }
 
+                    addressField
+                    apiKeyField
+
                     labeledField("模型") {
                         modelField
                     }
-
-                    labeledField("API 地址") {
-                        TextField(urlPlaceholder, text: $configuration.apiUrl)
-                            .textFieldStyle(.roundedBorder)
-                            .focused(focusedField, equals: .apiUrl)
-                    }
-
-                    apiKeyField
                     if !configuration.isValid {
                         Label("请填写配置名称、模型和有效的 HTTP(S) API 地址。", systemImage: "exclamationmark.triangle.fill")
                             .font(.caption)
@@ -544,6 +542,35 @@ private struct ModelConfigurationEditor: View {
         }
     }
 
+    @ViewBuilder
+    private var addressField: some View {
+        if configuration.providerKind == .openAICompatible && !usesResponsesEndpoint {
+            labeledField("Base URL") {
+                TextField(urlPlaceholder, text: Binding(
+                    get: { OpenAICompatibleURL.baseURLString(from: configuration.apiUrl) },
+                    set: { configuration.apiUrl = OpenAICompatibleURL.baseURLString(from: $0) }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .focused(focusedField, equals: .apiUrl)
+
+                Text("可粘贴 Base URL 或完整的 /chat/completions 地址；程序会自动识别并补全请求路径。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            labeledField("API 地址") {
+                TextField(urlPlaceholder, text: $configuration.apiUrl)
+                    .textFieldStyle(.roundedBorder)
+                    .focused(focusedField, equals: .apiUrl)
+            }
+        }
+    }
+
+    private var usesResponsesEndpoint: Bool {
+        configuration.providerKind == .openAICompatible
+            && URLComponents(string: configuration.apiUrl)?.path.lowercased().hasSuffix("/responses") == true
+    }
+
     private func loadModels() async {
         isLoadingModels = true
         defer { isLoadingModels = false }
@@ -625,7 +652,7 @@ private struct ModelConfigurationEditor: View {
     private var urlPlaceholder: String {
         switch configuration.providerKind {
         case .zhipu: return "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-        case .openAICompatible: return "http://localhost:1234/v1/chat/completions"
+        case .openAICompatible: return "https://example.com/v1"
         case .ollama: return "http://localhost:11434/api/chat"
         }
     }
@@ -635,7 +662,7 @@ private struct ModelConfigurationEditor: View {
         case .zhipu:
             return "使用智谱 Chat Completions 流式接口。"
         case .openAICompatible:
-            return "每个兼容服务都可保存为独立配置。支持 DashScope、LM Studio、vLLM 和 LocalAI 等 /v1/chat/completions 接口。"
+            return "填写兼容服务的 Base URL，例如 https://example.com/v1。也可直接粘贴完整的 /chat/completions 地址。"
         case .ollama:
             return "请先启动 Ollama 并下载对应模型，默认连接本机 11434 端口。"
         }

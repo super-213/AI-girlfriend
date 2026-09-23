@@ -136,7 +136,8 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         model: String
     ) -> URL? {
         guard !model.isEmpty,
-              var components = URLComponents(string: chatCompletionsURL),
+              let endpoint = OpenAICompatibleURL.chatEndpoint(from: chatCompletionsURL),
+              var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false),
               components.scheme?.lowercased() == "https",
               components.host != nil,
               components.path.lowercased().hasSuffix("/compatible-mode/v1/chat/completions") else {
@@ -269,14 +270,9 @@ final class APIManager: NSObject, URLSessionDataDelegate {
     /// Legacy chat methods remain available for context compaction and older callers.
     func makeAgentModelProvider() -> any AgentModelProvider {
         let kind = ModelProvider(rawValue: provider.lowercased()) ?? .openAICompatible
-        var endpointText = apiUrl.trimmingCharacters(in: .whitespacesAndNewlines)
-        if kind == .openAICompatible,
-           endpointText.contains("dashscope.aliyuncs.com/compatible-mode/v1"),
-           !endpointText.contains("/chat/completions") {
-            if endpointText.hasSuffix("/") { endpointText.removeLast() }
-            endpointText += "/chat/completions"
-        }
-        let endpoint = URL(string: endpointText)
+        let endpoint = (kind == .openAICompatible
+            ? OpenAICompatibleURL.chatEndpoint(from: apiUrl)
+            : URL(string: apiUrl.trimmingCharacters(in: .whitespacesAndNewlines)))
             ?? URL(string: "http://127.0.0.1/invalid")!
         let configuration = AgentProviderConfiguration(
             id: contextWindowConfigurationIdentifier,
@@ -378,18 +374,10 @@ final class APIManager: NSObject, URLSessionDataDelegate {
         }
         
         // 构造请求
-        var finalApiUrl = apiUrl
-        if provider.lowercased() == "qwen",
-           finalApiUrl.contains("dashscope.aliyuncs.com/compatible-mode/v1"),
-           !finalApiUrl.contains("/chat/completions") {
-            if finalApiUrl.hasSuffix("/") {
-                finalApiUrl.removeLast()
-            }
-            finalApiUrl += "/chat/completions"
-        }
-        
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let url = URL(string: finalApiUrl) else {
+              let url = provider.lowercased() == "qwen"
+                ? OpenAICompatibleURL.chatEndpoint(from: apiUrl)
+                : URL(string: apiUrl) else {
             return nil
         }
 
@@ -452,16 +440,10 @@ final class APIManager: NSObject, URLSessionDataDelegate {
             }
         }
 
-        var finalApiUrl = apiUrl
-        if provider.lowercased() == "qwen",
-           finalApiUrl.contains("dashscope.aliyuncs.com/compatible-mode/v1"),
-           !finalApiUrl.contains("/chat/completions") {
-            if finalApiUrl.hasSuffix("/") { finalApiUrl.removeLast() }
-            finalApiUrl += "/chat/completions"
-        }
-
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let url = URL(string: finalApiUrl) else { return nil }
+              let url = provider.lowercased() == "qwen"
+                ? OpenAICompatibleURL.chatEndpoint(from: apiUrl)
+                : URL(string: apiUrl) else { return nil }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
