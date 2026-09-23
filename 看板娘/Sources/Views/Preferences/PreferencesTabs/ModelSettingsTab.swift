@@ -336,6 +336,20 @@ private struct ModelConfigurationEditor: View {
 
     @State private var revealsAPIKey = false
     @State private var showsProviderHelp = false
+    @State private var availableModels: [String] = []
+    @State private var modelCatalogMessage: String?
+    @State private var isLoadingModels = false
+    @State private var usesManualModel = false
+
+    private struct CatalogRequest: Equatable {
+        let provider: String
+        let apiUrl: String
+        let apiKey: String
+    }
+
+    private var catalogRequest: CatalogRequest {
+        CatalogRequest(provider: configuration.provider, apiUrl: configuration.apiUrl, apiKey: configuration.apiKey)
+    }
 
     var body: some View {
         ScrollView {
@@ -378,9 +392,7 @@ private struct ModelConfigurationEditor: View {
                     }
 
                     labeledField("模型") {
-                        TextField(modelPlaceholder, text: $configuration.aiModel)
-                            .textFieldStyle(.roundedBorder)
-                            .focused(focusedField, equals: .model)
+                        modelField
                     }
 
                     labeledField("API 地址") {
@@ -409,6 +421,15 @@ private struct ModelConfigurationEditor: View {
             }
             .padding(DesignSpacing.xl)
             .frame(maxWidth: 620, alignment: .leading)
+        }
+        .task(id: catalogRequest) {
+            availableModels = []
+            modelCatalogMessage = nil
+            isLoadingModels = false
+            usesManualModel = false
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled else { return }
+            await loadModels()
         }
     }
 
@@ -467,6 +488,80 @@ private struct ModelConfigurationEditor: View {
             Text(title)
                 .font(.subheadline.weight(.semibold))
             content()
+        }
+    }
+
+    private var modelField: some View {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs) {
+            HStack(spacing: DesignSpacing.sm) {
+                if availableModels.isEmpty || usesManualModel {
+                    TextField(modelPlaceholder, text: $configuration.aiModel)
+                        .textFieldStyle(.roundedBorder)
+                        .focused(focusedField, equals: .model)
+                } else {
+                    Picker("模型", selection: $configuration.aiModel) {
+                        if !configuration.aiModel.isEmpty && !availableModels.contains(configuration.aiModel) {
+                            Text("当前：\(configuration.aiModel)").tag(configuration.aiModel)
+                        }
+                        ForEach(availableModels, id: \.self) { model in
+                            Text(model).tag(model)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .focused(focusedField, equals: .model)
+                }
+
+                if isLoadingModels {
+                    ProgressView()
+                        .controlSize(.small)
+                        .help("正在获取模型列表")
+                } else {
+                    Button {
+                        Task { await loadModels() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("重新获取模型列表")
+                    .accessibilityLabel("重新获取模型列表")
+                }
+
+                if !availableModels.isEmpty {
+                    Button(usesManualModel ? "选择模型" : "手动输入") {
+                        usesManualModel.toggle()
+                    }
+                    .buttonStyle(.link)
+                }
+            }
+
+            if let modelCatalogMessage {
+                Text(modelCatalogMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func loadModels() async {
+        isLoadingModels = true
+        defer { isLoadingModels = false }
+
+        do {
+            let models = try await ModelCatalogService().models(for: configuration)
+            guard !Task.isCancelled else { return }
+            availableModels = models
+            modelCatalogMessage = "已获取 \(models.count) 个模型"
+            if configuration.aiModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                configuration.aiModel = models[0]
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled else { return }
+            availableModels = []
+            modelCatalogMessage = error.localizedDescription
         }
     }
 
