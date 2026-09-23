@@ -1,16 +1,1 @@
-import Foundation
-
-protocol AgentTool: Sendable {
-    associatedtype Context: Sendable
-    associatedtype Arguments: Codable & Sendable
-    associatedtype Output: Codable & Sendable
-
-    static var definition: ToolDefinition { get }
-    static var behavior: ToolBehavior { get }
-
-    func invoke(context: ToolContext<Context>, arguments: Arguments) async throws -> Output
-}
-
-extension AgentTool {
-    static var behavior: ToolBehavior { .readOnly }
-}
+../../../../AgentSDK/Sources/KanbanAgentSDK/Tools/AgentTool.swift
