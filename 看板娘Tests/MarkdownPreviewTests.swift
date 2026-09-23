@@ -92,4 +92,33 @@ struct MarkdownPreviewTests {
         let answer = 42
         """)
     }
+
+    @Test
+    func dialogRendererRecognizesRichBlocksAndMath() {
+        #expect(DialogMarkdownNormalizer.needsRichRenderer("```bash\necho hello\n```"))
+        #expect(DialogMarkdownNormalizer.needsRichRenderer("| Name | Size |\n| cache | 10 GB |"))
+        #expect(DialogMarkdownNormalizer.needsRichRenderer("The area is $\\pi r^2$."))
+        #expect(DialogMarkdownNormalizer.needsRichRenderer("\\[x^2 + y^2\\]"))
+        #expect(!DialogMarkdownNormalizer.needsRichRenderer("A **formatted** paragraph."))
+    }
+
+    @Test
+    func dialogRendererRepairsSeparatorlessTablesWithoutChangingCode() {
+        let markdown = """
+        | 文件夹 | 大小 | 说明 |
+        | `.cache` | **10 GB** | 模型缓存 |
+
+        ```bash
+        echo 'a | b'
+        echo 'c | d'
+        ```
+        """
+        let normalized = DialogMarkdownNormalizer.normalizeLooseTables(markdown)
+
+        #expect(normalized.contains("| 文件夹 | 大小 | 说明 |\n| --- | --- | --- |\n| `.cache`"))
+        #expect(normalized.contains("echo 'a | b'\necho 'c | d'"))
+
+        let standard = "| A | B |\n| --- | --- |\n| x | y |"
+        #expect(DialogMarkdownNormalizer.normalizeLooseTables(standard) == standard)
+    }
 }

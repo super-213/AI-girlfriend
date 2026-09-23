@@ -846,7 +846,7 @@ struct DialogChatView: View {
                             .foregroundStyle(.secondary)
                     }
                 } else if message.role == .assistant {
-                    SelectableMarkdownText(source: message.content)
+                    DialogMarkdownView(source: message.content)
                 } else {
                     Text(message.content)
                         .textSelection(.enabled)
