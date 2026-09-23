@@ -541,56 +541,61 @@ struct DialogChatView: View {
                     .foregroundStyle(.tertiary)
             }
 
-            HStack(alignment: .bottom, spacing: 10) {
-                ZStack(alignment: .topLeading) {
-                    if viewModel.inputText.isEmpty && !isComposingInput {
-                        Text(inputPlaceholder)
-                            .font(.system(size: 14))
-                            .foregroundStyle(Color(nsColor: .placeholderTextColor))
-                            .padding(.top, 2)
-                            .allowsHitTesting(false)
-                    }
-
-                    DialogTextEditor(
-                        text: $viewModel.inputText,
-                        height: $inputEditorHeight,
-                        isFocused: $isInputFocused,
-                        isComposingText: $isComposingInput,
-                        isEditable: true,
-                        isInvocationPickerVisible: !filteredInvocationOptions.isEmpty
-                            && activeInvocationQuery != nil,
-                        onMoveInvocationSelection: moveInvocationSelection,
-                        onAcceptInvocation: acceptSelectedInvocation,
-                        onDismissInvocationPicker: { invocationPickerSuppressed = true },
-                        onSubmit: viewModel.sendCurrentInput
-                    )
-                    .frame(height: inputEditorHeight)
-                    .accessibilityLabel("消息")
+            ZStack(alignment: .topLeading) {
+                if viewModel.inputText.isEmpty && !isComposingInput {
+                    Text(inputPlaceholder)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color(nsColor: .placeholderTextColor))
+                        .padding(.top, 2)
+                        .allowsHitTesting(false)
                 }
 
-                composerActions
+                DialogTextEditor(
+                    text: $viewModel.inputText,
+                    height: $inputEditorHeight,
+                    isFocused: $isInputFocused,
+                    isComposingText: $isComposingInput,
+                    isEditable: true,
+                    isInvocationPickerVisible: !filteredInvocationOptions.isEmpty
+                        && activeInvocationQuery != nil,
+                    onMoveInvocationSelection: moveInvocationSelection,
+                    onAcceptInvocation: acceptSelectedInvocation,
+                    onDismissInvocationPicker: { invocationPickerSuppressed = true },
+                    onSubmit: viewModel.sendCurrentInput
+                )
+                .frame(height: inputEditorHeight)
+                .accessibilityLabel("消息")
             }
 
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
+                attachmentButton
+
                 if viewModel.isCompactingContext {
                     Text(queueStatusText(prefix: "正在压缩上下文"))
                 } else if viewModel.isExecutingTool {
                     Text(queueStatusText(prefix: "正在执行工具"))
                 } else if viewModel.isRequesting {
                     Text(queueStatusText(prefix: "正在生成"))
-                } else {
-                    Text("↵ 发送")
-                    Text("·")
-                    Text("⇧↵ 换行")
                 }
 
                 Spacer(minLength: 8)
 
                 cacheStatusLabel
+
+                if viewModel.isRequesting && !viewModel.isExecutingTool {
+                    stopButton
+                } else if viewModel.isExecutingTool {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 32, height: 32)
+                        .accessibilityLabel("正在执行工具")
+                }
+
+                sendButton
             }
             .font(.system(size: 10.5, weight: .medium))
             .foregroundStyle(.tertiary)
-            .frame(height: 13)
+            .frame(height: 32)
         }
         .padding(.leading, 16)
         .padding(.trailing, 10)
@@ -764,29 +769,15 @@ struct DialogChatView: View {
             .accessibilityValue(cacheStatusAccessibilityValue)
     }
 
-    private var composerActions: some View {
-        HStack(spacing: 6) {
-            Button(action: chooseAttachments) {
-                Image(systemName: "paperclip")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 32, height: 32)
-                    .background(Color.primary.opacity(0.075), in: Circle())
-            }
-            .buttonStyle(DialogPressButtonStyle())
-            .help("添加文件或文件夹")
-            .accessibilityLabel("添加附件")
-
-            if viewModel.isRequesting && !viewModel.isExecutingTool {
-                stopButton
-            } else if viewModel.isExecutingTool {
-                ProgressView()
-                    .controlSize(.small)
-                    .frame(width: 32, height: 32)
-                    .accessibilityLabel("正在执行工具")
-            }
-
-            sendButton
+    private var attachmentButton: some View {
+        Button(action: chooseAttachments) {
+            Image(systemName: "plus")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Color.primary)
         }
+        .buttonStyle(DialogComposerCircleButtonStyle())
+        .help("添加文件或文件夹")
+        .accessibilityLabel("添加附件")
     }
 
     private var stopButton: some View {
@@ -803,17 +794,18 @@ struct DialogChatView: View {
     }
 
     private var sendButton: some View {
-        Button(action: viewModel.sendCurrentInput) {
+        Button {
+            guard canSend else { return }
+            viewModel.sendCurrentInput()
+        } label: {
             Image(systemName: viewModel.isBusy ? "tray.and.arrow.down" : "arrow.up")
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(canSend ? Color(nsColor: .alternateSelectedControlTextColor) : Color.secondary)
-                .frame(width: 32, height: 32)
-                .background(canSend ? DesignColors.primary : Color.primary.opacity(0.075), in: Circle())
         }
-        .buttonStyle(DialogPressButtonStyle())
-        .disabled(!canSend)
-        .help(viewModel.isBusy ? "加入发送队列" : "发送消息")
+        .buttonStyle(DialogComposerCircleButtonStyle(isPrimary: true, isEnabled: canSend))
+        .help(canSend ? (viewModel.isBusy ? "加入发送队列" : "发送消息") : "输入消息或添加附件后发送")
         .accessibilityLabel(viewModel.isBusy ? "加入发送队列" : "发送消息")
+        .accessibilityHint(canSend ? "" : "请先输入消息或添加附件")
     }
 
     private func messageRow(for message: DialogMessage) -> some View {
@@ -1436,6 +1428,55 @@ private struct DialogPressButtonStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
             .opacity(configuration.isPressed ? 0.84 : 1)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+
+private struct DialogComposerCircleButtonStyle: ButtonStyle {
+    var isPrimary = false
+    var isEnabled = true
+
+    func makeBody(configuration: Configuration) -> some View {
+        DialogComposerCircleButtonBody(
+            configuration: configuration,
+            isPrimary: isPrimary,
+            isEnabled: isEnabled
+        )
+    }
+}
+
+private struct DialogComposerCircleButtonBody: View {
+    let configuration: ButtonStyleConfiguration
+    let isPrimary: Bool
+    let isEnabled: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovered = false
+
+    var body: some View {
+        configuration.label
+            .frame(width: 32, height: 32)
+            .background(backgroundColor, in: Circle())
+            .overlay {
+                Circle()
+                    .strokeBorder(
+                        isPrimary && isEnabled && isHovered
+                            ? Color.primary.opacity(0.25) : .clear,
+                        lineWidth: 1
+                    )
+            }
+            .contentShape(Circle())
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(reduceMotion ? nil : DesignAnimation.gentle, value: isHovered)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: configuration.isPressed)
+            .onHover { isHovered = $0 }
+    }
+
+    private var backgroundColor: Color {
+        if isPrimary && isEnabled {
+            return configuration.isPressed ? DesignColors.primaryActive
+                : isHovered ? DesignColors.primaryHover : DesignColors.primary
+        }
+        return Color.primary.opacity(configuration.isPressed ? 0.2 : isHovered ? 0.14 : 0.075)
     }
 }
 
