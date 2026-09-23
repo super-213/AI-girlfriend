@@ -22,9 +22,8 @@ struct OpenAIResponsesStreamParser: AgentStreamParser {
         }
         if type == "response.failed" || type == "response.incomplete" {
             let response = json["response"] as? [String: Any]
-            let error = response?["error"] as? [String: Any]
-            let detail = error?["message"] as? String
-                ?? response?["incomplete_details"] as? String
+            let detailValue = response?["error"] ?? response?["incomplete_details"]
+            let detail = detailValue.map { AgentProviderWireSupport.diagnosticDescription($0) }
                 ?? "Responses 请求未完成"
             throw ModelProviderError.invalidResponse(detail)
         }

@@ -7,6 +7,17 @@ enum ModelProviderError: Error, Codable, Equatable, Sendable {
     case transport(String)
 }
 
+extension ModelProviderError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .unavailable(let detail): "模型服务不可用：\(detail)"
+        case .unsupportedCapability(let detail): "模型能力不支持：\(detail)"
+        case .invalidResponse(let detail): "模型响应无效：\(detail)"
+        case .transport(let detail): "模型通信失败：\(detail)"
+        }
+    }
+}
+
 enum AgentError: Error, Equatable, Sendable {
     case busy
     case cancelled

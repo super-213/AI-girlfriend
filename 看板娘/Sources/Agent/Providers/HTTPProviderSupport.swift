@@ -46,7 +46,9 @@ final class URLSessionAgentHTTPTransport: AgentHTTPTransport, @unchecked Sendabl
                         throw ModelProviderError.invalidResponse("缺少 HTTP 响应")
                     }
                     guard 200..<300 ~= http.statusCode else {
-                        throw ModelProviderError.transport("HTTP \(http.statusCode)")
+                        throw ModelProviderError.transport(
+                            await Self.httpFailure(http, bytes: bytes, request: request)
+                        )
                     }
                     for try await line in bytes.lines {
                         try Task.checkCancellation()
@@ -56,7 +58,15 @@ final class URLSessionAgentHTTPTransport: AgentHTTPTransport, @unchecked Sendabl
                 } catch is CancellationError {
                     continuation.finish(throwing: AgentError.cancelled)
                 } catch {
-                    continuation.finish(throwing: error)
+                    if Task.isCancelled {
+                        continuation.finish(throwing: AgentError.cancelled)
+                    } else if error is ModelProviderError {
+                        continuation.finish(throwing: error)
+                    } else {
+                        continuation.finish(throwing: ModelProviderError.transport(
+                            Self.networkFailure(error, request: request)
+                        ))
+                    }
                 }
             }
             register(task, runID: runID)
@@ -78,6 +88,78 @@ final class URLSessionAgentHTTPTransport: AgentHTTPTransport, @unchecked Sendabl
 
     private func removeTask(runID: UUID) {
         _ = lock.withLock { tasks.removeValue(forKey: runID) }
+    }
+
+    private static func httpFailure(
+        _ response: HTTPURLResponse,
+        bytes: URLSession.AsyncBytes,
+        request: URLRequest
+    ) async -> String {
+        let maximumBodyBytes = 64 * 1024
+        var body = Data()
+        var truncated = false
+        var bodyReadError: Error?
+        do {
+            for try await byte in bytes {
+                if body.count < maximumBodyBytes {
+                    body.append(byte)
+                } else {
+                    truncated = true
+                    break
+                }
+            }
+        } catch {
+            bodyReadError = error
+        }
+        var details = ["HTTP \(response.statusCode) \(HTTPURLResponse.localizedString(forStatusCode: response.statusCode))",
+                       "请求：\(request.httpMethod ?? "GET") \(endpointDescription(request.url))"]
+        for name in ["x-request-id", "request-id", "x-correlation-id", "retry-after",
+                     "x-ratelimit-limit-requests", "x-ratelimit-remaining-requests",
+                     "x-ratelimit-reset-requests", "x-ratelimit-limit-tokens",
+                     "x-ratelimit-remaining-tokens", "x-ratelimit-reset-tokens"] {
+            if let value = response.value(forHTTPHeaderField: name) {
+                details.append("\(name)：\(value)")
+            }
+        }
+        let responseBody = String(decoding: body, as: UTF8.self)
+        if !responseBody.isEmpty {
+            details.append("响应体：\(responseBody)\(truncated ? "\n（响应体超过 64 KiB，已截断）" : "")")
+        }
+        if let bodyReadError {
+            let failure = bodyReadError as NSError
+            details.append("读取响应体失败：\(failure.domain) (\(failure.code))：\(failure.localizedDescription)")
+        }
+        return redact(details.joined(separator: "\n"), request: request)
+    }
+
+    private static func networkFailure(_ error: Error, request: URLRequest) -> String {
+        var details = ["请求：\(request.httpMethod ?? "GET") \(endpointDescription(request.url))"]
+        var current: NSError? = error as NSError
+        for _ in 0..<4 {
+            guard let problem = current else { break }
+            details.append("\(problem.domain) (\(problem.code))：\(problem.localizedDescription)")
+            current = problem.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return redact(details.joined(separator: "\n"), request: request)
+    }
+
+    private static func endpointDescription(_ url: URL?) -> String {
+        guard let url else { return "未知地址" }
+        let port = url.port.map { ":\($0)" } ?? ""
+        return "\(url.scheme ?? "?")://\(url.host ?? "?")\(port)\(url.path)"
+    }
+
+    private static func redact(_ value: String, request: URLRequest) -> String {
+        let authorization = request.value(forHTTPHeaderField: "Authorization") ?? ""
+        let secret = authorization.hasPrefix("Bearer ") ? String(authorization.dropFirst(7)) : ""
+        let querySecrets = request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }?
+            .queryItems?
+            .filter { item in
+                let name = item.name.lowercased()
+                return name.contains("key") || name.contains("token") || name.contains("secret")
+            }
+            .compactMap(\.value) ?? []
+        return SensitiveDataRedactor.redact(value, secrets: [secret] + querySecrets)
     }
 }
 
@@ -136,7 +218,10 @@ final class HTTPAgentModelProvider: AgentModelProvider, @unchecked Sendable {
                     for event in try parser.finish() { continuation.yield(event) }
                     continuation.finish()
                 } catch {
-                    continuation.finish(throwing: error)
+                    let reportedError = self.redactedError(error)
+                    let detail = reportedError.localizedDescription
+                    print("模型请求失败 [\(self.id), runID=\(request.runID)]：\(detail)")
+                    continuation.finish(throwing: reportedError)
                 }
             }
             continuation.onTermination = { @Sendable _ in
@@ -148,6 +233,21 @@ final class HTTPAgentModelProvider: AgentModelProvider, @unchecked Sendable {
 
     func cancel(runID: UUID) async {
         await transport.cancel(runID: runID)
+    }
+
+    private func redactedError(_ error: Error) -> Error {
+        guard let providerError = error as? ModelProviderError else { return error }
+        let secrets = [configuration.apiKey].compactMap { $0 }
+        switch providerError {
+        case .unavailable(let detail):
+            return ModelProviderError.unavailable(SensitiveDataRedactor.redact(detail, secrets: secrets))
+        case .unsupportedCapability(let detail):
+            return ModelProviderError.unsupportedCapability(SensitiveDataRedactor.redact(detail, secrets: secrets))
+        case .invalidResponse(let detail):
+            return ModelProviderError.invalidResponse(SensitiveDataRedactor.redact(detail, secrets: secrets))
+        case .transport(let detail):
+            return ModelProviderError.transport(SensitiveDataRedactor.redact(detail, secrets: secrets))
+        }
     }
 }
 
@@ -292,11 +392,23 @@ enum AgentProviderWireSupport {
             throw ModelProviderError.invalidResponse("无法解析 Provider 流事件")
         }
         if let error = json["error"] as? [String: Any] {
-            throw ModelProviderError.transport(error["message"] as? String ?? "Provider 返回错误")
+            let detail = diagnosticDescription(error)
+            throw ModelProviderError.transport("Provider 返回错误：\(detail)")
         }
         if let error = json["error"] as? String, !error.isEmpty {
-            throw ModelProviderError.transport(error)
+            throw ModelProviderError.transport(SensitiveDataRedactor.redact(error))
         }
         return json
+    }
+
+    static func diagnosticDescription(_ value: Any?) -> String {
+        guard let value else { return "未知错误" }
+        if let text = value as? String { return SensitiveDataRedactor.redact(text) }
+        guard JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+              let value = String(data: data, encoding: .utf8) else {
+            return SensitiveDataRedactor.redact(String(describing: value))
+        }
+        return SensitiveDataRedactor.redact(value)
     }
 }
